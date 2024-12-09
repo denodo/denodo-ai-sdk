@@ -25,8 +25,17 @@ class UniformLLM:
         self.callback = None
         self.tokens = self.calculate_tokens()
 
-        if self.provider_name is None or self.provider_name.lower() not in list(map(str.lower, self.VALID_PROVIDERS)):
-            raise ValueError("Invalid LLM provider name or provider name not set.")
+        if self.provider_name is None:
+            raise ValueError("Provider name not set.")
+
+        if self.provider_name.lower() not in list(map(str.lower, self.VALID_PROVIDERS)):
+            logging.warning(f"Provider '{self.provider_name}' not in standard list. Creating custom OpenAI-compatible provider.")
+            logging.info(f"Expected environment variables for custom provider:")
+            logging.info(f"- {self.provider_name.upper()}_API_KEY (required)")
+            logging.info(f"- {self.provider_name.upper()}_BASE_URL (required)")
+            logging.info(f"- {self.provider_name.upper()}_PROXY (optional)")
+            self.setup_custom()
+            return
 
         if self.provider_name.lower() == "openai":
             self.setup_openai()
@@ -185,7 +194,6 @@ class UniformLLM:
         self.callback = TokenCounter(self.llm)
 
     def setup_bedrock(self):
-        from langchain_community.llms import Bedrock
         from langchain_aws import ChatBedrock
 
         AWS_REGION = os.getenv("AWS_REGION")
@@ -194,8 +202,8 @@ class UniformLLM:
         AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
         AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 
-        if any([value is None for value in [AWS_REGION, AWS_PROFILE_NAME, AWS_ROLE_ARN, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY]]):
-            raise ValueError("AWS environment variables not set.")
+        if AWS_REGION is None:
+            raise ValueError("AWS_REGION environment variable must be set (even when using IAM credentials).")
 
         refreshable_session_instance = RefreshableBotoSession(
             region_name = AWS_REGION,
@@ -206,37 +214,17 @@ class UniformLLM:
         )
 
         session = refreshable_session_instance.refreshable_session()
-
         client = session.client('bedrock-runtime')
 
-        if any(model in self.model_name for model in ["claude-3", "mistral"]):
-            self.llm = ChatBedrock(
-                    client = client,
-                    model_id = self.model_name,
-                    model_kwargs = {
-                        "temperature": self.temperature,
-                        "max_tokens": self.max_tokens
-                        }
-                )
-        elif "llama" in self.model_name:
-            self.llm = ChatBedrock(
-                client = client,
-                model_id = self.model_name, 
-                model_kwargs = {
-                    "temperature": self.temperature, 
-                    "max_gen_len": self.max_tokens
-                    }
-                )
-        else:
-            self.llm = Bedrock(
-                client = client, 
-                model_id = self.model_name, 
-                model_kwargs = {
-                    "temperature": self.temperature, 
-                    "max_tokens_to_sample": self.max_tokens
-                    }
-                )
-            
+        self.llm = ChatBedrock(
+            client = client,
+            model = self.model_name,
+            model_kwargs = {
+                "temperature": self.temperature,
+                "max_tokens": self.max_tokens
+            }
+        )
+
         self.callback = TokenCounter(self.llm)
 
     def setup_mistral(self):
@@ -247,6 +235,32 @@ class UniformLLM:
             raise ValueError("MISTRAL_API_KEY environment variable not set.")
 
         self.llm = ChatMistralAI(model = self.model_name, mistral_api_key = api_key, temperature = self.temperature, max_tokens = self.max_tokens)
+        self.callback = TokenCounter(self.llm)
+
+    def setup_custom(self):
+        from langchain_openai import ChatOpenAI
+
+        api_key = os.getenv(f'{self.provider_name.upper()}_API_KEY')
+        base_url = os.getenv(f'{self.provider_name.upper()}_BASE_URL')
+        proxy = os.getenv(f'{self.provider_name.upper()}_PROXY')
+
+        if api_key is None:
+            raise ValueError(f"{self.provider_name.upper()}_API_KEY environment variable not set.")
+        if base_url is None:
+            raise ValueError(f"{self.provider_name.upper()}_BASE_URL environment variable not set.")
+
+        kwargs = {
+            "model": self.model_name,
+            "api_key": api_key,
+            "base_url": base_url,
+            "temperature": self.temperature * 2,
+            "max_tokens": self.max_tokens,
+        }
+
+        if proxy is not None:
+            kwargs["openai_proxy"] = proxy
+
+        self.llm = ChatOpenAI(**kwargs)
         self.callback = TokenCounter(self.llm)
 
     def calculate_tokens(self):

@@ -188,3 +188,17 @@ def test_data_catalog_connection(data_catalog_url, verify_ssl):
         return True
     except Exception:
         return False
+    
+def filter_non_allowed_associations(view_json, valid_view_ids):
+    # If valid_view_ids is None, return the original view_json unchanged
+    if valid_view_ids is None:
+        return view_json
+    
+    # Create a new view_json with filtered associations
+    filtered_view_json = view_json.copy()
+    filtered_view_json['associations'] = [
+        assoc for assoc in view_json['associations']
+        if str(assoc['table_id']) in valid_view_ids
+    ]
+    
+    return filtered_view_json

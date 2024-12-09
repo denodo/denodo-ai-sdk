@@ -45,7 +45,8 @@ logging.basicConfig(
     stream=sys.stdout,
     level=logging.INFO,
     format='%(asctime)s %(levelname)-8s %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    datefmt='%Y-%m-%d %H:%M:%S',
+    encoding='utf-8'
 )
 
 # Create upload folder if it doesn't exist to store unstructured csv files
@@ -66,6 +67,8 @@ CHATBOT_OVERWRITE_ON_LOAD = bool(os.getenv('CHATBOT_OVERWRITE_ON_LOAD', True))
 CHATBOT_EXAMPLES_PER_TABLE = int(os.getenv('CHATBOT_EXAMPLES_PER_TABLE', 3))
 CHATBOT_HOST = os.getenv('CHATBOT_HOST', '0.0.0.0')
 CHATBOT_PORT = int(os.getenv('CHATBOT_PORT', 9992))
+CHATBOT_SSL_CERT = os.getenv('CHATBOT_SSL_CERT')
+CHATBOT_SSL_KEY = os.getenv('CHATBOT_SSL_KEY')
 AI_SDK_HOST = os.environ['AI_SDK_HOST']
 AI_SDK_USERNAME = os.environ['AI_SDK_USERNAME']
 AI_SDK_PASSWORD = os.environ['AI_SDK_PASSWORD']
@@ -79,8 +82,8 @@ logging.info(f"    - Vector Store Provider: {CHATBOT_VECTOR_STORE_PROVIDER}")
 logging.info(f"    - AI SDK Host: {AI_SDK_HOST}")
 logging.info(f"    - Overwrite AI SDK vector stores on load: {CHATBOT_OVERWRITE_ON_LOAD}")
 logging.info(f"    - Examples per table: {CHATBOT_EXAMPLES_PER_TABLE}")
+logging.info(f"    - Using SSL: {bool(CHATBOT_SSL_CERT and CHATBOT_SSL_KEY)}")
 logging.info("Connecting to AI SDK...")
-
 
 # Connect to AI SDK
 success, result = connect_to_ai_sdk(
@@ -171,8 +174,8 @@ class User(UserMixin):
                 tool_selection_prompt=self.tools_prompt,
                 tools=self.tools,
                 api_host=AI_SDK_HOST,
-                username=AI_SDK_USERNAME,
-                password=AI_SDK_PASSWORD,
+                username=self.id,
+                password=self.password,
                 vdp_database_names=VDB_LIST,
                 vector_store_provider=CHATBOT_VECTOR_STORE_PROVIDER
             )
@@ -324,4 +327,7 @@ def serve_frontend(path):
         return send_from_directory(app.static_folder, 'index.html')
 
 if __name__ == '__main__':
-    app.run(host = CHATBOT_HOST, debug = False, port = CHATBOT_PORT)
+    if bool(CHATBOT_SSL_CERT and CHATBOT_SSL_KEY):
+        app.run(host = CHATBOT_HOST, debug = False, port = CHATBOT_PORT, ssl_context = (CHATBOT_SSL_CERT, CHATBOT_SSL_KEY))
+    else:
+        app.run(host = CHATBOT_HOST, debug = False, port = CHATBOT_PORT)

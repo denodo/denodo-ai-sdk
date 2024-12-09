@@ -1,3 +1,25 @@
+version 0.4 -  20241209
+------------------------
+
+## MAIN CHANGES
+
+- Fix bug when no description is provided for a view.
+- Enable SSL configuration in sample chatbot.
+- Fix blank screen error bug when the execution result was a string.
+- Langchain AWS update to support new Amazon Nova models.
+- Adjust related questions when user does not have permissions.
+- New parameter in AI SDK API getMetadata endpoint for column_descriptions.
+
+version 0.4-beta -  20241203
+------------------------
+
+## MAIN CHANGES
+
+- Improved response flow in the sample chatbot.
+- Ability to have multiple, differentOpenAI-API compatible providers.
+- Encoding support for emojis, thai, chinese, japanase and korean.
+- Disabled Langchain OpenAI feature that would send input as an array of tokens instead of as a string.
+
 version 0.3 -  20241101
 ------------------------
 

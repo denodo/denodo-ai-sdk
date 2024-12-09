@@ -33,6 +33,7 @@ def get_views_metadata_documents(
     examples_per_table=3,
     table_associations=True,
     table_descriptions=True,
+    table_column_descriptions=True,
     filter_tables=None,
     data_mode='DATABASE',
     server_id=DATA_CATALOG_SERVER_ID,
@@ -95,6 +96,7 @@ def get_views_metadata_documents(
             json_response=json_response,
             use_associations=table_associations,
             use_descriptions=table_descriptions,
+            use_column_descriptions=table_column_descriptions,
             filter_tables=filter_tables or []
         )
 
@@ -252,13 +254,13 @@ def remove_none_values(json_dict):
         return json_dict
 
 # Parse the Metadata JSON with more readable format
-def parse_metadata_json(json_response, use_associations = True, use_descriptions = True, filter_tables = []):
-    if len(json_response) == 0:
-        return False
-    
+def parse_metadata_json(json_response, use_associations = True, use_descriptions = True, use_column_descriptions = True, filter_tables = []):
     # Denodo 9.1.0 onwards, the response is wrapped in viewsDetails
     if 'viewsDetails' in json_response:
         json_response = json_response['viewsDetails']
+
+    if len(json_response) == 0:
+        return None
 
     json_metadata = {'databaseName': json_response[0]['databaseName'], 'databaseTables': []}
 
@@ -303,7 +305,7 @@ def parse_metadata_json(json_response, use_associations = True, use_descriptions
         for i, item in enumerate(json_table['schema']):
             column_name = {'columnName': item['name']}
             item.pop('name')
-            if use_descriptions == False:
+            if use_column_descriptions == False:
                 if 'logicalName' in item:
                     item.pop('logicalName')
                 if 'description' in item:
@@ -324,6 +326,7 @@ def parse_metadata_json(json_response, use_associations = True, use_descriptions
                     mapping = " = ".join(mapping)
                     association_data = {
                         'table_name': f"{other_table_db}.{other_table}",
+                        'table_id': association['viewDetailsOfTheOtherView']['id'],
                         'where': mapping
                     }
                     json_table['associations'].append(association_data)
@@ -333,7 +336,6 @@ def parse_metadata_json(json_response, use_associations = True, use_descriptions
             json_table.pop('description')
             
         json_metadata['databaseTables'].append(json_table)
-
     return json_metadata
 
 # Parse the result of the Execution to a more readable format

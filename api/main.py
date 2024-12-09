@@ -55,7 +55,8 @@ logging.basicConfig(
     stream=sys.stdout,
     level=logging.INFO,
     format='%(asctime)s %(levelname)-8s %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    datefmt='%Y-%m-%d %H:%M:%S',
+    encoding='utf-8'
 )
 
 AI_SDK_HOST = os.getenv("AI_SDK_HOST", "0.0.0.0")

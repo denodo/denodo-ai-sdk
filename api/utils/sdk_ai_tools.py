@@ -54,7 +54,7 @@ def generate_view_answer(query, vql_query, vql_execution_result, llm_provider, l
         "sql_response": vql_execution_result,
         "response_format": response_format,
         "response_example": response_example,
-        "tables_needed": sdk_utils.readable_tables([table for table in vector_search_tables if table['view_name'] in vql_query]),
+        "tables_needed": sdk_utils.readable_tables([table for table in vector_search_tables if table['view_name'] in vql_query.replace('"', '').replace("'", '')]),
         "custom_instructions": custom_instructions
     }
     chain_config = {
@@ -440,7 +440,6 @@ def get_relevant_tables(
             if assoc not in existing_view_names
         ])
 
-
     if use_views != '':
         use_views = [view.strip() for view in use_views.split(',')]
         new_associations.extend([
@@ -454,14 +453,14 @@ def get_relevant_tables(
     if new_associations:
         # Lookup new associations in vector_store
         with sdk_utils.timing_context("vector_store_search_time", timings):
-            association_lookup = vector_store.get_views(new_associations)
+            association_lookup = vector_store.get_views(new_associations, valid_view_ids if user_permissions else None)
 
         # Add new associations to relevant_tables
         for assoc in association_lookup:
             relevant_tables.append({
                 "view_text": assoc.page_content,
                 "view_name": assoc.metadata['view_name'],
-                "view_json": json.loads(assoc.metadata['view_json'])
+                "view_json": json.loads(assoc.metadata['view_json']) if not user_permissions else sdk_utils.filter_non_allowed_associations(json.loads(assoc.metadata['view_json']), valid_view_ids)
             })
 
     if not expand_set_views:

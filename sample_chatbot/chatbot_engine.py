@@ -1,9 +1,10 @@
 import inspect
 import traceback
+import logging
 
 from utils.utils import add_langfuse_callback, generate_langfuse_session_id
 from langchain_core.output_parsers import StrOutputParser
-from sample_chatbot.chatbot_utils import process_tool_query, add_to_chat_history, get_relevant_tables, readable_tool_result
+from sample_chatbot.chatbot_utils import process_tool_query, add_to_chat_history, get_relevant_tables, readable_tool_result, parse_xml_tags
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 class ChatbotEngine:
@@ -61,10 +62,10 @@ class ChatbotEngine:
                 query,
                 self.vdp_database_names
             )
-            if result:
+            if result and relevant_tables:
                 denodo_tables = "Some of the tables in the user's Denodo instance: " + ", ".join(relevant_tables) + "... Use the Metadata tool to query all."
             else:
-                denodo_tables = ""
+                denodo_tables = "No views where found in the user's Denodo instance. Either the user has no views, the connection is not working or he does not have enough permissions. Use the Metadata tool to check."
 
             force_tool = f"In this case, I will use tool {tool}..." if tool else ""
             first_input = self.tool_selection_chain.invoke(
@@ -78,17 +79,29 @@ class ChatbotEngine:
                 }
             )
 
+            # Send selected tool to the frontend
+            try:
+                parsed_query = parse_xml_tags(first_input)
+                for tool_name, _ in self.tools.items():
+                    if tool_name in parsed_query:
+                        if tool_name == "database_query":
+                            natural_language_query = parsed_query["database_query"]["natural_language_query"]
+                            yield "<TOOL:data>"
+                            yield f"Querying Denodo for: **{natural_language_query}**. Give me a second.\n\n"
+                        elif tool_name == "metadata_query":
+                            search_query = parsed_query["metadata_query"]["search_query"]
+                            yield "<TOOL:metadata>"
+                            yield f"Querying Denodo for: **{search_query}**. Give me a second.\n\n"
+                        elif tool_name == "kb_lookup":
+                            yield "<TOOL:kb>"
+                        else:
+                            yield "<TOOL:direct>"
+            except Exception as e:
+                yield 
+
             tool_result = process_tool_query(first_input, self.tools)
             if tool_result:
                 tool_name, tool_output, original_xml_call = tool_result
-                if tool_name == "database_query":
-                    yield "<TOOL:data>"
-                elif tool_name == "metadata_query":
-                    yield "<TOOL:metadata>"
-                elif tool_name == "kb_lookup":
-                    yield "<TOOL:kb>"
-                else:
-                    yield "<TOOL:direct>"
 
                 readable_tool_output = readable_tool_result(tool_name, tool_output)
                 ai_stream = self.answer_with_tool_chain.stream({
@@ -130,7 +143,7 @@ class ChatbotEngine:
             elif tool_name == "kb_lookup":
                 return_data["data_sources"] = self.vector_store_provider
 
-            print(f"Return data: {return_data}")
+            logging.info(f"Return data: {return_data}")
 
             yield return_data
 

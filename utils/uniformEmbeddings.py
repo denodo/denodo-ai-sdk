@@ -19,8 +19,17 @@ class UniformEmbeddings:
         self.model_name = model_name
         self.model = None
 
-        if self.provider_name is None or self.provider_name.lower() not in list(map(str.lower, self.VALID_PROVIDERS)):
-            raise ValueError("Invalid embeddings provider name or provider name not set.")
+        if self.provider_name is None:
+            raise ValueError("Provider name not set.")
+
+        if self.provider_name.lower() not in list(map(str.lower, self.VALID_PROVIDERS)):
+            logging.warning(f"Provider '{self.provider_name}' not in standard list. Creating custom OpenAI-compatible provider.")
+            logging.info(f"Expected environment variables for custom provider:")
+            logging.info(f"- {self.provider_name.upper()}_API_KEY (required)")
+            logging.info(f"- {self.provider_name.upper()}_BASE_URL (required)")
+            logging.info(f"- {self.provider_name.upper()}_PROXY (optional)")
+            self.setup_custom()
+            return
 
         if self.provider_name.lower() == "openai":
             self.setup_openai()
@@ -77,6 +86,7 @@ class UniformEmbeddings:
         base_url = os.getenv('OPENAI_BASE_URL')
         proxy = os.getenv('OPENAI_PROXY')
         organization_id = os.getenv('OPENAI_ORG_ID')
+        dimensions = os.getenv('OPENAI_EMBEDDINGS_DIMENSIONS')
         
         if api_key is None:
             raise ValueError("OPENAI_API_KEY environment variable not set.")
@@ -84,6 +94,7 @@ class UniformEmbeddings:
         kwargs = {
             "model": self.model_name,
             "openai_api_key": api_key,
+            "check_embedding_ctx_length": False,
         }
 
         if base_url is not None:
@@ -95,6 +106,9 @@ class UniformEmbeddings:
         if organization_id is not None:
             kwargs["organization"] = organization_id
 
+        if dimensions is not None:
+            kwargs["dimensions"] = int(dimensions)
+
         self.model = OpenAIEmbeddings(**kwargs)
 
     def setup_azure_openai(self):
@@ -104,6 +118,7 @@ class UniformEmbeddings:
         api_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
         api_key = os.getenv("AZURE_OPENAI_API_KEY")
         api_proxy = os.getenv("AZURE_OPENAI_PROXY")
+        dimensions = os.getenv('AZUREOPENAI_EMBEDDINGS_DIMENSIONS')
 
         if api_version is None or api_endpoint is None:
             raise ValueError("AzureOpenAI environment variables not set.")
@@ -115,6 +130,7 @@ class UniformEmbeddings:
             "azure_endpoint": api_endpoint,
             "openai_api_version": api_version,
             "deployment": self.model_name,
+            "check_embedding_ctx_length": False,
         }
 
         if api_key is not None:
@@ -127,6 +143,9 @@ class UniformEmbeddings:
         else:
             logging.warning("AzureOpenAI proxy not set. Using API key for authentication.")
 
+        if dimensions is not None:
+            kwargs["dimensions"] = int(dimensions)
+
         self.model = AzureOpenAIEmbeddings(**kwargs)
 
     def setup_bedrock(self):
@@ -138,8 +157,8 @@ class UniformEmbeddings:
         AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
         AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 
-        if any([value is None for value in [AWS_REGION, AWS_PROFILE_NAME, AWS_ROLE_ARN, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY]]):
-            raise ValueError("AWS environment variables not set.")
+        if AWS_REGION is None:
+            raise ValueError("AWS_REGION environment variable must be set (even when using IAM credentials).")
 
         refreshable_session_instance = RefreshableBotoSession(
             region_name = AWS_REGION,
@@ -166,3 +185,28 @@ class UniformEmbeddings:
             raise ValueError("MISTRAL_API_KEY environment variable not set.")
 
         self.model = MistralAIEmbeddings(model = self.model_name, mistral_api_key = api_key)
+
+    def setup_custom(self):
+        from langchain_openai import OpenAIEmbeddings
+
+        provider_upper = self.provider_name.upper()
+        api_key = os.getenv(f'{provider_upper}_API_KEY')
+        base_url = os.getenv(f'{provider_upper}_BASE_URL')
+        proxy = os.getenv(f'{provider_upper}_PROXY')
+        
+        if api_key is None:
+            raise ValueError(f"{provider_upper}_API_KEY environment variable not set.")
+        if base_url is None:
+            raise ValueError(f"{provider_upper}_BASE_URL environment variable not set.")
+
+        kwargs = {
+            "model": self.model_name,
+            "openai_api_key": api_key,
+            "openai_api_base": base_url,
+            "check_embedding_ctx_length": False,
+        }
+
+        if proxy is not None:
+            kwargs["openai_proxy"] = proxy
+
+        self.model = OpenAIEmbeddings(**kwargs)

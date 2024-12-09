@@ -103,12 +103,13 @@ class UniformVectorStore:
             self._add_views_to_manager(new_views, database_name)
 
     @log_params
-    def get_views(self, view_names):
+    def get_views(self, view_names, valid_view_ids = None):
         view_ids = self.get_view_ids(view_names)
+        if valid_view_ids is not None:
+            view_ids = [view_id for view_id in view_ids if view_id in valid_view_ids]
         if len(view_ids) == 0:
             view_ids = None
             return []
-            
         views = self.search_by_vector([0]*self.dimensions, k=len(view_names), view_ids=view_ids, scores=False)
         return views
     
@@ -119,6 +120,12 @@ class UniformVectorStore:
         placeholders = ','.join(['?' for _ in view_names])
         self.manager_cursor.execute(f"SELECT view_id FROM ai_sdk_VectorStore WHERE view_name IN ({placeholders})", view_names)
         return [row[0] for row in self.manager_cursor.fetchall()]
+
+    @log_params
+    def get_view_names(self, view_ids):
+        placeholders = ','.join(['?' for _ in view_ids])
+        self.manager_cursor.execute(f"SELECT view_id, view_name FROM ai_sdk_VectorStore WHERE view_id IN ({placeholders})", view_ids)
+        return [(row[0], row[1]) for row in self.manager_cursor.fetchall()]
     
     @log_params
     def delete_views(self, view_names):
@@ -148,6 +155,9 @@ class UniformVectorStore:
 
     @log_params
     def search(self, query, k=3, view_ids = None, scores=False, database_names = None):
+        if view_ids is not None and len(view_ids) == 0:
+            return []
+
         search_filter = self._build_search_filter(view_ids, database_names)
         
         if scores:
@@ -163,6 +173,9 @@ class UniformVectorStore:
 
     @log_params
     def search_by_vector(self, vector, k=3, view_ids = None, scores=False, database_names = None):
+        if view_ids is not None and len(view_ids) == 0:
+            return []
+        
         search_filter = self._build_search_filter(view_ids, database_names)
 
         # PGVector does not support scores

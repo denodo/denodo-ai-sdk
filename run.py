@@ -1,11 +1,11 @@
-import sys
-import subprocess
-import time
-import re
-import threading
-import argparse
 import os
+import re
+import sys
+import time
+import argparse
 import requests
+import threading
+import subprocess
 
 # Set default timeout to 180 seconds
 DEFAULT_TIMEOUT = 180
@@ -30,64 +30,101 @@ def ensure_logs_directory():
 
 def empty_file(file_path):
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    open(file_path, 'w').close()
+    open(file_path, 'w', encoding='utf-8').close()
 
-def run_api():
-    log_path = os.path.join("logs", "api.log")
-    with open(log_path, "w") as log_file:
-        subprocess.run([sys.executable, "-m", "api.main"], stdout=log_file, stderr=subprocess.STDOUT)
+def run_api(log_file_path=None, no_logs=False):
+    env = os.environ.copy()
+    env['PYTHONIOENCODING'] = 'utf-8'
+
+    if no_logs:
+        process = subprocess.Popen(
+            [sys.executable, "-m", "api.main"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            env=env
+        )
+        log_thread = threading.Thread(target=log_output, args=(process, sys.stdout))
+        log_thread.start()
+        return process, log_thread, None
+    else:
+        if log_file_path is None:
+            log_file_path = os.path.join("logs", "api.log")
+        empty_file(log_file_path)
+        log_file = open(log_file_path, "w", encoding='utf-8')
+        process = subprocess.Popen(
+            [sys.executable, "-m", "api.main"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            env=env
+        )
+        log_thread = threading.Thread(target=log_output, args=(process, log_file))
+        log_thread.start()
+        return process, log_thread, log_file
 
 def run_chatbot(log_file_path=None, no_logs=False):
+    env = os.environ.copy()
+    env['PYTHONIOENCODING'] = 'utf-8'
+
     if no_logs:
-        process = subprocess.Popen([sys.executable, "-m", "sample_chatbot.main"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        process = subprocess.Popen(
+            [sys.executable, "-m", "sample_chatbot.main"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            env=env
+        )
         return process, None
     else:
         if log_file_path is None:
             log_file_path = os.path.join("logs", "sample_chatbot.log")
         empty_file(log_file_path)
-        process = subprocess.Popen([sys.executable, "-m", "sample_chatbot.main"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        process = subprocess.Popen(
+            [sys.executable, "-m", "sample_chatbot.main"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            env=env
+        )
         return process, log_file_path
 
 def wait_for_chatbot(process, log_file_path, timeout=DEFAULT_TIMEOUT, no_logs=False):
     start_time = time.time()
+    found_running = False
     if no_logs:
         while time.time() - start_time < timeout:
-            line = process.stdout.readline().strip()
+            line = process.stdout.readline()
             if line:
-                print(line)
+                print(line.strip())
                 if "Running on" in line:
-                    match = re.search(r"Running on (http://[\d.:]+)", line)
+                    match = re.search(r"Running on (https?://[\d.:]+)", line)
                     if match:
                         print(f"Chatbot is running on: {match.group(1)}")
-                        return True
+                        found_running = True
+                        break
     else:
-        with open(log_file_path, "a") as log_file:
+        with open(log_file_path, "a", encoding='utf-8') as log_file:
             while time.time() - start_time < timeout:
-                line = process.stdout.readline().strip()
+                line = process.stdout.readline()
                 if line:
-                    log_file.write(line + '\n')
+                    log_file.write(line.strip() + '\n')
                     log_file.flush()
                     if "Running on" in line:
-                        match = re.search(r"Running on (http://[\d.:]+)", line)
+                        match = re.search(r"Running on (https?://[\d.:]+)", line)
                         if match:
                             print(f"Chatbot is running on: {match.group(1)}")
-                            return True
-    return False
-
-def run_api_with_output(no_logs=False):
-    if no_logs:
-        process = subprocess.Popen([sys.executable, "-m", "api.main"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        log_thread = threading.Thread(target=log_output, args=(process, sys.stdout))
-        log_thread.start()
-        return process, log_thread, None
-    else:
-        log_file_path = os.path.join("logs", "api.log")
-        empty_file(log_file_path)
-        log_file = open(log_file_path, "w")
-        process = subprocess.Popen([sys.executable, "-m", "api.main"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        log_thread = threading.Thread(target=log_output, args=(process, log_file))
-        log_thread.start()
-        return process, log_thread, log_file
+                            found_running = True
+                            break
+    return found_running
 
 def log_output(process, log_file):
     try:
@@ -196,23 +233,32 @@ if __name__ == "__main__":
             sys.exit(1)
 
     if mode == "api":
-        api_process, log_thread, log_file = run_api_with_output(args.no_logs)
+        api_process, log_thread, log_file = run_api(no_logs=args.no_logs)
         api_process.wait()
         log_thread.join()
         if log_file:
             log_file.close()
     elif mode == "chatbot":
         print(f"Attempting to run the chatbot, timeout is {CHATBOT_TIMEOUT} seconds")
-        process, log_file = run_chatbot(no_logs=args.no_logs)
-        if not wait_for_chatbot(process, log_file, timeout=CHATBOT_TIMEOUT, no_logs=args.no_logs):
+        process, log_file_path = run_chatbot(no_logs=args.no_logs)
+        if not wait_for_chatbot(process, log_file_path, timeout=CHATBOT_TIMEOUT, no_logs=args.no_logs):
             print(f"Error: Chatbot failed to start within {CHATBOT_TIMEOUT} seconds.")
             process.kill()
             sys.exit(1)
+        
+        # Add continuous logging after startup
+        if args.no_logs:
+            for line in process.stdout:
+                print(line.strip())
+        else:
+            with open(log_file_path, "a", encoding='utf-8', errors='replace') as log_file:
+                for line in process.stdout:
+                    log_file.write(line)
+                    log_file.flush()
+        
         process.wait()
-        if log_file:  # Only close if we're using a log file
-            log_file.close()
     elif mode == "both":
-        api_process, log_thread, api_log_file = run_api_with_output(args.no_logs)
+        api_process, log_thread, api_log_file = run_api(no_logs=args.no_logs)
         print("Waiting for API to initialize before running the chatbot...")
         time.sleep(5)
         print(f"Attempting to run the chatbot, timeout is {CHATBOT_TIMEOUT} seconds")
@@ -231,7 +277,7 @@ if __name__ == "__main__":
                 for line in chatbot_process.stdout:
                     print(line.strip())
             else:
-                with open(chatbot_log_path, "a") as chatbot_log_file:
+                with open(chatbot_log_path, "a", encoding='utf-8', errors='replace') as chatbot_log_file:
                     for line in chatbot_process.stdout:
                         chatbot_log_file.write(line)
                         chatbot_log_file.flush()

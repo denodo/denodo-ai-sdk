@@ -116,7 +116,7 @@ def get_table_associations(table_name, table_json):
 def schema_summary(schema):
     summary = "====="
     table_name = schema['tableName']
-    if "description" in schema:
+    if "description" in schema and schema['description'] and schema['description'].strip():
         summary += f"Table {table_name}=====\nDescription: {schema['description']}\nColumns:\n"
     else:
         summary += f"Table {table_name}=====\n"

@@ -224,19 +224,21 @@ const Results = ({ results, setResults }) => {
     return (
       <div className="mb-2">
         <b>Context:</b>{' '}
-        {sortedTables.map((table, index) => {
-          const cleanTable = table.replace(/"/g, '').toLowerCase();
-          const isUsedInVql = cleanVql.includes(cleanTable);
-          return (
-            <Badge 
-              key={index} 
-              bg={isUsedInVql ? "success" : "secondary"} 
-              className="me-1"
-            >
-              {table.replace(/"/g, '')}
-            </Badge>
-          );
-        })}
+        <div className="context-badges-container">
+          {sortedTables.map((table, index) => {
+            const cleanTable = table.replace(/"/g, '').toLowerCase();
+            const isUsedInVql = cleanVql.includes(cleanTable);
+            return (
+              <Badge 
+                key={index} 
+                bg={isUsedInVql ? "success" : "secondary"} 
+                className="context-badge me-1 mb-1"
+              >
+                {table.replace(/"/g, '')}
+              </Badge>
+            );
+          })}
+        </div>
       </div>
     );
   };
@@ -265,7 +267,7 @@ const Results = ({ results, setResults }) => {
   };
 
   const parseApiResponseToCsv = (apiResponse) => {
-    if (!apiResponse || Object.keys(apiResponse).length === 0) return [];
+    if (!apiResponse || typeof apiResponse === 'string' || Object.keys(apiResponse).length === 0) return [];
 
     const rows = Object.values(apiResponse);
     const headers = rows[0].map(item => item.columnName);

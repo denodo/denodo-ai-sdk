@@ -22,6 +22,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPAuthorizationC
 
 from utils.data_catalog import get_allowed_view_ids
 from utils.uniformVectorStore import UniformVectorStore
+from api.utils.sdk_utils import filter_non_allowed_associations
 
 router = APIRouter()
 security_basic = HTTPBasic()
@@ -85,7 +86,13 @@ def similaritySearch(endpoint_request: similaritySearchRequest = Depends(), auth
             "views": [
                 {
                     "view_name": (result[0] if endpoint_request.scores else result).metadata["view_name"],
-                    "view_json": json.loads((result[0] if endpoint_request.scores else result).metadata["view_json"]),
+                    "view_json": (
+                        filter_non_allowed_associations(
+                            json.loads((result[0] if endpoint_request.scores else result).metadata["view_json"]),
+                            valid_view_ids
+                        ) if USER_PERMISSIONS else 
+                        json.loads((result[0] if endpoint_request.scores else result).metadata["view_json"])
+                    ),
                     "view_text": (result[0] if endpoint_request.scores else result).page_content,
                     "database_name": (result[0] if endpoint_request.scores else result).metadata["database_name"],
                     **({"scores": result[1]} if endpoint_request.scores else {})

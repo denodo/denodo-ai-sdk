@@ -44,9 +44,13 @@ def process_database(db_name, request, auth, vector_store, user_permissions, sta
         database_name=db_name, 
         auth=auth,
         examples_per_table=request.examples_per_table, 
-        table_descriptions=request.descriptions, 
+        table_descriptions=request.view_descriptions, 
         table_associations=request.associations,
+        table_column_descriptions=request.column_descriptions
     )
+    
+    if not result:
+        raise ValueError(f"Empty response from the Denodo Data Catalog for database {db_name}")
     
     if isinstance(result, dict):
         db_schema = result
@@ -64,30 +68,14 @@ def process_database(db_name, request, auth, vector_store, user_permissions, sta
         
         return db_schema, db_schema_text
 
-def get_data_catalog_auth():
-    """
-    Determines the authentication method for the data catalog based on environment variables.
-    Returns either ("bearer", oauth_token) or (username, password) or None if no auth is configured.
-    This function is needed because getMetadata expects to have admin privileges, and the API receives the users credentials.
-    """
-    oauth_token = os.getenv("DATA_CATALOG_METADATA_OAUTH")
-    if oauth_token:
-        return oauth_token
-    
-    username = os.getenv("DATA_CATALOG_METADATA_USER")
-    password = os.getenv("DATA_CATALOG_METADATA_PWD")
-    if username and password:
-        return (username, password)
-    
-    return None
-
 class getMetadataRequest(BaseModel):
     vdp_database_names: str = os.getenv('VDB_NAMES')
     embeddings_provider: str = os.getenv('EMBEDDINGS_PROVIDER')
     embeddings_model: str = os.getenv('EMBEDDINGS_MODEL')
     vector_store_provider: str = os.getenv('VECTOR_STORE')
     examples_per_table: int = 3
-    descriptions: bool = True
+    view_descriptions: bool = True
+    column_descriptions: bool = True
     associations: bool = True
     insert: bool = False
     overwrite: bool = False
@@ -107,7 +95,6 @@ def getMetadata(endpoint_request: getMetadataRequest = Depends(), auth: str = De
     """
     try:
         vdp_database_names = [db.strip() for db in endpoint_request.vdp_database_names.split(',')]
-        data_catalog_auth = get_data_catalog_auth()
         USER_PERMISSIONS = int(os.getenv("USER_PERMISSIONS", 0))
 
         all_db_schemas = []
@@ -123,17 +110,24 @@ def getMetadata(endpoint_request: getMetadataRequest = Depends(), auth: str = De
             vector_store = None
 
         for db_name in vdp_database_names:
-            db_schema, db_schema_text = process_database(
-                db_name=db_name, 
-                request=endpoint_request, 
-                auth=data_catalog_auth,
-                vector_store=vector_store, 
-                user_permissions=USER_PERMISSIONS,
-                start_index=len(all_db_schema_texts)
-            )
-            
-            all_db_schemas.append(db_schema)
-            all_db_schema_texts.extend(db_schema_text)
+            try:
+                db_schema, db_schema_text = process_database(
+                    db_name=db_name, 
+                    request=endpoint_request, 
+                    auth=auth,
+                    vector_store=vector_store, 
+                    user_permissions=USER_PERMISSIONS,
+                    start_index=len(all_db_schema_texts)
+                )
+                
+                all_db_schemas.append(db_schema)
+                all_db_schema_texts.extend(db_schema_text)
+            except ValueError as ve:
+                logging.error(f"Error processing database: {ve}")
+                continue
+
+        if len(all_db_schemas) == 0:
+            raise HTTPException(status_code=204, detail=f"Data Catalog returned empty response for: {vdp_database_names}")
 
         response = {
             'db_schema_json': all_db_schemas,
@@ -145,6 +139,8 @@ def getMetadata(endpoint_request: getMetadataRequest = Depends(), auth: str = De
     except requests.exceptions.HTTPError as he:
         if he.response.status_code == 401:
             raise HTTPException(status_code=401, detail="Unauthorized")
+    except HTTPException as he:
+        raise he
     except Exception as e:
         error_details = {
             'error': str(e),

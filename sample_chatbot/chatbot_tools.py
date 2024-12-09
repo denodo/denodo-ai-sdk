@@ -24,6 +24,9 @@ def metadata_query(search_query, api_host, username, password, k = 5):
         )
         response.raise_for_status()
         json_data = response.json()
+        
+        if 'views' in json_data:
+            return [entry.get('view_json', {}) for entry in json_data['views']]
         return json_data
     except requests.HTTPError as e:
         if e.response.status_code == 401:

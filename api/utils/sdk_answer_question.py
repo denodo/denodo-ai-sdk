@@ -121,7 +121,7 @@ def execute_query(vql_query, to_execute, auth, timings):
         if to_execute:
             vql_status_code, execution_result = execute_vql(vql=vql_query, auth=auth)
         else:
-            vql_status_code, execution_result = 200, 'User asked not to execute the query.'
+            vql_status_code, execution_result = 200, f'User asked not to execute the query, so return the SQL query instead:\n{vql_query}'
     return execution_result, vql_status_code, timings
 
 def handle_query_error(vql_query, execution_result, request, auth, timings):

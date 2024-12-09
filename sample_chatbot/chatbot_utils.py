@@ -15,7 +15,7 @@ def dummy_login(api_host, username, password):
         'vdp_database_names': 'fake_vdb'
     }
     response = requests.get(f'{api_host}/getMetadata', params = params, auth = (username, password), verify=False)
-    return response.status_code != 401
+    return response.status_code == 204
 
 def get_relevant_tables(api_host, username, password, query, vdp_database_names):
     try:
@@ -183,7 +183,7 @@ def process_chunk(chunk):
 def add_to_chat_history(chat_history, human_query, ai_response, tool_name, tool_output, original_xml_call):
     if tool_name == "database_query":
         execution_result = tool_output.get('execution_result', {})
-        if len(execution_result.items()) > 15:
+        if isinstance(execution_result, dict) and len(execution_result.items()) > 15:
             llm_execution_result = dict(list(execution_result.items())[:15])
             llm_execution_result = str(llm_execution_result) + "... Showing only the first 15 rows of the execution result."
         else:

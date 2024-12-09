@@ -78,3 +78,16 @@
   .card-body {
     overflow: hidden;
   }
+  .context-badges-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 4px;
+  }
+  .context-badge {
+    margin-bottom: 4px !important;
+    white-space: normal;
+    text-align: left;
+    height: auto !important;
+    padding: 5px 10px;
+  }
