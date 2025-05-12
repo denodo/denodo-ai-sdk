@@ -63,7 +63,7 @@ def process_tag(tag_name, request, auth, vector_store, sample_data_vector_store)
     if isinstance(result, dict):
         db_schema = result
         logging.info(f"Tag schema for {tag_name} has {calculate_tokens(str(db_schema))} tokens.")
-        db_schema_text = [schema_summary(table) for table in db_schema['databaseTables']]
+        db_schema_text = [schema_summary(table) for table in db_schema['views']]
         
         if vector_store:
             views = flatten_list(prepare_schema(db_schema, request.embeddings_token_limit))
@@ -104,7 +104,7 @@ def process_database(db_name, request, auth, vector_store, sample_data_vector_st
     if isinstance(result, dict):
         db_schema = result
         logging.info(f"Database schema for {db_name} has {calculate_tokens(str(db_schema))} tokens.")
-        db_schema_text = [schema_summary(table) for table in db_schema['databaseTables']]
+        db_schema_text = [schema_summary(table) for table in db_schema['views']]
         
         if vector_store:
             views = flatten_list(prepare_schema(db_schema, request.embeddings_token_limit))
@@ -138,12 +138,11 @@ class getMetadataRequest(BaseModel):
     insert: bool = True
     parallel: bool = True
 
-class TableSummary(BaseModel):
-    summary: str
-
 class getMetadataResponse(BaseModel):
     db_schema_json: Dict
-    db_schema_text: List[TableSummary]
+    db_schema_text: List[str]
+    vdb_list: List[str]
+    tag_list: List[str]
     
 @router.get(
         '/getMetadata',
@@ -226,7 +225,8 @@ def getMetadata(endpoint_request: getMetadataRequest = Depends(), auth: str = De
     response = {
         'db_schema_json': all_db_schemas,
         'db_schema_text': all_db_schema_texts,
-        'vdb_list': vdp_database_names
+        'vdb_list': vdp_database_names,
+        'tag_list': vdp_tag_names
     }
 
     return JSONResponse(content = jsonable_encoder(response), media_type = "application/json")

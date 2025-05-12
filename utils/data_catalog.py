@@ -360,20 +360,22 @@ def parse_metadata_json(
     if len(json_response) == 0:
         return None
 
-    json_metadata = {'databaseName': json_response[0]['databaseName'], 'databaseTables': []}
+    json_metadata = {'views': []}
 
     for table in json_response:
         json_table = remove_none_values(table)
-        table_name = f"{json_response[0]['databaseName']}.{json_table['name']}"   
+        table_database = json_table['databaseName']
+        table_name = json_table['name']
+        table_name = f"{table_database}.{table_name}"   
         table_name = table_name.replace('"', '')      
 
-        if json_table['name'] in filter_tables:
+        if table_name in filter_tables:
             continue
 
-        if view_prefix_filter and not json_table['name'].startswith(view_prefix_filter):
+        if view_prefix_filter and not table_name.startswith(view_prefix_filter):
             continue
 
-        if view_suffix_filter and not json_table['name'].endswith(view_suffix_filter):
+        if view_suffix_filter and not table_name.endswith(view_suffix_filter):
             continue
 
         if 'viewFieldDataList' in json_table:
@@ -429,7 +431,7 @@ def parse_metadata_json(
                     for i in range(len(mapping)):
                         table_name = mapping[i].split(".")[0]
                         if table_name != other_table:
-                            mapping[i] = f"{json_response[0]['databaseName']}.{mapping[i]}"
+                            mapping[i] = f"{table_database}.{mapping[i]}"
                         else:
                             mapping[i] = f"{other_table_db}.{mapping[i]}"
 
@@ -445,7 +447,7 @@ def parse_metadata_json(
         if "description" in json_table and use_descriptions is False:
             json_table.pop('description')
             
-        json_metadata['databaseTables'].append(json_table)
+        json_metadata['views'].append(json_table)
     return json_metadata
 
 # Parse the result of the Execution to a more readable format

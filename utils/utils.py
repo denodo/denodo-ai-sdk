@@ -317,7 +317,7 @@ def prepare_sample_data_schema(schema):
             metadata=base_metadata
         ) for i, tuple in enumerate(tuples)]
     
-    return [create_sample_data_document(table) for table in schema['databaseTables']]
+    return [create_sample_data_document(table) for table in schema['views']]
 
 @timed
 def prepare_last_update_vector(last_update):
@@ -352,7 +352,7 @@ def prepare_schema(schema, embeddings_token_limit = 0):
             metadata=base_metadata
         )
         
-    return [create_document(table, embeddings_token_limit) for table in schema['databaseTables']]
+    return [create_document(table, embeddings_token_limit) for table in schema['views']]
 
 class RefreshableBotoSession:
     def __init__(

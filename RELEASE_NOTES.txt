@@ -1,3 +1,14 @@
+version 0.7.2 - 20250512
+------------------------
+
+- Fixed bug in the getMetadata endpoint that would use the first database name in the response instead of the actual database name when vectorizing tags
+
+version 0.7.1 - 20250424
+------------------------
+
+- Fixed bug in the answerQuestion with default mode that would fail to answer metadata questions
+- Fixed prompt that would slow down SQL query generation
+
 version 0.7 - 20250421
 ------------------------
 
