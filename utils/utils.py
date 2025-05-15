@@ -312,7 +312,7 @@ def prepare_sample_data_schema(schema):
 
         tuples = list(map(list, zip(*examples)))
         return [Document(
-            id=f"{table_id}_{i}",
+            id=f"{table_id}_tuple_{i}",
             page_content=','.join(tuple),
             metadata=base_metadata
         ) for i, tuple in enumerate(tuples)]

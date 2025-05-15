@@ -1,3 +1,8 @@
+version 0.8.1 - 20250515
+------------------------
+
+- Fixed error when chunking a view in PGVector that some chunks would be skipped
+
 version 0.8 - 20250515
 ------------------------
 
