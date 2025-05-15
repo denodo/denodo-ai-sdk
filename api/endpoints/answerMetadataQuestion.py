@@ -19,9 +19,10 @@ from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPAuthorizationCredentials, HTTPBearer
 
-from api.utils.sdk_utils import timing_context, handle_endpoint_error
+from api.utils.sdk_utils import timing_context, handle_endpoint_error, generate_session_id
 from api.utils import sdk_ai_tools
 from api.utils import sdk_answer_question
+from utils.uniformLLM import UniformLLM
 
 router = APIRouter()
 security_basic = HTTPBasic(auto_error = False)
@@ -139,6 +140,11 @@ async def answer_metadata_question_post(
 
 async def process_metadata_question(request_data: answerMetadataQuestionRequest, auth: str):
     """Main function to process the metadata question and return the answer"""
+
+    # Generate session ID for Langfuse debugging purposes
+    session_id = generate_session_id(request_data.question)
+    chat_llm = UniformLLM(request_data.chat_provider, request_data.chat_model)
+
     vector_search_tables, _, timings = await sdk_ai_tools.get_relevant_tables(
         query=request_data.question,
         embeddings_provider=request_data.embeddings_provider,
@@ -157,8 +163,7 @@ async def process_metadata_question(request_data: answerMetadataQuestionRequest,
         _, category_response, category_related_questions, sql_category_tokens = await sdk_ai_tools.sql_category(
             query=request_data.question, 
             vector_search_tables=vector_search_tables, 
-            llm_provider=request_data.chat_provider,
-            llm_model=request_data.chat_model,
+            llm=chat_llm,
             mode="metadata",
             custom_instructions=request_data.custom_instructions
         )

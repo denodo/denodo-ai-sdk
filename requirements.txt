@@ -33,7 +33,8 @@ docstring_parser==0.16
 durationpy==0.9
 Events==0.5
 exceptiongroup==1.2.2
-fastapi==0.112.0
+fastapi==0.115.12
+fastmcp==2.2.8
 filelock==3.16.1
 Flask==3.0.3
 Flask-HTTPAuth==4.8.0
@@ -152,7 +153,7 @@ PyPika==0.48.9
 pyproject_hooks==1.2.0
 python-dateutil==2.9.0.post0
 pysqlite3-binary==0.5.4; platform_system=="Linux"
-python-dotenv==1.0.1
+python-dotenv==1.1.0
 pytz==2024.1
 PyYAML==6.0.2
 ratelimiter==1.2.0.post0
@@ -171,7 +172,7 @@ six==1.16.0
 sniffio==1.3.1
 SQLAlchemy==2.0.36
 sseclient-py==1.8.0
-starlette==0.37.2
+starlette==0.40.0
 sympy==1.13.3
 tenacity==8.5.0
 tiktoken==0.7.0
@@ -179,7 +180,7 @@ tokenizers==0.19.1
 tomli==2.0.2
 tqdm==4.66.6
 transformers==4.44.0
-typer==0.12.5
+typer==0.15.2
 types-requests
 typing-inspect==0.9.0
 typing_extensions==4.12.2
@@ -188,7 +189,7 @@ urllib3==1.26.19
 uvicorn==0.32.0
 watchfiles==0.24.0
 websocket-client==1.8.0
-websockets==13.1
+websockets==14.0
 Werkzeug==3.1.2
 wrapt==1.16.0
 yarl==1.17.1

@@ -12,32 +12,22 @@
 import os
 
 from pydantic import BaseModel, Field
-from typing import Dict, Annotated, List, Literal
+from typing import Dict, List, Literal
 
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import APIRouter, Depends
 
-from api.utils.sdk_utils import timing_context, add_tokens, generate_session_id, handle_endpoint_error
+from api.utils.sdk_utils import (
+    timing_context, add_tokens, generate_session_id, 
+    handle_endpoint_error, authenticate
+)
 from api.utils import sdk_ai_tools
 from api.utils import sdk_answer_question
+from utils.uniformLLM import UniformLLM
 
 router = APIRouter()
-security_basic = HTTPBasic(auto_error = False)
-security_bearer = HTTPBearer(auto_error = False)
     
-def authenticate(
-        basic_credentials: Annotated[HTTPBasicCredentials, Depends(security_basic)],
-        bearer_credentials: Annotated[HTTPAuthorizationCredentials, Depends(security_bearer)]
-        ):
-    if bearer_credentials is not None:
-        return bearer_credentials.credentials
-    elif basic_credentials is not None:
-        return (basic_credentials.username, basic_credentials.password)
-    else:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
 class answerQuestionRequest(BaseModel):
     question: str
     plot: bool = False
@@ -146,6 +136,8 @@ async def process_question(request_data: answerQuestionRequest, auth: str):
     """Main function to process the question and return the answer"""
     # Generate session ID for Langfuse debugging purposes
     session_id = generate_session_id(request_data.question)
+    chat_llm = UniformLLM(request_data.chat_provider, request_data.chat_model)
+    sql_gen_llm = UniformLLM(request_data.sql_gen_provider, request_data.sql_gen_model)
 
     vector_search_tables, sample_data, timings = await sdk_ai_tools.get_relevant_tables(
         query=request_data.question,
@@ -165,8 +157,7 @@ async def process_question(request_data: answerQuestionRequest, auth: str):
         category, category_response, category_related_questions, sql_category_tokens = await sdk_ai_tools.sql_category(
             query=request_data.question, 
             vector_search_tables=vector_search_tables, 
-            llm_provider=request_data.chat_provider,
-            llm_model=request_data.chat_model,
+            llm=chat_llm,
             mode=request_data.mode,
             custom_instructions=request_data.custom_instructions,
             session_id=session_id
@@ -180,7 +171,9 @@ async def process_question(request_data: answerQuestionRequest, auth: str):
             auth=auth, 
             timings=timings,
             session_id=session_id,
-            sample_data=sample_data
+            sample_data=sample_data,
+            chat_llm=chat_llm,
+            sql_gen_llm=sql_gen_llm
         )
         response['tokens'] = add_tokens(response['tokens'], sql_category_tokens)
     elif category == "METADATA":

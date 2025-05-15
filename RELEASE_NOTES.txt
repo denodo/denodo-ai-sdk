@@ -1,7 +1,24 @@
-version 0.7.2 - 20250512
+version 0.8 - 20250515
 ------------------------
 
-- Fixed bug in the getMetadata endpoint that would use the first database name in the response instead of the actual database name when vectorizing tags
+- Fixed error when vectorizing a tag with views from multiple DBs
+- Fixed sample_data_search_k parameter not being respected
+- Only added associations component in the textual representation when there were associations
+- Fixed endpoint answerMetadataQuestion that was failing to run
+- Fixed prompt issues
+- Added example MCP server JSON configuration file
+- Resolved dependency conflicts
+
+version 0.8-beta - 20250506
+------------------------
+
+- Implemented STDIO MCP Server for the AI SDK
+- Completed incremental update integration
+- Improved LLM client object re-utilization for better performance
+- Fixed 'streamAnswerQuestion object has no attribute vector_search_sample_data_k' error
+- Improved graph generation: removed LLM complexity determination, pre-defined Python template, dataset description 
+- Added parameter CHATBOT_AUTO_GRAPH to control graph generation in the chatbot UI
+- Fixed issue where deleting IDs failed when the number of IDs was too big in Chroma SQLite
 
 version 0.7.1 - 20250424
 ------------------------

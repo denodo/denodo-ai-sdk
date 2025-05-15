@@ -6,21 +6,20 @@ import asyncio
 
 from api.utils import sdk_ai_tools
 from utils.data_catalog import execute_vql
-from utils.uniformLLM import UniformLLM
 from utils.utils import custom_tag_parser, add_langfuse_callback
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from api.utils.sdk_utils import timing_context, is_data_complex, add_tokens
 
-async def process_sql_category(request, vector_search_tables, category_response, auth, timings, session_id = None, sample_data = None):
+async def process_sql_category(request, vector_search_tables, sql_gen_llm, chat_llm, category_response, auth, timings, session_id = None, sample_data = None):
     with timing_context("llm_time", timings):
         vql_query, query_explanation, query_to_vql_tokens = await sdk_ai_tools.query_to_vql(
             query=request.question, 
             vector_search_tables=vector_search_tables, 
-            llm_provider=request.sql_gen_provider, 
-            llm_model=request.sql_gen_model, 
+            llm=sql_gen_llm,
             filter_params=category_response,
             custom_instructions=request.custom_instructions,
+            vector_search_sample_data_k=request.vector_search_sample_data_k,
             session_id=session_id,
             sample_data=sample_data
         )
@@ -29,9 +28,9 @@ async def process_sql_category(request, vector_search_tables, category_response,
             question=request.question,
             query=vql_query, 
             query_explanation=query_explanation,
-            llm_provider=request.sql_gen_provider, 
-            llm_model=request.sql_gen_model,
+            llm=sql_gen_llm,
             session_id=session_id,
+            vector_search_sample_data_k=request.vector_search_sample_data_k,
             vector_search_tables=vector_search_tables,
             sample_data=sample_data
         )
@@ -52,7 +51,8 @@ async def process_sql_category(request, vector_search_tables, category_response,
             query_explanation=query_explanation,
             query_fixer_tokens=query_fixer_tokens,
             fixer_history=fixer_history,
-            sample_data=sample_data
+            sample_data=sample_data,
+            llm=sql_gen_llm
         )
         
         if vql_query == 'OK':
@@ -101,7 +101,9 @@ async def process_sql_category(request, vector_search_tables, category_response,
             data_file=data_file, 
             timings=timings,
             session_id=session_id,
-            sample_data=sample_data
+            sample_data=sample_data,
+            chat_llm=chat_llm,
+            sql_gen_llm=sql_gen_llm
         )
 
     if request.disclaimer:
@@ -148,7 +150,7 @@ def process_unknown_category(timings):
         'total_execution_time': round(sum(timings.values()), 2) if timings else 0
     }
 
-async def attempt_query_execution(vql_query, request, auth, timings, vector_search_tables, session_id, query_explanation, query_fixer_tokens=None, fixer_history=[], sample_data=None):
+async def attempt_query_execution(vql_query, request, auth, llm, timings, vector_search_tables, session_id, query_explanation, query_fixer_tokens=None, fixer_history=[], sample_data=None):
     if vql_query:
         execution_result, vql_status_code, timings = await execute_query(
             vql_query=vql_query, 
@@ -166,7 +168,7 @@ async def attempt_query_execution(vql_query, request, auth, timings, vector_sear
         with timing_context("llm_time", timings):
             escape_execution_result = execution_result.replace("{", "{{").replace("}", "}}")
             fixer_history.append(('human', f'Your response resulted in the following error {vql_status_code}: {escape_execution_result}'))
-            llm = UniformLLM(request.sql_gen_provider, request.sql_gen_model)
+            llm.callback.reset_tokens()
             prompt = ChatPromptTemplate.from_messages(fixer_history)
             chain = prompt | llm.llm | StrOutputParser()
             response = await chain.ainvoke({}, config = {
@@ -186,9 +188,9 @@ async def attempt_query_execution(vql_query, request, auth, timings, vector_sear
                     query=vql_query, 
                     query_explanation=query_explanation,
                     error_log=execution_result,
-                    llm_provider=request.sql_gen_provider,
-                    llm_model=request.sql_gen_model,
+                    llm=llm,
                     session_id=session_id,
+                    vector_search_sample_data_k=request.vector_search_sample_data_k,
                     vector_search_tables=vector_search_tables,
                     fixer_history=fixer_history,
                     sample_data=sample_data
@@ -198,10 +200,10 @@ async def attempt_query_execution(vql_query, request, auth, timings, vector_sear
                 vql_query, fixer_history, query_reviewer_tokens = await sdk_ai_tools.query_reviewer(
                     question=request.question,
                     vql_query=vql_query,
-                    llm_provider=request.sql_gen_provider,
-                    llm_model=request.sql_gen_model,
+                    llm=llm,
                     vector_search_tables=vector_search_tables,
                     session_id=session_id,
+                    vector_search_sample_data_k=request.vector_search_sample_data_k,
                     fixer_history=fixer_history,
                     sample_data=sample_data
                 )
@@ -262,7 +264,7 @@ def prepare_response(vql_query, query_explanation, tokens, execution_result, vec
         "total_execution_time": round(sum(timings.values()), 2)
     }
 
-async def enhance_verbose_response(request, response, vql_query, llm_execution_result, vector_search_tables, data_file, timings, session_id = None, sample_data = None):
+async def enhance_verbose_response(request, response, vql_query, llm_execution_result, vector_search_tables, data_file, timings, chat_llm, sql_gen_llm, session_id = None, sample_data = None):
     with timing_context("llm_time", timings):
         tasks = []
         
@@ -271,8 +273,7 @@ async def enhance_verbose_response(request, response, vql_query, llm_execution_r
                 query=request.question,
                 data_file=data_file,
                 execution_result=response['execution_result'],
-                llm_provider=request.sql_gen_provider,
-                llm_model=request.sql_gen_model,
+                llm=sql_gen_llm,
                 details=request.plot_details,
                 session_id=session_id
             )
@@ -283,8 +284,7 @@ async def enhance_verbose_response(request, response, vql_query, llm_execution_r
                 query=request.question,
                 vql_query=vql_query,
                 vql_execution_result=llm_execution_result,
-                llm_provider=request.chat_provider,
-                llm_model=request.chat_model,
+                llm=chat_llm,
                 vector_search_tables=vector_search_tables,
                 markdown_response=request.markdown_response,
                 custom_instructions=request.custom_instructions,
@@ -295,8 +295,7 @@ async def enhance_verbose_response(request, response, vql_query, llm_execution_r
                 sql_query=vql_query,
                 execution_result=llm_execution_result,
                 vector_search_tables=vector_search_tables,
-                llm_provider=request.chat_provider,
-                llm_model=request.chat_model,
+                llm=chat_llm,
                 custom_instructions=request.custom_instructions,
                 session_id=session_id,
                 sample_data=sample_data

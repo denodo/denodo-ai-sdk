@@ -320,11 +320,20 @@ def prepare_sample_data_schema(schema):
     return [create_sample_data_document(table) for table in schema['views']]
 
 @timed
-def prepare_last_update_vector(last_update):
+def prepare_last_update_vector(last_update_dict, last_update, source_type, source_name):
+    if last_update_dict is None:
+        last_update_dict = {}
+    if source_type in last_update_dict:
+        last_update_dict[source_type][source_name] = last_update
+    else:
+        last_update_dict[source_type] = {
+            source_name: last_update
+        }
+
     return [Document(
         id="last_update",
         page_content="last_update",
-        metadata={"last_update": last_update}
+        metadata={"view_id": "last_update", "last_update": json.dumps(last_update_dict)}
     )]
 
 @timed

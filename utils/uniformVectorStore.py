@@ -1,8 +1,8 @@
 import os
+import json
 import time
 import logging
 import concurrent.futures
-
 from utils.uniformEmbeddings import UniformEmbeddings
 from utils.utils import log_params, prepare_last_update_vector, timed
 
@@ -77,11 +77,18 @@ class UniformVectorStore:
         test_vector = self.embeddings.embed_query("test")
         return len(test_vector)
     
-    @timed
-    def get_last_update(self):
+    def get_last_update_dict(self):
         search_vector = self.search_by_vector([0] * self.dimensions, k = 1, view_ids = ["last_update"])
         if search_vector and 'last_update' in search_vector[0].metadata:
-            return int(search_vector[0].metadata['last_update'])
+            return json.loads(search_vector[0].metadata['last_update'])
+        else:
+            return None
+
+    @timed
+    def get_last_update(self, source_type, source_name):
+        last_update_dict = self.get_last_update_dict()
+        if last_update_dict and source_type in last_update_dict and source_name in last_update_dict[source_type]:
+            return int(last_update_dict[source_type][source_name])
         else:
             return None
     
@@ -249,13 +256,18 @@ class UniformVectorStore:
             return filter_query
         else:
             return None
+        
+    def delete(self, ids, batch_size = 1000):
+        for i in range(0, len(ids), batch_size):
+            batch_ids = ids[i:i+batch_size]
+            self.client.delete(ids=batch_ids)
 
-    def add_views(self, views, parallel = True):
+    def add_views(self, views, parallel = True, source_type = "OTHER", source_name = "default"):
         views = list({view.id: view for view in views}.values())
         view_ids = [view.id for view in views]
         
         if view_ids:
-            self.client.delete(ids = view_ids)
+            self.delete(ids = view_ids)
                     
         # If rate limiting is enabled, process views in batches
         if self.rate_limit_rpm and len(view_ids) > self.rate_limit_rpm:
@@ -296,8 +308,10 @@ class UniformVectorStore:
                 self.client.add_documents(views, ids=view_ids)
 
         last_update = int(time.time() * 1000)
-        self.client.delete(ids = ["last_update"])
-        self.client.add_documents(prepare_last_update_vector(last_update), ids = ["last_update"])
+        last_update_dict = self.get_last_update_dict()
+        if last_update_dict:
+            self.client.delete(ids = ["last_update"])
+        self.client.add_documents(prepare_last_update_vector(last_update_dict, last_update, source_type, source_name), ids = ["last_update"])
 
     def _add_views_parallel(self, views, ids, batch_size=5, max_retries=3):
         """Add views in parallel with batching and error handling."""
@@ -377,4 +391,4 @@ class UniformVectorStore:
         view_ids = [str(id) for sublist in results for id in sublist]
         
         if view_ids:
-            self.client.delete(view_ids)
+            self.delete(view_ids)

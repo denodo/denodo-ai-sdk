@@ -13,7 +13,6 @@ from langchain_core.output_parsers import StrOutputParser
 
 from utils import utils
 from utils.uniformVectorStore import UniformVectorStore
-from utils.uniformLLM import UniformLLM
 from utils.data_catalog import get_allowed_view_ids
 from api.utils import sdk_utils
 
@@ -23,6 +22,7 @@ ANSWER_VIEW_PROMPT = os.getenv("ANSWER_VIEW")
 SQL_CATEGORY_PROMPT = os.getenv("SQL_CATEGORY")
 METADATA_CATEGORY_PROMPT = os.getenv("METADATA_CATEGORY")
 GENERATE_VISUALIZATION_PROMPT = os.getenv("GENERATE_VISUALIZATION")
+GENERATE_VISUALIZATION_PYTHON_TEMPLATE = os.getenv("GENERATE_VISUALIZATION_PYTHON_TEMPLATE")
 DIRECT_SQL_CATEGORY_PROMPT = os.getenv("DIRECT_SQL_CATEGORY")
 DIRECT_METADATA_CATEGORY_PROMPT = os.getenv("DIRECT_METADATA_CATEGORY")
 RELATED_QUESTIONS_PROMPT = os.getenv("RELATED_QUESTIONS")
@@ -43,8 +43,13 @@ TODAYS_DATE = datetime.now().strftime("%Y-%m-%d")
 
 @utils.log_params
 @utils.timed
-async def generate_view_answer(query, vql_query, vql_execution_result, llm_provider, llm_model, vector_search_tables, markdown_response = False, custom_instructions = '', session_id = None):
-    llm = UniformLLM(llm_provider, llm_model)
+async def generate_view_answer(
+    query, vql_query, vql_execution_result, llm, vector_search_tables,
+    markdown_response = False,
+    custom_instructions = '',
+    session_id = None
+):
+    llm.callback.reset_tokens()
     prompt = PromptTemplate.from_template(ANSWER_VIEW_PROMPT)
     chain = prompt | llm.llm | StrOutputParser()
 
@@ -70,14 +75,22 @@ async def generate_view_answer(query, vql_query, vql_execution_result, llm_provi
     
 @utils.log_params
 @utils.timed
-async def query_to_vql(query, vector_search_tables, llm_provider, llm_model, filter_params = '', custom_instructions = '', session_id = None, sample_data = None):
-    llm = UniformLLM(llm_provider, llm_model)
+async def query_to_vql(
+    query, vector_search_tables, llm,
+    filter_params = '', 
+    custom_instructions = '',
+    session_id = None,
+    sample_data = None,
+    vector_search_sample_data_k = 3
+):
+    llm.callback.reset_tokens()
+
     prompt = PromptTemplate.from_template(QUERY_TO_VQL_PROMPT)
     query = re.sub(r'(?i)sql', 'VQL', query)
     chain = prompt | llm.llm | StrOutputParser()
 
     filtered_tables = utils.custom_tag_parser(filter_params, 'table', default = [])
-    relevant_tables = format_schema_text(vector_search_tables, filtered_tables, sample_data)
+    relevant_tables = format_schema_text(vector_search_tables, filtered_tables, sample_data, examples_per_table=vector_search_sample_data_k)
 
     prompt_parts = {
         "having": int("<having>" in filter_params),
@@ -123,8 +136,13 @@ async def query_to_vql(query, vector_search_tables, llm_provider, llm_model, fil
 
 @utils.log_params
 @utils.timed
-async def related_questions(question, sql_query, execution_result, vector_search_tables, llm_provider, llm_model, custom_instructions = '', session_id = None, sample_data = None):
-    llm = UniformLLM(llm_provider, llm_model)
+async def related_questions(
+    question, sql_query, execution_result, vector_search_tables, llm,
+    custom_instructions = '',
+    session_id = None,
+    sample_data = None,
+):
+    llm.callback.reset_tokens()
     prompt = PromptTemplate.from_template(RELATED_QUESTIONS_PROMPT)
     chain = prompt | llm.llm | StrOutputParser()
 
@@ -199,12 +217,16 @@ def format_schema_text(vector_search_tables, filtered_tables, sample_data, examp
 
         # Format associations
         associations = table.get('associations', [])
+        association_lines = []
         if associations:
-            lines.append("## Joins:")
             for assoc in associations:
                 where_clause = assoc.get('where')
                 if where_clause and sum(table in where_clause for table in present_tables) == 2:
-                        lines.append(f"→ {where_clause}")
+                    association_lines.append(f"→ {where_clause}")
+
+        if association_lines:
+            lines.append("## Joins:")
+            lines.extend(association_lines)
 
         return "\n".join(lines)
 
@@ -269,8 +291,8 @@ def get_relevant_tables_json(vector_search_tables, filtered_tables):
 
 @utils.log_params
 @utils.timed
-async def metadata_category(query, vector_search_tables, llm_provider, llm_model, custom_instructions = '', session_id = None):
-    llm = UniformLLM(llm_provider, llm_model)
+async def metadata_category(query, vector_search_tables, llm, custom_instructions = '', session_id = None):
+    llm.callback.reset_tokens()
 
     prompt = PromptTemplate.from_template(METADATA_CATEGORY_PROMPT)
     chain = prompt | llm.llm | StrOutputParser()
@@ -294,8 +316,8 @@ async def metadata_category(query, vector_search_tables, llm_provider, llm_model
 
 @utils.log_params
 @utils.timed
-async def direct_metadata_category(query, vector_search_tables, llm_provider, llm_model, custom_instructions = '', session_id = None):
-    llm = UniformLLM(llm_provider, llm_model)
+async def direct_metadata_category(query, vector_search_tables, llm, custom_instructions = '', session_id = None):
+    llm.callback.reset_tokens()
 
     prompt = PromptTemplate.from_template(DIRECT_METADATA_CATEGORY_PROMPT)
     chain = prompt | llm.llm | StrOutputParser()
@@ -320,8 +342,9 @@ async def direct_metadata_category(query, vector_search_tables, llm_provider, ll
 
 @utils.log_params
 @utils.timed
-async def direct_sql_category(query, vector_search_tables, llm_provider, llm_model, custom_instructions = '', session_id = None):
-    llm = UniformLLM(llm_provider, llm_model)
+async def direct_sql_category(query, vector_search_tables, llm, custom_instructions = '', session_id = None):
+    llm.callback.reset_tokens()
+
     prompt = PromptTemplate.from_template(DIRECT_SQL_CATEGORY_PROMPT)
     chain = prompt | llm.llm | StrOutputParser()
 
@@ -342,8 +365,8 @@ async def direct_sql_category(query, vector_search_tables, llm_provider, llm_mod
 
 @utils.log_params
 @utils.timed
-async def sql_category(query, vector_search_tables, llm_provider, llm_model, mode = 'default', custom_instructions = '', session_id = None):
-    llm = UniformLLM(llm_provider, llm_model)
+async def sql_category(query, vector_search_tables, llm, mode = 'default', custom_instructions = '', session_id = None):
+    llm.callback.reset_tokens()
     prompt = PromptTemplate.from_template(SQL_CATEGORY_PROMPT)
     chain = prompt | llm.llm | StrOutputParser()
 
@@ -351,8 +374,7 @@ async def sql_category(query, vector_search_tables, llm_provider, llm_model, mod
         return await direct_metadata_category(
             query=query, 
             vector_search_tables=vector_search_tables, 
-            llm_provider=llm_provider, 
-            llm_model=llm_model,
+            llm=llm,
             custom_instructions=custom_instructions,
             session_id=session_id
         )
@@ -360,8 +382,7 @@ async def sql_category(query, vector_search_tables, llm_provider, llm_model, mod
         return await direct_sql_category(
             query=query, 
             vector_search_tables=vector_search_tables, 
-            llm_provider=llm_provider, 
-            llm_model=llm_model,
+            llm=llm,
             custom_instructions=custom_instructions,
             session_id=session_id
         )
@@ -371,8 +392,7 @@ async def sql_category(query, vector_search_tables, llm_provider, llm_model, mod
             metadata_category(
                 query=query, 
                 vector_search_tables=vector_search_tables, 
-                llm_provider=llm_provider, 
-                llm_model=llm_model,
+                llm=llm,
                 custom_instructions=custom_instructions,
                 session_id=session_id
             )
@@ -390,7 +410,7 @@ async def sql_category(query, vector_search_tables, llm_provider, llm_model, mod
         )
         
         # Wait for either task to complete
-        done, pending = await asyncio.wait(
+        done, _ = await asyncio.wait(
             {metadata_task, sql_task}, 
             return_when=asyncio.FIRST_COMPLETED
         )
@@ -429,8 +449,12 @@ async def sql_category(query, vector_search_tables, llm_provider, llm_model, mod
 
 @utils.log_params
 @utils.timed
-async def graph_generator(query, data_file, execution_result, llm_provider, llm_model, details = 'No special requirements', session_id = None):
-    llm = UniformLLM(llm_provider, llm_model)
+async def graph_generator(
+    query, data_file, execution_result, llm,
+    details = 'No special requirements',
+    session_id = None
+):
+    llm.callback.reset_tokens()
     final_prompt = PromptTemplate.from_template(GENERATE_VISUALIZATION_PROMPT)
     final_chain = final_prompt | llm.llm | StrOutputParser()
 
@@ -439,10 +463,10 @@ async def graph_generator(query, data_file, execution_result, llm_provider, llm_
 
     response = await final_chain.ainvoke({
         "data": data_file, 
-        "details": details,
         "instruction": query,
         "plot_details": details,
-        "sample_data": json.dumps(sample_data)
+        "sample_data": json.dumps(sample_data),
+        "sample_data_stats": await sdk_utils.stats_about_data(data_file)
     }, 
         config = {
             "callbacks": utils.add_langfuse_callback(llm.callback, f"{llm.provider_name}.{llm.model_name}", session_id),
@@ -451,6 +475,7 @@ async def graph_generator(query, data_file, execution_result, llm_provider, llm_
     )
     
     python_code = utils.custom_tag_parser(response, 'python', default = '')[0].strip()
+    python_code = GENERATE_VISUALIZATION_PYTHON_TEMPLATE.format(data=data_file, python_code=python_code)
 
     python_repl = PythonREPL()
     output = await asyncio.to_thread(python_repl.run, python_code)
@@ -463,14 +488,28 @@ async def graph_generator(query, data_file, execution_result, llm_provider, llm_
 
 @utils.log_params
 @utils.timed
-async def query_fixer(question, query, llm_provider, llm_model, vector_search_tables, error_log=False, error_categories=[], fixer_history=[], session_id = None, query_explanation = '', sample_data = None):
-    llm = UniformLLM(llm_provider, llm_model)
+async def query_fixer(
+    question, query, llm, vector_search_tables,
+    error_log = False,
+    error_categories = None,
+    fixer_history = None,
+    session_id = None,
+    query_explanation = '',
+    sample_data = None,
+    vector_search_sample_data_k = 3
+):
+    if error_categories is None:
+        error_categories = []
+    if fixer_history is None:
+        fixer_history = []
+        
+    llm.callback.reset_tokens()
     
     if not error_log:
         query, error_log, error_categories = sdk_utils.prepare_vql(query)
 
     schema = [table for table in vector_search_tables if table['view_name'] in query.replace('"', '')]
-    relevant_tables = format_schema_text(schema, [], sample_data)
+    relevant_tables = format_schema_text(schema, [], sample_data, examples_per_table=vector_search_sample_data_k)
     prompt, parameters = _get_prompt_and_parameters(question, query, error_log, error_categories, relevant_tables, query_explanation)
     
     if not prompt:
@@ -500,13 +539,23 @@ async def query_fixer(question, query, llm_provider, llm_model, vector_search_ta
 
 @utils.log_params
 @utils.timed
-async def query_reviewer(question, vql_query, llm_provider, llm_model, vector_search_tables, session_id = None, fixer_history=[], sample_data = None):
-    llm = UniformLLM(llm_provider, llm_model)
+async def query_reviewer(
+    question, vql_query, llm, vector_search_tables,
+    session_id = None,
+    fixer_history = None,
+    sample_data = None,
+    vector_search_sample_data_k = 3
+):
+
+    if fixer_history is None:
+        fixer_history = []
+
+    llm.callback.reset_tokens()
     final_prompt = PromptTemplate.from_template(QUERY_REVIEWER_PROMPT)
     final_chain = final_prompt | llm.llm | StrOutputParser()
 
     schema = [table for table in vector_search_tables if table['view_name'] in vql_query.replace('"', '')]
-    relevant_tables = format_schema_text(schema, [], sample_data)
+    relevant_tables = format_schema_text(schema, [], sample_data, examples_per_table=vector_search_sample_data_k)
 
     vql_restrictions = sdk_utils.generate_vql_restrictions(
         prompt_parts={"dates": 1, "arithmetic": 1, "groupby": 1, "having": 1},
@@ -580,7 +629,13 @@ def _get_prompt_and_parameters(question, vql_query, error_log, error_categories,
 
 @utils.log_params
 @utils.timed
-async def get_relevant_tables(query, embeddings_provider, embeddings_model, vector_store_provider, vdb_list, tag_list, auth, k = 5, use_views = '', expand_set_views = True, vector_search_sample_data_k = 3):
+async def get_relevant_tables(
+    query, embeddings_provider, embeddings_model, vector_store_provider, vdb_list, tag_list, auth,
+    k = 5, 
+    use_views = '', 
+    expand_set_views = True, 
+    vector_search_sample_data_k = 3
+):
     vdb_list = [db.strip() for db in vdb_list.split(',')] if vdb_list else []
     tag_list = [tag.strip() for tag in tag_list.split(',')] if tag_list else []
     

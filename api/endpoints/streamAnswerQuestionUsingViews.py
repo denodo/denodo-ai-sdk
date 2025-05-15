@@ -20,7 +20,8 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPAuthorizationC
 
 from api.utils import sdk_ai_tools
 from api.utils import sdk_answer_question
-from api.utils.sdk_utils import timing_context, handle_endpoint_error
+from api.utils.sdk_utils import timing_context, handle_endpoint_error, generate_session_id
+from utils.uniformLLM import UniformLLM
 
 router = APIRouter()
 security_basic = HTTPBasic(auto_error = False)
@@ -52,6 +53,7 @@ class streamAnswerQuestionUsingViewsRequest(BaseModel):
     custom_instructions: str = os.getenv('CUSTOM_INSTRUCTIONS', '')
     markdown_response: bool = True
     vector_search_k: int = 5
+    vector_search_sample_data_k: int = 3
     mode: Literal["default", "data", "metadata"] = Field(default = "default")
     disclaimer: bool = True
     verbose: bool = True
@@ -83,15 +85,20 @@ async def streamAnswerQuestionUsingViews(endpoint_request: streamAnswerQuestionU
     As you can see, you can specify a different provider for SQL generation and chat generation. This is because generating a correct SQL query
     is a complex task that should be handled with a powerful LLM."""
 
+    # Generate session ID for Langfuse debugging purposes
+    session_id = generate_session_id(endpoint_request.question)
+    chat_llm = UniformLLM(endpoint_request.chat_provider, endpoint_request.chat_model)
+    sql_gen_llm = UniformLLM(endpoint_request.sql_gen_provider, endpoint_request.sql_gen_model)
+
     timings = {}
     with timing_context("llm_time", timings):
         category, category_response, category_related_questions, sql_category_tokens = await sdk_ai_tools.sql_category(
             query=endpoint_request.question, 
             vector_search_tables=endpoint_request.vector_search_tables, 
-            llm_provider=endpoint_request.chat_provider,
-            llm_model=endpoint_request.chat_model,
+            llm=chat_llm,
             mode=endpoint_request.mode,
-            custom_instructions=endpoint_request.custom_instructions
+            custom_instructions=endpoint_request.custom_instructions,
+            session_id=session_id
         )
 
     if category == "SQL":
@@ -101,6 +108,9 @@ async def streamAnswerQuestionUsingViews(endpoint_request: streamAnswerQuestionU
             category_response=category_response,
             auth=auth, 
             timings=timings,
+            session_id=session_id,
+            chat_llm=chat_llm,
+            sql_gen_llm=sql_gen_llm
         )
     elif category == "METADATA":
         response = await sdk_answer_question.process_metadata_category(

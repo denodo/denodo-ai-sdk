@@ -19,9 +19,10 @@ from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPAuthorizationCredentials, HTTPBearer
 
-from api.utils.sdk_utils import timing_context, add_tokens, handle_endpoint_error
+from api.utils.sdk_utils import timing_context, add_tokens, handle_endpoint_error, generate_session_id
 from api.utils import sdk_ai_tools
 from api.utils import sdk_answer_question
+from utils.uniformLLM import UniformLLM
 
 router = APIRouter()
 security_basic = HTTPBasic(auto_error = False)
@@ -77,7 +78,7 @@ class answerQuestionUsingViewsResponse(BaseModel):
         response_model = answerQuestionUsingViewsResponse,
         tags = ['Ask a Question - Custom Vector Store'])
 @handle_endpoint_error("answerQuestionUsingViews")
-def answerQuestionUsingViews(endpoint_request: answerQuestionUsingViewsRequest, auth: str = Depends(authenticate)):
+async def answerQuestionUsingViews(endpoint_request: answerQuestionUsingViewsRequest, auth: str = Depends(authenticate)):
     """
     The only difference between this endpoint and `answerQuestion` is that this endpoint 
     expects the result of the vector search to be passed in as a parameter.
@@ -99,33 +100,41 @@ def answerQuestionUsingViews(endpoint_request: answerQuestionUsingViewsRequest, 
     As you can see, you can specify a different provider for SQL generation and chat generation. This is because generating a correct SQL query
     is a complex task that should be handled with a powerful LLM."""
 
+    # Generate session ID for Langfuse debugging purposes
+    session_id = generate_session_id(endpoint_request.question)
+    chat_llm = UniformLLM(endpoint_request.chat_provider, endpoint_request.chat_model)
+    sql_gen_llm = UniformLLM(endpoint_request.sql_gen_provider, endpoint_request.sql_gen_model)
+
     timings = {}
     with timing_context("llm_time", timings):
-        category, category_response, category_related_questions, sql_category_tokens = sdk_ai_tools.sql_category(
+        category, category_response, category_related_questions, sql_category_tokens = await sdk_ai_tools.sql_category(
             query=endpoint_request.question, 
             vector_search_tables=endpoint_request.vector_search_tables, 
-            llm_provider=endpoint_request.chat_provider,
-            llm_model=endpoint_request.chat_model,
+            llm=chat_llm,
             mode=endpoint_request.mode,
-            custom_instructions=endpoint_request.custom_instructions
+            custom_instructions=endpoint_request.custom_instructions,
+            session_id=session_id
         )
 
     if category == "SQL":
-        response = sdk_answer_question.process_sql_category(
+        response = await sdk_answer_question.process_sql_category(
             request=endpoint_request, 
             vector_search_tables=endpoint_request.vector_search_tables, 
             category_response=category_response,
             auth=auth, 
-            timings=timings
+            timings=timings,
+            session_id=session_id,
+            chat_llm=chat_llm,
+            sql_gen_llm=sql_gen_llm
         )
         response['tokens'] = add_tokens(response['tokens'], sql_category_tokens)
     elif category == "METADATA":
-        response = sdk_answer_question.process_metadata_category(
+        response = await sdk_answer_question.process_metadata_category(
             category_response=category_response, 
             category_related_questions=category_related_questions, 
             vector_search_tables=endpoint_request.vector_search_tables, 
             tokens=sql_category_tokens,
-            timings=timings
+            timings=timings,
         )
     else:
         response = sdk_answer_question.process_unknown_category(timings=timings)

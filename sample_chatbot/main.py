@@ -73,6 +73,7 @@ CHATBOT_FEEDBACK = bool(int(os.getenv('CHATBOT_FEEDBACK', '0')))
 CHATBOT_UNSTRUCTURED_MODE = bool(int(os.getenv('CHATBOT_UNSTRUCTURED_MODE', '1')))
 CHATBOT_UNSTRUCTURED_INDEX = os.getenv('CHATBOT_UNSTRUCTURED_INDEX')
 CHATBOT_UNSTRUCTURED_DESCRIPTION = os.getenv('CHATBOT_UNSTRUCTURED_DESCRIPTION')
+CHATBOT_AUTO_GRAPH = bool(int(os.getenv('CHATBOT_AUTO_GRAPH', '1')))
 AI_SDK_HOST = os.getenv('AI_SDK_URL', 'http://localhost:8008')
 AI_SDK_USERNAME = os.getenv('AI_SDK_USERNAME')
 AI_SDK_PASSWORD = os.getenv('AI_SDK_PASSWORD')
@@ -89,6 +90,7 @@ logging.info(f"    - Using SSL: {bool(CHATBOT_SSL_CERT and CHATBOT_SSL_KEY)}")
 logging.info(f"    - Reporting: {CHATBOT_REPORTING}")
 logging.info(f"    - Report Max Size: {CHATBOT_REPORT_MAX_SIZE}mb")
 logging.info(f"    - Feedback: {CHATBOT_FEEDBACK if CHATBOT_REPORTING else False}")
+logging.info(f"    - Auto Graph: {CHATBOT_AUTO_GRAPH}")
 logging.info("Connecting to AI SDK...")
 
 # Connect to AI SDK
@@ -181,11 +183,16 @@ class User(UserMixin):
         return tools
 
     def generate_tools_prompt(self):
+        if CHATBOT_AUTO_GRAPH:
+            database_query_tool = CHATBOT_DATABASE_QUERY_TOOL.format(auto_graph="I can request a plot of the data even if the user does not explicitly ask for it if I think it will help the user understand the data better.")
+        else:
+            database_query_tool = CHATBOT_DATABASE_QUERY_TOOL.format(auto_graph="I will only request a plot of the data if explicitly requested by the user.")
+
         if self.unstructured_vector_store:
             kb_tool_prompt = CHATBOT_KNOWLEDGE_BASE_TOOL.format(description=self.csv_file_description)
-            final_tools = "\n".join([CHATBOT_DATABASE_QUERY_TOOL, CHATBOT_METADATA_QUERY_TOOL, kb_tool_prompt])
+            final_tools = "\n".join([database_query_tool, CHATBOT_METADATA_QUERY_TOOL, kb_tool_prompt])
         else:
-            final_tools = "\n".join([CHATBOT_DATABASE_QUERY_TOOL, CHATBOT_METADATA_QUERY_TOOL])
+            final_tools = "\n".join([database_query_tool, CHATBOT_METADATA_QUERY_TOOL])
         return CHATBOT_TOOL_SELECTION_PROMPT.format(tools=final_tools)
 
     def get_or_create_chatbot(self):

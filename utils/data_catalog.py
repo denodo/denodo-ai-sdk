@@ -24,6 +24,7 @@ DATA_CATALOG_SERVER_ID = int(os.getenv('DATA_CATALOG_SERVER_ID', 1))
 DATA_CATALOG_METADATA_URL = f"{DATA_CATALOG_URL}public/api/askaquestion/data"
 DATA_CATALOG_EXECUTION_URL = f"{DATA_CATALOG_URL}public/api/askaquestion/execute"
 DATA_CATALOG_PERMISSIONS_URL = f"{DATA_CATALOG_URL}public/api/views/allowed-identifiers"
+DATA_CATALOG_INCREMENTAL_UPDATE_URL = f"{DATA_CATALOG_URL}public/api/ai-sdk/configuration"
 
 EXECUTE_VQL_LIMIT = 100
 
@@ -39,7 +40,6 @@ def get_views_metadata_documents(
     filter_tables=None,
     server_id=DATA_CATALOG_SERVER_ID,
     verify_ssl=DATA_CATALOG_VERIFY_SSL,
-    metadata_url=DATA_CATALOG_METADATA_URL,
     last_update_timestamp_ms=None,
     view_prefix_filter='',
     view_suffix_filter=''
@@ -74,8 +74,11 @@ def get_views_metadata_documents(
     # Set the appropriate logging message based on which parameter is provided
     entity_name = database_name if database_name is not None else tag_name
     entity_type = "database" if database_name is not None else "tag"
+
     logging.info(f"Starting to retrieve views metadata with {examples_per_table} examples per view on {entity_type} '{entity_name}'")
     
+    delete_view_ids = []
+
     def prepare_request_data(offset=None, limit=None):
         data = {
             "dataMode": data_mode,
@@ -114,7 +117,7 @@ def get_views_metadata_documents(
 
         # 1. Make request and raise any connection/HTTP errors
         response = requests.post(
-            f"{metadata_url}?serverId={server_id}",
+            f"{DATA_CATALOG_METADATA_URL}?serverId={server_id}",
             json=data,
             headers=headers,
             verify=verify_ssl
@@ -143,6 +146,7 @@ def get_views_metadata_documents(
         # If it's not a list, it's the old DC API (<9.1.0)
         if not isinstance(initial_response, list):
             views = initial_response.get('viewsDetails', initial_response)
+            delete_view_ids.extend(initial_response.get('deletedViewIdentifiers', []))
             total_views = len(views)
             logging.info(f"Total views retrieved: {total_views}")
         
@@ -175,7 +179,7 @@ def get_views_metadata_documents(
 
         logging.info(f"Total views retrieved: {len(all_views)}")
         
-        return parse_metadata_json(
+        processed_views = parse_metadata_json(
             json_response=all_views,
             use_associations=table_associations,
             use_descriptions=table_descriptions,
@@ -184,6 +188,8 @@ def get_views_metadata_documents(
             view_prefix_filter=view_prefix_filter,
             view_suffix_filter=view_suffix_filter
         )
+
+        return processed_views, delete_view_ids
 
     except requests.HTTPError as e:
         error_response = json.loads(e.response.text)
@@ -463,3 +469,64 @@ def parse_execution_json(json_response):
             })
 
     return parsed_data
+
+@timed
+def activate_incremental(
+    auth,
+    enabled=True,
+    server_id=DATA_CATALOG_SERVER_ID,
+    verify_ssl=DATA_CATALOG_VERIFY_SSL
+):
+    """
+    Enable or disable incremental metadata updates for the Data Catalog.
+    
+    Args:
+        auth: Either (username, password) tuple for basic auth or OAuth token string
+        enabled: Boolean flag to enable (True) or disable (False) incremental metadata updates
+        server_id: Server identifier (default is DATA_CATALOG_SERVER_ID)
+        incremental_update_url: The Data Catalog incremental update configuration URL
+        verify_ssl: Whether to verify SSL certificates
+        
+    Returns:
+        Tuple containing (status_code, response_message)
+    """
+    # Prepare headers based on auth type
+    headers = {
+        'accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': (
+            calculate_basic_auth_authorization_header(*auth) 
+            if isinstance(auth, tuple) 
+            else f'Bearer {auth}'
+        )
+    }
+    
+    # Prepare request data
+    data = {
+        "metadataChangesEnabled": enabled
+    }
+    
+    try:
+        response = requests.post(
+            f"{DATA_CATALOG_INCREMENTAL_UPDATE_URL}?serverId={server_id}",
+            json=data,
+            headers=headers,
+            verify=verify_ssl
+        )
+        response.raise_for_status()
+        logging.info(f"Incremental metadata updates {'enabled' if enabled else 'disabled'} successfully")
+        return response.status_code, f"Incremental metadata updates {'enabled' if enabled else 'disabled'} successfully"
+                
+    except requests.HTTPError as e:
+        try:
+            error_response = json.loads(e.response.text)
+            error_message = str(error_response.get('message', 'Data Catalog did not return further details'))
+        except (json.JSONDecodeError, AttributeError):
+            error_message = f"HTTP Error: {e.response.status_code} - {str(e)}"
+        logging.error(f"Failed to configure incremental metadata updates: {error_message}")
+        return e.response.status_code, error_message
+    
+    except requests.RequestException as e:
+        error_message = f"Failed to connect to the server: {str(e)}"
+        logging.error(error_message)
+        return 500, error_message

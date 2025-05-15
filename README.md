@@ -44,7 +44,12 @@ You may use this benchmark as reference to choose an LLM model.
 | Google      | Gemini 2.0 Flash          | 🟢                      | 2.42                      | 4,230            | 398              | $0.001            |
 
 Please note that "Input Tokens" and "Output Tokens" is the average input/output tokens per query.
-Also, any model with its size in the name, i.e Llama 3.1 **8b** represents an **open-source model**.
+Also, each color corresponds to the following range in terms of accuracy:
+- 🟢 = 90%+
+- 🟡 = 80–90%
+- 🔴 = <80%
+
+Finally, any model with its size in the name, i.e.: Llama 3.1 **8b**, represents an **open-source model**.
 
 ## List of supported LLM providers
 

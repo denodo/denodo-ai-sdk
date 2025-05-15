@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import json
 import random
 import inspect
 import uvicorn
@@ -10,8 +11,17 @@ import functools
 import traceback
 
 from time import time
-from fastapi import HTTPException
+from typing import Annotated
+from fastapi import HTTPException, Depends
+from fastapi.security import HTTPBasic, HTTPBearer, HTTPBasicCredentials, HTTPAuthorizationCredentials
 from contextlib import contextmanager
+
+from utils.data_catalog import get_views_metadata_documents
+from utils.uniformVectorStore import UniformVectorStore
+from utils.utils import schema_summary, prepare_schema, flatten_list, prepare_sample_data_schema, calculate_tokens
+
+security_basic = HTTPBasic(auto_error=False)
+security_bearer = HTTPBearer(auto_error=False)
 
 def add_tokens(token_set1, token_set2):
     return {key: token_set1[key] + token_set2[key] for key in token_set1}
@@ -315,3 +325,210 @@ def handle_endpoint_error(endpoint_name):
             return sync_wrapper
 
     return decorator
+
+async def stats_about_data(data_file, unique_values_limit = 20):
+    with open(data_file, 'r') as f:
+        data = json.load(f)
+
+    # Transform into a flat list of rows
+    rows = []
+    for _, columns in data.items():
+        row = {col["columnName"]: col["value"] for col in columns}
+        rows.append(row)
+
+    # Now you have a list of dicts
+    column_names = set()
+    for row in rows:
+        column_names.update(row.keys())
+    column_names = list(column_names)
+
+    # Analysis
+    info = {
+        "num_rows": len(rows),
+        "num_columns": len(column_names),
+        "columns": {}
+    }
+
+    for col in column_names:
+        values = [row.get(col) for row in rows]
+        non_null_values = [v for v in values if v is not None]
+        unique_values = list(set(non_null_values))
+        num_unique = len(unique_values)
+
+        # Try to infer type
+        try:
+            floats = [float(v) for v in non_null_values]
+            inferred_type = "float"
+            min_val = min(floats)
+            max_val = max(floats)
+        except (ValueError, TypeError):
+            inferred_type = "string"
+            min_val = None
+            max_val = None
+
+        info["columns"][col] = {
+            "inferred_type": inferred_type,
+            "num_unique": num_unique,
+            "min": min_val,
+            "max": max_val,
+            "num_missing": values.count(None),
+        }
+        
+        # Only add all unique_values if num_unique <= unique_values_limit
+        if num_unique <= unique_values_limit:
+            info["columns"][col]["unique_values"] = unique_values
+
+    return str(info)
+
+def authenticate(
+        basic_credentials: Annotated[HTTPBasicCredentials, Depends(security_basic)],
+        bearer_credentials: Annotated[HTTPAuthorizationCredentials, Depends(security_bearer)]
+        ):
+    if bearer_credentials is not None:
+        return bearer_credentials.credentials
+    elif basic_credentials is not None:
+        return (basic_credentials.username, basic_credentials.password)
+    else:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+def initialize_vector_stores(
+    vector_store_provider,
+    embeddings_provider,
+    embeddings_model,
+    rate_limit_rpm,
+    sample_data_enabled
+):
+    """
+    Initialize vector stores for metadata and optionally for sample data.
+    
+    Args:
+        vector_store_provider: Provider for the vector store
+        embeddings_provider: Provider for embeddings
+        embeddings_model: Model for embeddings
+        rate_limit_rpm: Rate limit in requests per minute
+        sample_data_enabled: Whether to initialize a sample data vector store
+        
+    Returns:
+        Tuple of (metadata_vector_store, sample_data_vector_store)
+    """
+    vector_store = UniformVectorStore(
+        provider=vector_store_provider,
+        embeddings_provider=embeddings_provider,
+        embeddings_model=embeddings_model,
+        rate_limit_rpm=rate_limit_rpm,
+    )
+    
+    sample_data_vector_store = None
+    if sample_data_enabled:
+        sample_data_vector_store = UniformVectorStore(
+            provider=vector_store_provider,
+            embeddings_provider=embeddings_provider,
+            embeddings_model=embeddings_model,
+            rate_limit_rpm=rate_limit_rpm,
+            index_name="ai_sdk_sample_data"
+        )
+    
+    return vector_store, sample_data_vector_store
+
+def process_metadata_source(
+    source_type,
+    source_name,
+    request,
+    auth,
+    vector_store,
+    sample_data_vector_store
+):
+    """
+    Process metadata from a source (tag or database).
+    
+    Args:
+        source_type: 'TAG' or 'DATABASE'
+        source_name: Name of the tag or database
+        request: Request object with processing parameters
+        auth: Authentication credentials
+        vector_store: Vector store for metadata
+        sample_data_vector_store: Vector store for sample data
+        
+    Returns:
+        Tuple of (db_schema, db_schema_text)
+    """
+    
+    if vector_store and request.incremental:
+        last_update = vector_store.get_last_update(source_type=source_type, source_name=source_name)
+    else:
+        last_update = None
+    
+    # Prepare arguments for get_views_metadata_documents
+    kwargs = {
+        "auth": auth,
+        "examples_per_table": request.examples_per_table,
+        "table_descriptions": request.view_descriptions,
+        "table_associations": request.associations,
+        "table_column_descriptions": request.column_descriptions,
+        "last_update_timestamp_ms": last_update,
+        "view_prefix_filter": request.view_prefix_filter,
+        "view_suffix_filter": request.view_suffix_filter
+    }
+    
+    # Add source-specific parameter
+    if source_type == "TAG":
+        kwargs["tag_name"] = source_name
+    elif source_type == "DATABASE":
+        kwargs["database_name"] = source_name
+    else:
+        raise ValueError(f"Invalid source type: {source_type}")
+
+    # Get metadata documents
+    result, delete_view_ids = get_views_metadata_documents(**kwargs)
+
+    # Handle view deletions if needed
+    if delete_view_ids and vector_store:
+        vector_store.delete(ids=delete_view_ids)
+    
+    # Validate response
+    if not result:
+        raise ValueError(f"Empty response from the Denodo Data Catalog for {source_type.lower()} {source_name}")
+    
+    # Process schema
+    if isinstance(result, dict):
+        db_schema = result
+        logging.info(f"{source_type} schema for {source_name} has {calculate_tokens(str(db_schema))} tokens.")
+        db_schema_text = [schema_summary(table) for table in db_schema['views']]
+        
+        # Add to vector store if provided
+        if vector_store:
+            views = flatten_list(prepare_schema(db_schema, request.embeddings_token_limit))
+            vector_store.add_views(
+                views=views,
+                parallel=request.parallel,
+                source_type=source_type,
+                source_name=source_name
+            )
+
+        # Add sample data if enabled
+        if sample_data_vector_store:
+            views = flatten_list(prepare_sample_data_schema(db_schema))
+            sample_data_vector_store.add_views(
+                views=views,
+                parallel=request.parallel,
+                source_type=source_type,
+                source_name=source_name,
+            )
+        
+        return db_schema, db_schema_text
+    
+    # If not a dict, return empty results
+    return {}, []
+
+def format_metadata_response(
+    all_db_schemas,
+    all_db_schema_texts,
+    vdb_database_names,
+    vdb_tag_names
+):
+    return {
+        'db_schema_json': all_db_schemas,
+        'db_schema_text': all_db_schema_texts,
+        'vdb_list': vdb_database_names,
+        'tag_list': vdb_tag_names
+    }

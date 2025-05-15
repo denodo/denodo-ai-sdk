@@ -12,114 +12,19 @@ import os
 import logging
 
 from pydantic import BaseModel
-from typing import Dict, List, Annotated
+from typing import Dict, List
 
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.security import HTTPBasic, HTTPBearer, HTTPBasicCredentials, HTTPAuthorizationCredentials
 
-from utils.uniformVectorStore import UniformVectorStore
-from utils.data_catalog import get_views_metadata_documents
-from utils.utils import calculate_tokens, schema_summary, prepare_schema, flatten_list, prepare_sample_data_schema
-from api.utils.sdk_utils import handle_endpoint_error
+from utils.data_catalog import activate_incremental
+from api.utils.sdk_utils import (
+    handle_endpoint_error, authenticate, initialize_vector_stores, 
+    process_metadata_source, format_metadata_response
+)
 
 router = APIRouter()
-security_basic = HTTPBasic(auto_error = False)
-security_bearer = HTTPBearer(auto_error = False)
-    
-def authenticate(
-        basic_credentials: Annotated[HTTPBasicCredentials, Depends(security_basic)],
-        bearer_credentials: Annotated[HTTPAuthorizationCredentials, Depends(security_bearer)]
-        ):
-    if bearer_credentials is not None:
-        return bearer_credentials.credentials
-    elif basic_credentials is not None:
-        return (basic_credentials.username, basic_credentials.password)
-    else:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
-def process_tag(tag_name, request, auth, vector_store, sample_data_vector_store):
-    if vector_store:
-        last_update = vector_store.get_last_update()
-    else:
-        last_update = None
-
-    result = get_views_metadata_documents(
-        tag_name=tag_name,
-        auth=auth,
-        examples_per_table=request.examples_per_table,
-        table_descriptions=request.view_descriptions,
-        table_associations=request.associations,
-        table_column_descriptions=request.column_descriptions,
-        last_update_timestamp_ms=last_update,
-        view_prefix_filter=request.view_prefix_filter,
-        view_suffix_filter=request.view_suffix_filter
-    )
-    
-    if not result:
-        raise ValueError(f"Empty response from the Denodo Data Catalog for tag {tag_name}")
-    
-    if isinstance(result, dict):
-        db_schema = result
-        logging.info(f"Tag schema for {tag_name} has {calculate_tokens(str(db_schema))} tokens.")
-        db_schema_text = [schema_summary(table) for table in db_schema['views']]
-        
-        if vector_store:
-            views = flatten_list(prepare_schema(db_schema, request.embeddings_token_limit))
-            vector_store.add_views(
-                views=views,
-                parallel=request.parallel
-            )
-
-        if sample_data_vector_store:
-            views = flatten_list(prepare_sample_data_schema(db_schema))
-            sample_data_vector_store.add_views(
-                views=views,
-                parallel=request.parallel
-            )
-        return db_schema, db_schema_text
-
-def process_database(db_name, request, auth, vector_store, sample_data_vector_store):
-    if vector_store:
-        last_update = vector_store.get_last_update()
-    else:
-        last_update = None
-
-    result = get_views_metadata_documents(
-        database_name=db_name, 
-        auth=auth,
-        examples_per_table=request.examples_per_table, 
-        table_descriptions=request.view_descriptions, 
-        table_associations=request.associations,
-        table_column_descriptions=request.column_descriptions,
-        last_update_timestamp_ms=last_update,
-        view_prefix_filter=request.view_prefix_filter,
-        view_suffix_filter=request.view_suffix_filter
-    )
-    
-    if not result:
-        raise ValueError(f"Empty response from the Denodo Data Catalog for database {db_name}")
-    
-    if isinstance(result, dict):
-        db_schema = result
-        logging.info(f"Database schema for {db_name} has {calculate_tokens(str(db_schema))} tokens.")
-        db_schema_text = [schema_summary(table) for table in db_schema['views']]
-        
-        if vector_store:
-            views = flatten_list(prepare_schema(db_schema, request.embeddings_token_limit))
-            vector_store.add_views(
-                views=views,
-                parallel=request.parallel
-            )
-        
-        if sample_data_vector_store:
-            views = flatten_list(prepare_sample_data_schema(db_schema))
-            sample_data_vector_store.add_views(
-                views=views,
-                parallel=request.parallel
-            )        
-        return db_schema, db_schema_text
 
 class getMetadataRequest(BaseModel):
     vdp_database_names: str = os.getenv('VDB_NAMES', '')
@@ -136,13 +41,18 @@ class getMetadataRequest(BaseModel):
     view_prefix_filter: str = ''
     view_suffix_filter: str = ''
     insert: bool = True
+    incremental: bool = True
     parallel: bool = True
+
+class TableSummary(BaseModel):
+    summary: str
 
 class getMetadataResponse(BaseModel):
     db_schema_json: Dict
     db_schema_text: List[str]
     vdb_list: List[str]
     tag_list: List[str]
+
     
 @router.get(
         '/getMetadata',
@@ -157,12 +67,19 @@ def getMetadata(endpoint_request: getMetadataRequest = Depends(), auth: str = De
 
     You can use the view_prefix_filter and view_suffix_filter parameters to filter the views that are inserted into the vector store.
     For example, if you set view_prefix_filter to "vdp_", only views that start with "vdp_" will be inserted into the vector store.
+
+    For first-time vectorization, please set incremental to False. This will vectorize all views associated with the indicated databases/tags.
+    After that, you can call getMetadata with incremental set to True to only vectorize views that have been modified since the last sync.
     """
     vdp_database_names = [db.strip() for db in endpoint_request.vdp_database_names.split(',') if db]
     vdp_tag_names = [tag.strip() for tag in endpoint_request.vdp_tag_names.split(',') if tag]
 
     if not vdp_database_names and not vdp_tag_names:
         raise HTTPException(status_code=400, detail="At least one database or tag must be provided")
+    
+    if endpoint_request.incremental:
+        status_code, response_message = activate_incremental(auth)
+        logging.info(f"Received status code {status_code} and response message {response_message}")
 
     all_db_schemas = []
     all_db_schema_texts = []
@@ -170,31 +87,26 @@ def getMetadata(endpoint_request: getMetadataRequest = Depends(), auth: str = De
     vector_store = None
     sample_data_vector_store = None
 
+    # Initialize vector stores if needed
     if endpoint_request.insert:
-        vector_store = UniformVectorStore(
-            provider=endpoint_request.vector_store_provider,
+        vector_store, sample_data_vector_store = initialize_vector_stores(
+            vector_store_provider=endpoint_request.vector_store_provider,
             embeddings_provider=endpoint_request.embeddings_provider,
             embeddings_model=endpoint_request.embeddings_model,
             rate_limit_rpm=endpoint_request.rate_limit_rpm,
+            sample_data_enabled=endpoint_request.examples_per_table > 0
         )
-
-        if endpoint_request.examples_per_table > 0:
-            sample_data_vector_store = UniformVectorStore(
-                provider=endpoint_request.vector_store_provider,
-                embeddings_provider=endpoint_request.embeddings_provider,
-                embeddings_model=endpoint_request.embeddings_model,
-                rate_limit_rpm=endpoint_request.rate_limit_rpm,
-                index_name="ai_sdk_sample_data"
-            )
     
+    # Process tags
     for tag_name in vdp_tag_names:
         try:
-            db_schema, db_schema_text = process_tag(
-                tag_name=tag_name,
+            db_schema, db_schema_text = process_metadata_source(
+                source_type="TAG",
+                source_name=tag_name,
                 request=endpoint_request,
                 auth=auth,
                 vector_store=vector_store,
-                sample_data_vector_store=sample_data_vector_store,
+                sample_data_vector_store=sample_data_vector_store
             )
             
             all_db_schemas.append(db_schema)
@@ -203,11 +115,13 @@ def getMetadata(endpoint_request: getMetadataRequest = Depends(), auth: str = De
             logging.error(f"Error processing tag: {ve}")
             continue
 
+    # Process databases
     for db_name in vdp_database_names:
         try:
-            db_schema, db_schema_text = process_database(
-                db_name=db_name, 
-                request=endpoint_request, 
+            db_schema, db_schema_text = process_metadata_source(
+                source_type="DATABASE",
+                source_name=db_name,
+                request=endpoint_request,
                 auth=auth,
                 vector_store=vector_store,
                 sample_data_vector_store=sample_data_vector_store
@@ -222,11 +136,12 @@ def getMetadata(endpoint_request: getMetadataRequest = Depends(), auth: str = De
     if len(all_db_schemas) == 0:
         raise HTTPException(status_code=204, detail=f"Data Catalog returned empty response for: {vdp_database_names}")
 
-    response = {
-        'db_schema_json': all_db_schemas,
-        'db_schema_text': all_db_schema_texts,
-        'vdb_list': vdp_database_names,
-        'tag_list': vdp_tag_names
-    }
+    # Format and return response
+    response = format_metadata_response(
+        all_db_schemas=all_db_schemas,
+        all_db_schema_texts=all_db_schema_texts,
+        vdb_database_names=vdp_database_names,
+        vdb_tag_names=vdp_tag_names
+    )
 
-    return JSONResponse(content = jsonable_encoder(response), media_type = "application/json")
+    return JSONResponse(content=jsonable_encoder(response), media_type="application/json")

@@ -32,7 +32,7 @@ def denodo_query(natural_language_query, api_host, username, password, database_
         'question': natural_language_query,
         'mode': 'data',
         'verbose': False,
-        'plot': bool(plot),
+        'plot': bool(int(plot)),
         'plot_details': plot_details,
         'custom_instructions': custom_instructions,
     }
