@@ -450,7 +450,7 @@ async def sql_category(query, vector_search_tables, llm, mode = 'default', custo
 @utils.log_params
 @utils.timed
 async def graph_generator(
-    query, data_file, execution_result, llm,
+    query, plot_data, llm,
     details = 'No special requirements',
     session_id = None
 ):
@@ -458,15 +458,13 @@ async def graph_generator(
     final_prompt = PromptTemplate.from_template(GENERATE_VISUALIZATION_PROMPT)
     final_chain = final_prompt | llm.llm | StrOutputParser()
 
-    # Get the first 3 available rows in execution_result, if they exist
-    sample_data = {f"Row {i+1}": execution_result[f"Row {i+1}"] for i in range(3) if f"Row {i+1}" in execution_result}
-
+    execution_result_df = sdk_utils.execution_result_to_dataframe(plot_data)
+    data_stats = sdk_utils.dataframe_stats(execution_result_df)
     response = await final_chain.ainvoke({
-        "data": data_file, 
         "instruction": query,
         "plot_details": details,
-        "sample_data": json.dumps(sample_data),
-        "sample_data_stats": await sdk_utils.stats_about_data(data_file)
+        "sample_data": json.dumps(execution_result_df[:3].to_dict(orient='records')),
+        "sample_data_stats": data_stats
     }, 
         config = {
             "callbacks": utils.add_langfuse_callback(llm.callback, f"{llm.provider_name}.{llm.model_name}", session_id),
@@ -474,11 +472,20 @@ async def graph_generator(
         }
     )
     
+    response = response.replace('```python', '<python>').replace('```', '</python').strip()
     python_code = utils.custom_tag_parser(response, 'python', default = '')[0].strip()
-    python_code = GENERATE_VISUALIZATION_PYTHON_TEMPLATE.format(data=data_file, python_code=python_code)
 
-    python_repl = PythonREPL()
+    if not python_code:
+        return "LLM failed to generate a valid Python code, please try again.", llm.tokens
+    
+    python_code = GENERATE_VISUALIZATION_PYTHON_TEMPLATE.format(python_code=python_code)
+
+    python_repl = PythonREPL(_locals={"data": execution_result_df})
     output = await asyncio.to_thread(python_repl.run, python_code)
+
+    if not output.startswith('data:image'):
+        logging.error(f"LLM failed to generate a valid Python code, please try again. LLM output: {output}")
+        return "LLM failed to generate a valid Python code, please try again.", llm.tokens
 
     # Check if the \n at the end of the string and remove it
     if output.endswith("\n"):

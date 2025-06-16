@@ -1,7 +1,3 @@
-import os
-import json
-import random
-import string
 import asyncio
 
 from api.utils import sdk_ai_tools
@@ -9,7 +5,7 @@ from utils.data_catalog import execute_vql
 from utils.utils import custom_tag_parser, add_langfuse_callback
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from api.utils.sdk_utils import timing_context, is_data_complex, add_tokens
+from api.utils.sdk_utils import timing_context, add_tokens
 
 async def process_sql_category(request, vector_search_tables, sql_gen_llm, chat_llm, category_response, auth, timings, session_id = None, sample_data = None):
     with timing_context("llm_time", timings):
@@ -79,7 +75,7 @@ async def process_sql_category(request, vector_search_tables, sql_gen_llm, chat_
         vql_status_code=vql_status_code
     )
 
-    raw_graph, data_file, request = handle_plotting(request=request, execution_result=execution_result)
+    raw_graph, plot_data, request = handle_plotting(request=request, execution_result=execution_result)
 
     response = prepare_response(
         vql_query=vql_query, 
@@ -98,7 +94,7 @@ async def process_sql_category(request, vector_search_tables, sql_gen_llm, chat_
             vql_query=vql_query, 
             llm_execution_result=llm_execution_result, 
             vector_search_tables=vector_search_tables, 
-            data_file=data_file, 
+            plot_data=plot_data, 
             timings=timings,
             session_id=session_id,
             sample_data=sample_data,
@@ -108,9 +104,6 @@ async def process_sql_category(request, vector_search_tables, sql_gen_llm, chat_
 
     if request.disclaimer:
         response['answer'] += "\n\nDISCLAIMER: This response has been generated based on an LLM's interpretation of the data and may not be accurate."
-
-    if os.path.exists(data_file):
-        os.remove(data_file)
 
     return response
 
@@ -232,18 +225,15 @@ def prepare_execution_result(execution_result, vql_status_code):
 
 def handle_plotting(request, execution_result):
     if not request.plot:
-        return '', '', request
+        return '', None, request
 
-    if is_data_complex(execution_result):
-        random_id = ''.join(random.choices(string.ascii_letters + string.digits, k=4))
-        data_file = f'data_{random_id}.json'
-        with open(data_file, 'w') as f:
-            json.dump(execution_result, f)
+    if execution_result and isinstance(execution_result, dict) and len(execution_result.items()) > 0:
+        plot_data = execution_result
     else:
-        data_file = ''
+        plot_data = None
         request.plot = False
 
-    return '', data_file, request
+    return '', plot_data, request
 
 def prepare_response(vql_query, query_explanation, tokens, execution_result, vector_search_tables, raw_graph, timings):
     #Remove conditions from query explanation as it contains sample data the final user might not have access to
@@ -264,15 +254,18 @@ def prepare_response(vql_query, query_explanation, tokens, execution_result, vec
         "total_execution_time": round(sum(timings.values()), 2)
     }
 
-async def enhance_verbose_response(request, response, vql_query, llm_execution_result, vector_search_tables, data_file, timings, chat_llm, sql_gen_llm, session_id = None, sample_data = None):
+async def enhance_verbose_response(
+    request, response, vql_query, llm_execution_result,
+    vector_search_tables, plot_data, timings, chat_llm, sql_gen_llm,
+    session_id = None, sample_data = None
+):
     with timing_context("llm_time", timings):
         tasks = []
         
         if request.plot:
             graph_task = sdk_ai_tools.graph_generator(
                 query=request.question,
-                data_file=data_file,
-                execution_result=response['execution_result'],
+                plot_data=plot_data,
                 llm=sql_gen_llm,
                 details=request.plot_details,
                 session_id=session_id

@@ -1,3 +1,8 @@
+version 0.8.2 - 20250616
+------------------------
+
+- Fixed bug with some LLMs that would return a blank graph
+
 version 0.8.1 - 20250515
 ------------------------
 

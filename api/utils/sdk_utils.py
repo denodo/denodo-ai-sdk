@@ -9,6 +9,7 @@ import logging
 import requests
 import functools
 import traceback
+import pandas as pd
 
 from time import time
 from typing import Annotated
@@ -326,10 +327,7 @@ def handle_endpoint_error(endpoint_name):
 
     return decorator
 
-async def stats_about_data(data_file, unique_values_limit = 20):
-    with open(data_file, 'r') as f:
-        data = json.load(f)
-
+async def stats_about_data(data, unique_values_limit = 20):
     # Transform into a flat list of rows
     rows = []
     for _, columns in data.items():
@@ -378,6 +376,47 @@ async def stats_about_data(data_file, unique_values_limit = 20):
         if num_unique <= unique_values_limit:
             info["columns"][col]["unique_values"] = unique_values
 
+    return str(info)
+
+def dataframe_stats(df, unique_values_limit=20):
+    info = {
+        "num_rows": len(df),
+        "num_columns": len(df.columns),
+        "columns": {}
+    }
+    
+    for col in df.columns:
+        values = df[col]
+        non_null_values = values.dropna()
+        unique_values = non_null_values.unique()
+        num_unique = len(unique_values)
+        
+        # Determine type and min/max values
+        if pd.api.types.is_numeric_dtype(df[col]):
+            dtype = str(df[col].dtype)
+            min_val = float(non_null_values.min()) if len(non_null_values) > 0 else None
+            max_val = float(non_null_values.max()) if len(non_null_values) > 0 else None
+        else:
+            dtype = str(df[col].dtype)
+        
+        info["columns"][col] = {
+            "dtype": dtype,
+            "num_unique_values": num_unique,
+            "num_missing": int(values.isna().sum()),
+        }
+
+        if pd.api.types.is_numeric_dtype(df[col]):
+            info["columns"][col]["min"] = min_val
+            info["columns"][col]["max"] = max_val
+        
+        # Only add unique values if number is below the limit
+        if num_unique <= unique_values_limit:
+            # Convert values to Python native types for serialization
+            if pd.api.types.is_numeric_dtype(unique_values):
+                info["columns"][col]["unique_values"] = unique_values.tolist()
+            else:
+                info["columns"][col]["unique_values"] = [str(v) for v in unique_values]
+    
     return str(info)
 
 def authenticate(
@@ -532,3 +571,38 @@ def format_metadata_response(
         'vdb_list': vdb_database_names,
         'tag_list': vdb_tag_names
     }
+
+def execution_result_to_dataframe(data):
+    # Initialize an empty list to store row data
+    rows = []
+    
+    # Sort the keys to preserve order (e.g., "Row 1", "Row 2", etc.)
+    sorted_keys = sorted(data.keys(), key=lambda k: int(re.search(r'\d+', k).group()) if re.search(r'\d+', k) else float('inf'))
+    
+    # Process each row in the JSON data in order
+    for row_key in sorted_keys:
+        columns = data[row_key]
+        
+        # Create a dictionary for the current row
+        row_dict = {}
+        
+        # Extract column name and value for each item in the row
+        for item in columns:
+            column_name = item["columnName"]
+            value = item["value"]
+            
+            # Try to convert numeric values
+            try:
+                value = float(value)
+            except (ValueError, TypeError):
+                pass
+                
+            row_dict[column_name] = value
+            
+        # Add the row dictionary to our list
+        rows.append(row_dict)
+    
+    # Create DataFrame from the list of dictionaries
+    df = pd.DataFrame(rows)
+    
+    return df
