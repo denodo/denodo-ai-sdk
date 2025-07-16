@@ -5,18 +5,22 @@ import hashlib
 import logging
 import warnings
 import threading
+import logging.config
 
 from flask_httpauth import HTTPBasicAuth
-from flask import Flask, Response, request, jsonify, send_from_directory
+from flask import Flask, Response, request, jsonify, send_from_directory, Blueprint
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 
+from utils.logging_utils import get_logging_config
 from utils.uniformLLM import UniformLLM
+from utils.uniformEmbeddings import UniformEmbeddings
 from utils.uniformVectorStore import UniformVectorStore
+from utils.utils import normalize_root_path
 from sample_chatbot.chatbot_engine import ChatbotEngine
 from sample_chatbot.chatbot_config_loader import load_config
 from sample_chatbot.chatbot_tools import denodo_query, metadata_query, kb_lookup
 from sample_chatbot.chatbot_utils import ai_sdk_health_check, get_relevant_tables, setup_user_details
-from sample_chatbot.chatbot_utils import dummy_login, prepare_unstructured_vector_store, check_env_variables, connect_to_ai_sdk, process_chunk, setup_directories, write_to_report, update_feedback_in_report
+from sample_chatbot.chatbot_utils import prepare_unstructured_vector_store, check_env_variables, connect_to_ai_sdk, process_chunk, setup_directories, write_to_report, update_feedback_in_report
 
 required_vars = [
     'CHATBOT_LLM_PROVIDER',
@@ -41,13 +45,8 @@ load_config()
 check_env_variables(required_vars)
 
 # Set up logging
-logging.basicConfig(
-    stream=sys.stdout,
-    level=logging.INFO,
-    format='[%(asctime)s] [%(process)d] [%(levelname)s] %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S %z',
-    encoding='utf-8'
-)
+log_config = get_logging_config()
+logging.config.dictConfig(log_config)
 
 # Create upload folder if it doesn't exist to store unstructured csv files
 setup_directories()
@@ -55,6 +54,7 @@ setup_directories()
 # Environment variable lookup
 CHATBOT_LLM_PROVIDER = os.environ['CHATBOT_LLM_PROVIDER']
 CHATBOT_LLM_MODEL = os.environ['CHATBOT_LLM_MODEL']
+CHATBOT_LLM_RESPONSE_ROWS_LIMIT = int(os.getenv('CHATBOT_LLM_RESPONSE_ROWS_LIMIT', '15'))
 CHATBOT_EMBEDDINGS_PROVIDER = os.environ['CHATBOT_EMBEDDINGS_PROVIDER']
 CHATBOT_EMBEDDINGS_MODEL = os.environ['CHATBOT_EMBEDDINGS_MODEL']
 CHATBOT_VECTOR_STORE_PROVIDER = os.environ['CHATBOT_VECTOR_STORE_PROVIDER']
@@ -65,6 +65,7 @@ CHATBOT_METADATA_QUERY_TOOL = os.environ['METADATA_QUERY_TOOL']
 CHATBOT_DATABASE_QUERY_TOOL = os.environ['DATABASE_QUERY_TOOL']
 CHATBOT_HOST = os.getenv('CHATBOT_HOST', '0.0.0.0')
 CHATBOT_PORT = int(os.getenv('CHATBOT_PORT', 9992))
+CHATBOT_ROOT_PATH = normalize_root_path(os.getenv("CHATBOT_ROOT_PATH", ""))
 CHATBOT_SSL_CERT = os.getenv('CHATBOT_SSL_CERT')
 CHATBOT_SSL_KEY = os.getenv('CHATBOT_SSL_KEY')
 CHATBOT_REPORTING = bool(int(os.getenv('CHATBOT_REPORTING', '0')))
@@ -74,6 +75,7 @@ CHATBOT_UNSTRUCTURED_MODE = bool(int(os.getenv('CHATBOT_UNSTRUCTURED_MODE', '1')
 CHATBOT_UNSTRUCTURED_INDEX = os.getenv('CHATBOT_UNSTRUCTURED_INDEX')
 CHATBOT_UNSTRUCTURED_DESCRIPTION = os.getenv('CHATBOT_UNSTRUCTURED_DESCRIPTION')
 CHATBOT_AUTO_GRAPH = bool(int(os.getenv('CHATBOT_AUTO_GRAPH', '1')))
+CHATBOT_SYNC_VDBS_TIMEOUT = int(os.getenv('CHATBOT_SYNC_VDBS_TIMEOUT', '600000'))
 AI_SDK_HOST = os.getenv('AI_SDK_URL', 'http://localhost:8008')
 AI_SDK_USERNAME = os.getenv('AI_SDK_USERNAME')
 AI_SDK_PASSWORD = os.getenv('AI_SDK_PASSWORD')
@@ -102,9 +104,11 @@ else:
 
 app = Flask(__name__, static_folder = 'frontend/build')
 app.config['UPLOAD_FOLDER'] = "uploads"
+app.config['APPLICATION_ROOT'] = CHATBOT_ROOT_PATH
 app.secret_key = os.urandom(24)
 app.session_interface.digest_method = staticmethod(hashlib.sha256)
 auth = HTTPBasicAuth()
+chatbot_bp = Blueprint('chatbot', __name__)
 
 # Flask-Login setup
 login_manager = LoginManager()
@@ -142,11 +146,11 @@ class User(UserMixin):
     def check_custom_kb(self):
         if CHATBOT_UNSTRUCTURED_INDEX and CHATBOT_UNSTRUCTURED_DESCRIPTION:
             self.csv_file_description = CHATBOT_UNSTRUCTURED_DESCRIPTION
+            embeddings = UniformEmbeddings(CHATBOT_EMBEDDINGS_PROVIDER, CHATBOT_EMBEDDINGS_MODEL).model
             self.unstructured_vector_store = UniformVectorStore(
                 index_name=CHATBOT_UNSTRUCTURED_INDEX,
                 provider=CHATBOT_VECTOR_STORE_PROVIDER,
-                embeddings_provider=CHATBOT_EMBEDDINGS_PROVIDER,
-                embeddings_model=CHATBOT_EMBEDDINGS_MODEL
+                embeddings=embeddings
             )
 
     def set_csv_data(self, csv_file_path, csv_file_description, delimiter = ";"):
@@ -199,6 +203,7 @@ class User(UserMixin):
         if not self.chatbot:
             self.chatbot = ChatbotEngine(
                 llm=llm,
+                llm_response_rows_limit=CHATBOT_LLM_RESPONSE_ROWS_LIMIT,
                 system_prompt=CHATBOT_SYSTEM_PROMPT,
                 tool_selection_prompt=self.tools_prompt,
                 tools=self.tools,
@@ -218,39 +223,42 @@ report_lock = threading.Lock()
 def load_user(user_id):
     return users.get(user_id)
 
-@auth.verify_password
-def verify_password(username, password):
-    if dummy_login(AI_SDK_HOST, username, password):
-        return username
-    return None
-
-@app.route("/login", methods=["POST"])
+@chatbot_bp.route("/login", methods=["POST"])
 def login():
     data = request.json
     username = data.get('username')
     password = data.get('password')
 
-    if not username or not password or not verify_password(username, password):
-        return jsonify({"success": False, "message": "Invalid credentials"}), 401
-    
-    csv_file_path = request.json.get('csv_file_path')
-    csv_file_description = request.json.get('csv_file_description')
-    
-    user = User(username, password)
-    users[username] = user
-    login_user(user)
-    result, relevant_tables = get_relevant_tables(
+    if not username or not password:
+        return jsonify({"success": False, "message": "Username and password are required"}), 400
+
+    status, response_data = get_relevant_tables(
         api_host=AI_SDK_HOST,
         username=username,
         password=password,
         query="views"
     )
 
-    if result and relevant_tables:
+    if status != 200:
+        if status == 401:
+            return jsonify({"success": False, "message": "Invalid credentials"}), 401
+        else:
+            return jsonify({"success": False, "message": response_data}), status
+    
+    relevant_tables = response_data
+
+    user = User(username, password)
+    users[username] = user
+    login_user(user)
+
+    if relevant_tables:
         user.denodo_tables = "Some of the views in the user's Denodo instance: " + ", ".join(relevant_tables) + "... Use the Metadata tool to query all."
     else:
-        user.denodo_tables = "No views where found in the user's Denodo instance. Either the user has no views, the connection is failing or he does not have enough permissions. Use the Metadata tool to check."
-    
+        user.denodo_tables = "No views were found in the user's Denodo instance. Either the user has no views, the connection is failing or he does not have enough permissions. Use the Metadata tool to check."
+
+    csv_file_path = request.json.get('csv_file_path')
+    csv_file_description = request.json.get('csv_file_description')
+
     if csv_file_path and csv_file_description:
         user.set_csv_data(csv_file_path, csv_file_description)
         if not user.unstructured_vector_store:
@@ -258,7 +266,7 @@ def login():
 
     return jsonify({"success": True}), 200
 
-@app.route('/update_csv', methods=['POST'])
+@chatbot_bp.route('/update_csv', methods=['POST'])
 @login_required
 def update_csv():
     if 'file' not in request.files:
@@ -270,7 +278,7 @@ def update_csv():
     if file.filename == '':
         return jsonify({"error": "No selected file"}), 400
     
-    if file and csv_file_description:        
+    if file and csv_file_description:       
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
         file.save(file_path)
         
@@ -281,7 +289,7 @@ def update_csv():
     
     return jsonify({"error": "Missing file or description"}), 400
 
-@app.route('/question', methods=['GET'])
+@chatbot_bp.route('/question', methods=['GET'])
 @login_required
 def question():
     query = request.args.get('query')
@@ -308,13 +316,13 @@ def question():
             
     return Response(generate(), mimetype='text/event-stream')
 
-@app.route('/clear_history', methods=['POST'])
+@chatbot_bp.route('/clear_history', methods=['POST'])
 @login_required
 def clear_history():
     current_user.chatbot = None
     return jsonify({"message": f"Chat history cleared for user {current_user.id}"})
 
-@app.route("/sync_vdbs", methods=["POST"])
+@chatbot_bp.route("/sync_vdbs", methods=["POST"])
 @login_required
 def sync_vdbs():
     if not AI_SDK_USERNAME or not AI_SDK_PASSWORD:
@@ -323,20 +331,22 @@ def sync_vdbs():
     vdbs_to_sync = request.json.get('vdbs', [])    
     tags_to_sync = request.json.get('tags', [])
     examples_per_table = request.json.get('examples_per_table', 100)
+    incremental = request.json.get('incremental', True)
     parallel = request.json.get('parallel', True)
     
-    success, result = connect_to_ai_sdk(
+    status, result = connect_to_ai_sdk(
         api_host=AI_SDK_HOST, 
         username=AI_SDK_USERNAME, 
         password=AI_SDK_PASSWORD, 
         insert=True,
         examples_per_table=examples_per_table,
+        incremental=incremental,
         parallel=parallel,
         vdp_database_names=vdbs_to_sync,
         vdp_tag_names=tags_to_sync
     )
 
-    if success:
+    if status == 200:
         result, relevant_tables = get_relevant_tables(
             api_host=AI_SDK_HOST,
             username=current_user.id,
@@ -350,11 +360,13 @@ def sync_vdbs():
         else:
             current_user.denodo_tables = "No views where found in the user's Denodo instance. Either the user has no views, the connection is failing or he does not have enough permissions. Use the Metadata tool to check."
 
-        return jsonify({"success": True, "message": f"VectorDB synchronization successful for VDBs: {result}"}), 200
+        return jsonify({"success": True, "message": f"VectorDB synchronization successful for VDBs: {result}"}), status
+    elif status == 204:
+        return jsonify({"success": True, "message": result}), status
     else:
-        return jsonify({"success": False, "message": result}), 500
+        return jsonify({"success": False, "message": result}), status
     
-@app.route('/logout', methods=['POST'])
+@chatbot_bp.route('/logout', methods=['POST'])
 @login_required
 def logout():
     username = current_user.id
@@ -362,20 +374,22 @@ def logout():
     logout_user()
     return jsonify({"success": True, "message": "Logged out successfully"}), 200
 
-@app.route('/api/config', methods=['GET'])
+@chatbot_bp.route('/api/config', methods=['GET'])
 def get_config():
     """Endpoint to expose configuration variables to the frontend."""
     # Only include dataCatalogUrl if it's explicitly set in the environment
     config = {
         "hasAISDKCredentials": bool(AI_SDK_USERNAME and AI_SDK_PASSWORD),
         "chatbotFeedback": CHATBOT_FEEDBACK if CHATBOT_REPORTING else False,
-        "unstructuredMode": CHATBOT_UNSTRUCTURED_MODE
+        "unstructuredMode": CHATBOT_UNSTRUCTURED_MODE,
+        "syncTimeout": CHATBOT_SYNC_VDBS_TIMEOUT,
+        "llm_response_rows_limit": CHATBOT_LLM_RESPONSE_ROWS_LIMIT
     }
     if DATA_CATALOG_URL:
         config["dataCatalogUrl"] = DATA_CATALOG_URL.rstrip('/')
     return jsonify(config)
 
-@app.route('/update_custom_instructions', methods=['POST'])
+@chatbot_bp.route('/update_custom_instructions', methods=['POST'])
 @login_required
 def update_custom_instructions():
     data = request.json
@@ -388,12 +402,12 @@ def update_custom_instructions():
     
     return jsonify({"message": "Profile updated successfully"}), 200
 
-@app.route('/current_user', methods=['GET'])
+@chatbot_bp.route('/current_user', methods=['GET'])
 @login_required
 def get_current_user():
     return jsonify({"username": current_user.id}), 200
 
-@app.route('/submit_feedback', methods=['POST'])
+@chatbot_bp.route('/submit_feedback', methods=['POST'])
 @login_required
 def submit_feedback():
     if not CHATBOT_REPORTING:
@@ -414,13 +428,15 @@ def submit_feedback():
     else:
         return jsonify({"success": False, "message": "Failed to save feedback. UUID not found."}), 404
 
-@app.route('/', defaults = {'path': ''})
-@app.route('/<path:path>')
+@chatbot_bp.route('/', defaults = {'path': ''})
+@chatbot_bp.route('/<path:path>')
 def serve_frontend(path):
     if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
         return send_from_directory(app.static_folder, path)
     else:
         return send_from_directory(app.static_folder, 'index.html')
+
+app.register_blueprint(chatbot_bp, url_prefix=CHATBOT_ROOT_PATH)
     
 if __name__ == '__main__':
     if bool(CHATBOT_SSL_CERT and CHATBOT_SSL_KEY):

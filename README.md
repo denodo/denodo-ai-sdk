@@ -12,7 +12,7 @@ We test our query-to-SQL pipeline on our propietary benchmark across the whole r
 The benchmark dataset consists of 20+ questions in the finance sector.
 You may use this benchmark as reference to choose an LLM model.
 
-<em>Latest update: 05/31/2025 on AI SDK version 0.7</em>
+<em>Latest update: 03/31/2025 on AI SDK version 0.7</em>
 
 | LLM Provider| Model                     | 🎯 Accuracy             | 🕒 LLM execution time (s) | 🔢 Input Tokens   | 🔡 Output Tokens | 💰 Cost per Query |
 |-------------|---------------------------|-------------------------|---------------------------|------------------|------------------|-------------------|

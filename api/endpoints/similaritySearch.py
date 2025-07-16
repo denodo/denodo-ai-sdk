@@ -19,8 +19,8 @@ from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPAuthorizationCredentials, HTTPBearer
 
-from utils.data_catalog import get_allowed_view_ids
-from utils.uniformVectorStore import UniformVectorStore
+from utils.data_catalog import get_allowed_view_ids, DataCatalogAuthError
+from api.utils import state_manager
 from api.utils.sdk_utils import filter_non_allowed_associations, handle_endpoint_error
 
 router = APIRouter()
@@ -40,8 +40,8 @@ def authenticate(
 
 class similaritySearchRequest(BaseModel):
     query: str
-    vdp_database_names: str = os.getenv('VDB_NAMES', '')
-    vdp_tag_names: str = os.getenv('VDB_TAGS', '')
+    vdp_database_names: str = ''
+    vdp_tag_names: str = ''
     embeddings_provider: str = os.getenv('EMBEDDINGS_PROVIDER')
     embeddings_model: str = os.getenv('EMBEDDINGS_MODEL')
     vector_store_provider: str = os.getenv('VECTOR_STORE')
@@ -66,11 +66,20 @@ async def similaritySearch(endpoint_request: similaritySearchRequest = Depends()
     vdp_database_names = [db.strip() for db in endpoint_request.vdp_database_names.split(',')] if endpoint_request.vdp_database_names else []
     vdp_tag_names = [tag.strip() for tag in endpoint_request.vdp_tag_names.split(',')] if endpoint_request.vdp_tag_names else []
 
-    vector_store = UniformVectorStore(
-        provider=endpoint_request.vector_store_provider,
-        embeddings_provider=endpoint_request.embeddings_provider,
-        embeddings_model=endpoint_request.embeddings_model,
-    )
+    try:
+        vector_store = state_manager.get_vector_store(
+            provider=endpoint_request.vector_store_provider,
+            embeddings_provider=endpoint_request.embeddings_provider,
+            embeddings_model=endpoint_request.embeddings_model
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get vector store from state manager: {e}")
+
+    try:
+        valid_view_ids = await get_allowed_view_ids(auth=auth, raise_on_auth_error=True)
+        valid_view_ids = [str(view_id) for view_id in valid_view_ids]
+    except DataCatalogAuthError as e:
+        raise HTTPException(status_code=401, detail=f"Authentication failed during similaritySearch: {str(e)}")
 
     search_params = {
         "query": endpoint_request.query,
@@ -78,11 +87,8 @@ async def similaritySearch(endpoint_request: similaritySearchRequest = Depends()
         "scores": endpoint_request.scores,
         "database_names": vdp_database_names,
         "tag_names": vdp_tag_names,
+        "view_ids": valid_view_ids
     }
-
-    valid_view_ids = await get_allowed_view_ids(auth = auth)
-    valid_view_ids = [str(view_id) for view_id in valid_view_ids]
-    search_params["view_ids"] = valid_view_ids
 
     search_results = vector_store.search(**search_params)
 

@@ -15,7 +15,7 @@ const CustomInstructionsModal = ({ show, handleClose }) => {
     if (show) {
       const getLoggedInUsername = async () => {
         try {
-          const response = await axios.get('/current_user');
+          const response = await axios.get('current_user');
           if (response.data && response.data.username) {
             setUsername(response.data.username);
           }
@@ -33,7 +33,7 @@ const CustomInstructionsModal = ({ show, handleClose }) => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const response = await axios.post('/update_custom_instructions', {
+      const response = await axios.post('update_custom_instructions', {
         custom_instructions: customInstructions,
         user_details: userDetails
       });

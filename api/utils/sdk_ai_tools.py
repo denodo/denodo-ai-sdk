@@ -12,7 +12,6 @@ from langchain_experimental.utilities import PythonREPL
 from langchain_core.output_parsers import StrOutputParser
 
 from utils import utils
-from utils.uniformVectorStore import UniformVectorStore
 from utils.data_catalog import get_allowed_view_ids
 from api.utils import sdk_utils
 
@@ -29,8 +28,6 @@ RELATED_QUESTIONS_PROMPT = os.getenv("RELATED_QUESTIONS")
 
 # OTHER PROMPTS
 VQL_RESTRICTIONS_PROMPT = os.getenv("VQL_RESTRICTIONS")
-GROUPBY_VQL_PROMPT = os.getenv("GROUPBY_VQL")
-HAVING_VQL_PROMPT = os.getenv("HAVING_VQL")
 DATES_VQL_PROMPT = os.getenv("DATES_VQL")
 ARITHMETIC_VQL_PROMPT = os.getenv("ARITHMETIC_VQL")
 VQL_RULES_PROMPT = os.getenv("VQL_RULES")
@@ -93,8 +90,6 @@ async def query_to_vql(
     relevant_tables = format_schema_text(vector_search_tables, filtered_tables, sample_data, examples_per_table=vector_search_sample_data_k)
 
     prompt_parts = {
-        "having": int("<having>" in filter_params),
-        "groupby": int("<orderby>" in filter_params or "<groupby>" in filter_params),
         "dates": int("<dates>" in filter_params),
         "arithmetic": int("<arithmetic>" in filter_params)
     }
@@ -102,8 +97,6 @@ async def query_to_vql(
     vql_restrictions = sdk_utils.generate_vql_restrictions(
         prompt_parts,
         VQL_RULES_PROMPT,
-        GROUPBY_VQL_PROMPT,
-        HAVING_VQL_PROMPT,
         DATES_VQL_PROMPT,
         ARITHMETIC_VQL_PROMPT,
     )
@@ -565,10 +558,8 @@ async def query_reviewer(
     relevant_tables = format_schema_text(schema, [], sample_data, examples_per_table=vector_search_sample_data_k)
 
     vql_restrictions = sdk_utils.generate_vql_restrictions(
-        prompt_parts={"dates": 1, "arithmetic": 1, "groupby": 1, "having": 1},
+        prompt_parts={"dates": 1, "arithmetic": 1},
         vql_rules_prompt=VQL_RULES_PROMPT,
-        groupby_vql_prompt=GROUPBY_VQL_PROMPT,
-        having_vql_prompt=HAVING_VQL_PROMPT,
         dates_vql_prompt=DATES_VQL_PROMPT,
         arithmetic_vql_prompt=ARITHMETIC_VQL_PROMPT,
     )
@@ -616,10 +607,8 @@ def _get_prompt_and_parameters(question, vql_query, error_log, error_categories,
     if error_log:
         logging.info("VQL generation failed, fixing query.")
         vql_restrictions = sdk_utils.generate_vql_restrictions(
-            prompt_parts={"dates": 1, "arithmetic": 1, "groupby": 1, "having": 1},
+            prompt_parts={"dates": 1, "arithmetic": 1},
             vql_rules_prompt=VQL_RULES_PROMPT,
-            groupby_vql_prompt=GROUPBY_VQL_PROMPT,
-            having_vql_prompt=HAVING_VQL_PROMPT,
             dates_vql_prompt=DATES_VQL_PROMPT,
             arithmetic_vql_prompt=ARITHMETIC_VQL_PROMPT,
         )
@@ -637,7 +626,7 @@ def _get_prompt_and_parameters(question, vql_query, error_log, error_categories,
 @utils.log_params
 @utils.timed
 async def get_relevant_tables(
-    query, embeddings_provider, embeddings_model, vector_store_provider, vdb_list, tag_list, auth,
+    query, vector_store, sample_data_vector_store, vdb_list, tag_list, auth,
     k = 5, 
     use_views = '', 
     expand_set_views = True, 
@@ -647,19 +636,6 @@ async def get_relevant_tables(
     tag_list = [tag.strip() for tag in tag_list.split(',')] if tag_list else []
     
     timings = {}
-
-    vector_store = UniformVectorStore(
-        provider = vector_store_provider,
-        embeddings_provider = embeddings_provider,
-        embeddings_model = embeddings_model
-    )
-
-    sample_data_vector_store = UniformVectorStore(
-        provider = vector_store_provider,
-        embeddings_provider = embeddings_provider,
-        embeddings_model = embeddings_model,
-        index_name = "ai_sdk_sample_data"
-    )
     
     # Create tasks for both async operations to run in parallel
     embedding_task = asyncio.create_task(vector_store.embeddings.aembed_query(query))

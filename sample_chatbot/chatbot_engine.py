@@ -15,10 +15,11 @@ The questions should be closely related to the current conversation and should n
 - Return each related question in between <related_question></related_question> tags. I will now answer:"""
 
 class ChatbotEngine:
-    def __init__(self, llm, system_prompt, tool_selection_prompt, tools, api_host, username, password, vector_store_provider, denodo_tables, message_history = 4, user_details = ""):
+    def __init__(self, llm, llm_response_rows_limit, system_prompt, tool_selection_prompt, tools, api_host, username, password, vector_store_provider, denodo_tables, message_history = 4, user_details = ""):
         self.llm = llm.llm
         self.llm_callback = llm.callback
         self.llm_model = f"{llm.provider_name}.{llm.model_name}"
+        self.llm_response_rows_limit = llm_response_rows_limit
         self.vector_store_provider = vector_store_provider
         self.chat_history = []
         self.tools = tools
@@ -100,7 +101,7 @@ class ChatbotEngine:
             tool_result = process_tool_query(first_input, self.tools)
             if tool_result:
                 tool_name, tool_output, original_xml_call = tool_result
-                readable_tool_output = readable_tool_result(tool_name, tool_output)
+                readable_tool_output = readable_tool_result(tool_name, tool_output, self.llm_response_rows_limit)
                 ai_stream = self.answer_with_tool_chain.stream({
                     "input": query,
                     "chat_history": self.chat_history,
@@ -180,7 +181,8 @@ class ChatbotEngine:
                 ai_response = ai_response,
                 tool_name = tool_name,
                 tool_output = tool_output,
-                original_xml_call = original_xml_call
+                original_xml_call = original_xml_call,
+                llm_response_rows_limit = self.llm_response_rows_limit
             )
             
             self.chat_history = trim_conversation(self.chat_history)

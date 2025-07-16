@@ -22,7 +22,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPAuthorizationC
 from api.utils.sdk_utils import timing_context, add_tokens, handle_endpoint_error, generate_session_id
 from api.utils import sdk_ai_tools
 from api.utils import sdk_answer_question
-from utils.uniformLLM import UniformLLM
+from api.utils import state_manager
 
 router = APIRouter()
 security_basic = HTTPBasic(auto_error = False)
@@ -57,6 +57,8 @@ class answerQuestionUsingViewsRequest(BaseModel):
     mode: Literal["default", "data", "metadata"] = Field(default = "default")
     disclaimer: bool = True
     verbose: bool = True
+    vql_execute_rows_limit: int = int(os.getenv('VQL_EXECUTE_ROWS_LIMIT', '100'))
+    llm_response_rows_limit: int = int(os.getenv('LLM_RESPONSE_ROWS_LIMIT', '15'))
 
 class answerQuestionUsingViewsResponse(BaseModel):
     answer: str
@@ -102,8 +104,18 @@ async def answerQuestionUsingViews(endpoint_request: answerQuestionUsingViewsReq
 
     # Generate session ID for Langfuse debugging purposes
     session_id = generate_session_id(endpoint_request.question)
-    chat_llm = UniformLLM(endpoint_request.chat_provider, endpoint_request.chat_model)
-    sql_gen_llm = UniformLLM(endpoint_request.sql_gen_provider, endpoint_request.sql_gen_model)
+
+    try:
+        chat_llm = state_manager.get_llm(
+            provider_name=endpoint_request.chat_provider, 
+            model_name=endpoint_request.chat_model
+        )
+        sql_gen_llm = state_manager.get_llm(
+            provider_name=endpoint_request.sql_gen_provider, 
+            model_name=endpoint_request.sql_gen_model
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}")
 
     timings = {}
     with timing_context("llm_time", timings):

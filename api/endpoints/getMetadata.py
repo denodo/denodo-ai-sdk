@@ -14,21 +14,22 @@ import logging
 from pydantic import BaseModel
 from typing import Dict, List
 
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from utils.data_catalog import activate_incremental
+from api.utils import state_manager
 from api.utils.sdk_utils import (
-    handle_endpoint_error, authenticate, initialize_vector_stores, 
-    process_metadata_source, format_metadata_response
+    handle_endpoint_error, authenticate, process_metadata_source, 
+    format_metadata_response, delete_by_db_or_tag
 )
 
 router = APIRouter()
 
 class getMetadataRequest(BaseModel):
-    vdp_database_names: str = os.getenv('VDB_NAMES', '')
-    vdp_tag_names: str = os.getenv('VDB_TAGS', '')
+    vdp_database_names: str = ''
+    vdp_tag_names: str = ''
     embeddings_provider: str = os.getenv('EMBEDDINGS_PROVIDER')
     embeddings_model: str = os.getenv('EMBEDDINGS_MODEL')
     embeddings_token_limit: int = os.getenv('EMBEDDINGS_TOKEN_LIMIT', 0)
@@ -89,14 +90,39 @@ def getMetadata(endpoint_request: getMetadataRequest = Depends(), auth: str = De
 
     # Initialize vector stores if needed
     if endpoint_request.insert:
-        vector_store, sample_data_vector_store = initialize_vector_stores(
-            vector_store_provider=endpoint_request.vector_store_provider,
-            embeddings_provider=endpoint_request.embeddings_provider,
-            embeddings_model=endpoint_request.embeddings_model,
-            rate_limit_rpm=endpoint_request.rate_limit_rpm,
-            sample_data_enabled=endpoint_request.examples_per_table > 0
-        )
-    
+        try:
+            vector_store = state_manager.get_vector_store(
+                provider=endpoint_request.vector_store_provider,
+                embeddings_provider=endpoint_request.embeddings_provider,
+                embeddings_model=endpoint_request.embeddings_model,
+                rate_limit_rpm=endpoint_request.rate_limit_rpm
+            )
+            
+            if endpoint_request.examples_per_table > 0:
+                sample_data_vector_store = state_manager.get_vector_store(
+                    provider=endpoint_request.vector_store_provider,
+                    embeddings_provider=endpoint_request.embeddings_provider,
+                    embeddings_model=endpoint_request.embeddings_model,
+                    rate_limit_rpm=endpoint_request.rate_limit_rpm,
+                    index_name="ai_sdk_sample_data"
+                )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}")
+
+    if not endpoint_request.incremental:
+        try:
+            delete_by_db_or_tag(
+                vector_store=vector_store,
+                sample_data_vector_store=sample_data_vector_store,
+                vdp_database_names=vdp_database_names,
+                vdp_tag_names=vdp_tag_names,
+                delete_conflicting=False
+            )
+
+        except Exception as e:
+            logging.error(f"Error during metadata deletion: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to delete metadata: {e}")
+
     # Process tags
     for tag_name in vdp_tag_names:
         try:
@@ -133,8 +159,8 @@ def getMetadata(endpoint_request: getMetadataRequest = Depends(), auth: str = De
             logging.error(f"Error processing database: {ve}")
             continue
 
-    if len(all_db_schemas) == 0:
-        raise HTTPException(status_code=204, detail=f"Data Catalog returned empty response for: {vdp_database_names}")
+    if not any(all_db_schemas):
+        return Response(status_code=204, content=None)
 
     # Format and return response
     response = format_metadata_response(

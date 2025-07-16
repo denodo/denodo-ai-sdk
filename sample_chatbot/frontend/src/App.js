@@ -18,7 +18,7 @@ const App = () => {
 
   const handleSignIn = async (userCredentials) => {
     try {
-      const response = await axios.post('/login', userCredentials);
+      const response = await axios.post('login', userCredentials);
       if (response.data.success) {
         setIsAuthenticated(true);
         setShowSignInModal(false);
@@ -34,7 +34,7 @@ const App = () => {
   const handleClearResults = async () => {
     try {
       setResults([]);
-      await axios.post(`/clear_history`);
+      await axios.post(`clear_history`);
     } catch (error) {
       console.error("There was an error clearing the memory!", error);
     }
@@ -47,7 +47,7 @@ const App = () => {
     formData.append('delimiter', delimiter);
 
     try {
-      const response = await axios.post('/update_csv', formData, {
+      const response = await axios.post('update_csv', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },

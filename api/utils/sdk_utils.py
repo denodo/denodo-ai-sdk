@@ -18,7 +18,6 @@ from fastapi.security import HTTPBasic, HTTPBearer, HTTPBasicCredentials, HTTPAu
 from contextlib import contextmanager
 
 from utils.data_catalog import get_views_metadata_documents
-from utils.uniformVectorStore import UniformVectorStore
 from utils.utils import schema_summary, prepare_schema, flatten_list, prepare_sample_data_schema, calculate_tokens
 
 security_basic = HTTPBasic(auto_error=False)
@@ -54,12 +53,6 @@ def readable_tables(relevant_tables):
         readable_output += f'<table>Table {table["view_name"]} with columns {", ".join(table_columns)}\n</table>\n'
     
     return readable_output
-
-def is_data_complex(data):
-    if isinstance(data, dict) and len(data) > 3:
-        if len(data['Row 1']) > 1:
-            return True 
-    return False
 
 def match_nested_parentheses(text):
     def find_closing_paren(s, start):
@@ -190,13 +183,11 @@ def prepare_vql(vql):
     logging.info(f"prepare_vql vql: {vql} error log: {error_log} and categories: {error_categories}")
     return vql.strip(), error_log, error_categories
 
-def generate_vql_restrictions(prompt_parts, vql_rules_prompt, groupby_vql_prompt, having_vql_prompt, dates_vql_prompt, arithmetic_vql_prompt):
+def generate_vql_restrictions(prompt_parts, vql_rules_prompt, dates_vql_prompt, arithmetic_vql_prompt):
     if prompt_parts is None:
         return vql_rules_prompt.replace("{EXTRA_RESTRICTIONS}", "")
 
     vql_prompt_parts = {
-        "groupby": groupby_vql_prompt if prompt_parts.get("groupby") else "",
-        "having": having_vql_prompt if prompt_parts.get("having") else "",
         "dates": dates_vql_prompt if prompt_parts.get("dates") else "",
         "arithmetic": arithmetic_vql_prompt if prompt_parts.get("arithmetic") else ""
     }
@@ -247,22 +238,6 @@ def filter_non_allowed_associations(view_json, valid_view_ids):
     ]
     
     return filtered_view_json
-
-def configure_uvicorn_logging():
-    """Configure Uvicorn's logging to use our format."""
-    log_config = uvicorn.config.LOGGING_CONFIG
-    timestamp_fmt = "[%(asctime)s] [%(process)d] [%(levelname)s] %(message)s"
-    date_fmt = "%Y-%m-%d %H:%M:%S %z"
-
-    # Update all formatters
-    for formatter in log_config["formatters"].values():
-        formatter["fmt"] = timestamp_fmt
-        formatter["datefmt"] = date_fmt
-
-    # The access formatter needs special handling to preserve request information
-    log_config["formatters"]["access"]["fmt"] = "[%(asctime)s] [%(process)d] [%(levelname)s] %(client_addr)s - \"%(request_line)s\" %(status_code)s"
-    
-    return log_config
 
 def handle_endpoint_error(endpoint_name):
     def decorator(func):
@@ -430,45 +405,6 @@ def authenticate(
     else:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-def initialize_vector_stores(
-    vector_store_provider,
-    embeddings_provider,
-    embeddings_model,
-    rate_limit_rpm,
-    sample_data_enabled
-):
-    """
-    Initialize vector stores for metadata and optionally for sample data.
-    
-    Args:
-        vector_store_provider: Provider for the vector store
-        embeddings_provider: Provider for embeddings
-        embeddings_model: Model for embeddings
-        rate_limit_rpm: Rate limit in requests per minute
-        sample_data_enabled: Whether to initialize a sample data vector store
-        
-    Returns:
-        Tuple of (metadata_vector_store, sample_data_vector_store)
-    """
-    vector_store = UniformVectorStore(
-        provider=vector_store_provider,
-        embeddings_provider=embeddings_provider,
-        embeddings_model=embeddings_model,
-        rate_limit_rpm=rate_limit_rpm,
-    )
-    
-    sample_data_vector_store = None
-    if sample_data_enabled:
-        sample_data_vector_store = UniformVectorStore(
-            provider=vector_store_provider,
-            embeddings_provider=embeddings_provider,
-            embeddings_model=embeddings_model,
-            rate_limit_rpm=rate_limit_rpm,
-            index_name="ai_sdk_sample_data"
-        )
-    
-    return vector_store, sample_data_vector_store
-
 def process_metadata_source(
     source_type,
     source_name,
@@ -522,11 +458,14 @@ def process_metadata_source(
 
     # Handle view deletions if needed
     if delete_view_ids and vector_store:
-        vector_store.delete(ids=delete_view_ids)
+        vector_store.delete_by_view_id(view_ids = delete_view_ids)
+        if sample_data_vector_store:
+            sample_data_vector_store.delete_by_view_id(view_ids = delete_view_ids)
     
     # Validate response
     if not result:
-        raise ValueError(f"Empty response from the Denodo Data Catalog for {source_type.lower()} {source_name}")
+        logging.info(f"Empty response from the Denodo Data Catalog for {source_type.lower()} {source_name}")
+        return {}, []
     
     # Process schema
     if isinstance(result, dict):
@@ -551,7 +490,7 @@ def process_metadata_source(
                 views=views,
                 parallel=request.parallel,
                 source_type=source_type,
-                source_name=source_name,
+                sample_data=True
             )
         
         return db_schema, db_schema_text
@@ -571,6 +510,97 @@ def format_metadata_response(
         'vdb_list': vdb_database_names,
         'tag_list': vdb_tag_names
     }
+
+def is_non_conflicting_doc(doc, databases_to_delete, tags_to_delete, last_update_dict):
+        """
+        Determines whether a document can be safely deleted without conflicting metadata.
+
+        A document is considered non-conflicting if both of these are true:
+        - Its 'database_name' is either:
+            - in the databases_to_delete list, or
+            - not present in last_update_dict["DATABASE"].
+        - For each of its active tags ('tag_' fields with value '1'):
+            - If the tag is NOT in tags_to_delete, it must also NOT be in last_update_dict["TAG"].
+
+        This ensures that we don't delete documents whose metadata partially overlaps
+        with deletion criteria, unless they're fully safe to remove.
+        """
+        metadata = doc.metadata or {}
+
+        db_name = metadata.get("database_name")
+        last_updated_dbs = set(last_update_dict.get("DATABASE", []))
+        last_updated_tags = set(last_update_dict.get("TAG", []))
+
+        db_match = (
+            db_name in databases_to_delete or
+            db_name not in last_updated_dbs
+        )
+
+        tags_to_delete_full = {f"tag_{tag}" for tag in tags_to_delete}
+        last_updated_tags_full = {f"tag_{tag}" for tag in last_updated_tags}
+
+        for k, v in metadata.items():
+            if k.startswith("tag_") and v == "1":
+                if k not in tags_to_delete_full and k in last_updated_tags_full:
+                    return False
+
+        return db_match
+
+def delete_by_db_or_tag(vector_store, sample_data_vector_store, vdp_database_names, vdp_tag_names, delete_conflicting):
+    """
+    Deletes views based on database/tag names.
+    """
+    K_BATCH_SIZE = 1000
+    total_deleted_ids = 0
+    more_results_left = True
+
+    while more_results_left:
+        results = vector_store.search_by_vector(
+            vector=[0]*vector_store.dimensions,
+            k=K_BATCH_SIZE,
+            database_names=vdp_database_names,
+            tag_names=vdp_tag_names,
+            view_ids=None,
+            view_names=None
+        )
+
+        if not results:
+            break
+
+        view_ids_to_delete = set()
+        document_ids_to_delete = set()
+
+        last_update_dict = vector_store.get_last_update_dict()
+        for doc in results:
+            if not delete_conflicting:
+                if not is_non_conflicting_doc(doc, vdp_database_names, vdp_tag_names, last_update_dict):
+                    continue
+
+            view_id = doc.metadata.get('view_id')
+            doc_id = doc.metadata.get('document_id')
+
+            if view_id:
+                view_ids_to_delete.add(view_id)
+            if doc_id:
+                document_ids_to_delete.add(doc_id)
+
+
+        if document_ids_to_delete:
+            vector_store.delete(ids=list(document_ids_to_delete))
+
+        if view_ids_to_delete:
+            total_deleted_ids += len(view_ids_to_delete)
+            sample_data_vector_store.delete_by_view_id(view_ids=list(view_ids_to_delete))
+
+        more_results_left = len(results) == K_BATCH_SIZE
+
+    if total_deleted_ids > 0:
+        vector_store.remove_from_last_update(
+            database_names=vdp_database_names,
+            tag_names=vdp_tag_names
+        )
+    
+    return total_deleted_ids
 
 def execution_result_to_dataframe(data):
     # Initialize an empty list to store row data

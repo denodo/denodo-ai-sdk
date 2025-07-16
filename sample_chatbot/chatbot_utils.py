@@ -9,6 +9,7 @@ import datetime
 from time import time
 from functools import wraps
 from utils.utils import calculate_tokens
+from utils.uniformEmbeddings import UniformEmbeddings
 from utils.uniformVectorStore import UniformVectorStore
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_community.document_loaders.csv_loader import CSVLoader
@@ -52,14 +53,6 @@ def trim_conversation(conversation_history, token_limit = 7000):
         
     return trimmed_history
 
-def dummy_login(api_host, username, password):
-    params = {
-        'vdp_database_names': 'fake_vdb',
-        'vdp_tag_names': 'fake_tag'
-    }
-    response = requests.get(f'{api_host}/getMetadata', params = params, auth = (username, password), verify=False)
-    return response.status_code == 204
-
 def get_relevant_tables(api_host, username, password, query):
     try:
         request_params = {
@@ -75,9 +68,20 @@ def get_relevant_tables(api_host, username, password, query):
             table_names = [view['view_name'] for view in data]
         else:
             table_names = []
-        return True, table_names
-    except Exception as e:
-        return False, {str(e)}
+        return 200, table_names
+
+    except requests.exceptions.HTTPError as e:
+        status_code = e.response.status_code
+        error_message = f"AI SDK returned HTTP {status_code}"
+        try:
+            error_message = e.response.json().get('detail', error_message)
+        except requests.exceptions.JSONDecodeError:
+            pass
+        
+        return status_code, error_message
+
+    except requests.exceptions.RequestException as e:
+        return 503, "A required service is unavailable."
     
 def ai_sdk_health_check(api_host):
     try:
@@ -86,11 +90,12 @@ def ai_sdk_health_check(api_host):
     except Exception as e:
         return False
 
-def connect_to_ai_sdk(api_host, username, password, insert=True, examples_per_table=100, parallel=True, vdp_database_names = None, vdp_tag_names = None):
+def connect_to_ai_sdk(api_host, username, password, insert=True, examples_per_table=100, incremental=True, parallel=True, vdp_database_names = None, vdp_tag_names = None):
     try:
         request_params = {
             'insert': insert,
             'examples_per_table': examples_per_table,
+            'incremental': incremental,
             'parallel': parallel
         }
 
@@ -101,20 +106,29 @@ def connect_to_ai_sdk(api_host, username, password, insert=True, examples_per_ta
             request_params['vdp_tag_names'] = ",".join(vdp_tag_names)
 
         response = requests.get(f'{api_host}/getMetadata', params=request_params, auth=(username, password), verify=False)
-        
-        if response.status_code != 200:
-            return False, f"Server Error ({response.status_code}): {response.text}"
+
+        if response.status_code == 204:
+            return 204, "No Content"
+
+        if not (200 <= response.status_code < 300):
+            if 400 <= response.status_code < 500:
+                error_type = "Client Error"
+            elif response.status_code >= 500:
+                error_type = "Server Error"
+            else:
+                error_type = "Error"
+            return response.status_code, f"{error_type} ({response.status_code}): {response.text}"
 
         data = response.json()
         db_schema = data.get('db_schema_json')
         vdbs = ','.join(data.get('vdb_list', []))
 
         if db_schema is None:
-            return False, "Query didn't fail, but it returned no data. Check the Data Catalog logs."
+            return 500, "Query didn't fail, but it returned no data. Check the Data Catalog logs."
 
-        return True, vdbs
+        return 200, vdbs
     except Exception as e:
-        return False, f"Unexpected error: {str(e)}"
+        return 500, f"Unexpected error: {str(e)}"
 
 def parse_xml_tags(query):
     # Some LLMs escape their _ because they're trained on markdown
@@ -223,10 +237,10 @@ def prepare_unstructured_vector_store(csv_file_path, vector_store_provider, embe
     filename = os.path.splitext(filename)[0]
     filename = ''.join(filter(str.isalpha, filename))
     unstructured_index_name = f"unstructured_{filename}"
+    embeddings = UniformEmbeddings(embeddings_provider, embeddings_model).model
     unstructured_vector_store = UniformVectorStore(
         provider=vector_store_provider,
-        embeddings_provider=embeddings_provider,
-        embeddings_model=embeddings_model,
+        embeddings=embeddings,
         index_name=unstructured_index_name,
     )
     
@@ -237,7 +251,7 @@ def prepare_unstructured_vector_store(csv_file_path, vector_store_provider, embe
 def process_chunk(chunk):
     return chunk.replace("\n", "<NEWLINE>")
 
-def add_to_chat_history(chat_history, human_query, ai_response, tool_name, tool_output, original_xml_call):
+def add_to_chat_history(chat_history, human_query, ai_response, tool_name, tool_output, original_xml_call, llm_response_rows_limit):
     #Remove related questions from the ai_response
     related_question_index = ai_response.find("<related_question>")
     if related_question_index != -1:
@@ -247,9 +261,9 @@ def add_to_chat_history(chat_history, human_query, ai_response, tool_name, tool_
         execution_result = tool_output.get('execution_result', {})
         if isinstance(execution_result, dict):
             total_rows = len(execution_result.items())
-            if total_rows > 15:
-                llm_execution_result = dict(list(execution_result.items())[:15])
-                llm_execution_result = str(llm_execution_result) + f"... Showing only the first 15 rows of the execution result out of a total of {total_rows} rows."
+            if total_rows > llm_response_rows_limit:
+                llm_execution_result = dict(list(execution_result.items())[:llm_response_rows_limit])
+                llm_execution_result = str(llm_execution_result) + f"... Showing only the first {llm_response_rows_limit} rows of the execution result out of a total of {total_rows} rows."
             else:
                 llm_execution_result = execution_result
         else:
@@ -279,33 +293,47 @@ def add_to_chat_history(chat_history, human_query, ai_response, tool_name, tool_
         """
     chat_history.extend([HumanMessage(content = human_query), AIMessage(content = ai_response)])
 
-def readable_tool_result(tool_name, tool_params):
+def readable_tool_result(tool_name, tool_params, llm_response_rows_limit):
     if tool_name == "database_query":
-        execution_result = tool_params.get('execution_result', {})
-        if isinstance(execution_result, dict) and len(execution_result.items()) > 15:
-            llm_execution_result = dict(list(execution_result.items())[:15])
-            llm_execution_result = str(llm_execution_result) + "... Showing only the first 15 rows of the execution result."
-        else:
-            llm_execution_result = execution_result
-        
-        graph_data = tool_params.get('raw_graph', '')
-        if len(graph_data) > 300:
-            graph_text = "Graph generated succesfully and shown to the user through the chatbot UI, I will not include it in the response."
-        else:
-            graph_text = "Graph generation failed or not requested."
-        
-        return_string = f"""
-        ## TOOL EXECUTION DETAILS FOR ASSISTANT
-        
-        I used the {tool_name} tool.
+        if isinstance(tool_params, dict):
+            execution_result = tool_params.get('execution_result', {})
+            if isinstance(execution_result, dict) and len(execution_result.items()) > llm_response_rows_limit:
+                llm_execution_result = dict(list(execution_result.items())[:llm_response_rows_limit])
+                llm_execution_result = str(llm_execution_result) + f"... Showing only the first {llm_response_rows_limit} rows of the execution result."
+            else:
+                llm_execution_result = execution_result
+            
+            graph_data = tool_params.get('raw_graph', '')
+            if len(graph_data) > 300:
+                graph_text = "Graph generated succesfully and shown to the user through the chatbot UI, I will not include it in the response."
+            else:
+                graph_text = "Graph generation failed or not requested."
+            
+            return_string = f"""
+            ## TOOL EXECUTION DETAILS FOR ASSISTANT
+            
+            I used the {tool_name} tool.
 
-            Output:
-            SQL Query: {tool_params.get('sql_query')}
-            Execution result: {llm_execution_result}
-            Graph: {graph_text}
+                Output:
+                SQL Query: {tool_params.get('sql_query')}
+                Execution result: {llm_execution_result}
+                Graph: {graph_text}
 
-        Even if the tool failed, I will answer the user's query directly because I cannot execute a new tool.
-        Now that I have executed the tool, I will answer the user's query based on the tool output:"""
+            Even if the tool failed, I will answer the user's query directly because I cannot execute a new tool.
+            Now that I have executed the tool, I will answer the user's query based on the tool output:"""
+        else:
+            return_string = f"""
+            ## TOOL EXECUTION DETAILS FOR ASSISTANT
+
+            I used the {tool_name} tool.
+
+                Output:
+                <output>
+                {tool_params}
+                </output>
+
+            Even if the tool failed, I will answer the user's query directly because I cannot execute a new tool.
+            Now that I have executed the tool, I will answer the user's query based on the tool output:"""
     elif tool_name == "metadata_query":
         return_string = f"""
         ## TOOL EXECUTION DETAILS FOR ASSISTANT
@@ -358,16 +386,19 @@ def make_ai_sdk_request(endpoint, payload, auth_tuple, method = "POST"):
         
         error_message = "An error occurred when connecting to the AI SDK"
         try:
-            if e.response.status_code == 500:
-                error_data = e.response.json()
-                if 'detail' in error_data:
-                    error_msg = error_data['detail'].get('error', 'Unknown error')
-                    return f"{error_message}: {error_msg}"
-                return f"{error_message}: {error_data}"
+            error_data = e.response.json()
+            detail = error_data.get('detail', str(e))
+
+            if isinstance(detail, dict):
+                final_error_msg = detail.get('error', str(detail))
+            else:
+                final_error_msg = str(detail)
+
+            return f"{error_message}: {final_error_msg}"
+
         except ValueError:
-            pass
-        
-        return f"{error_message}: {e}"
+            return f"{error_message}: {e}"
+
     except Exception as e:
         return f"An error occurred when connecting to the AI SDK: {e}"
 

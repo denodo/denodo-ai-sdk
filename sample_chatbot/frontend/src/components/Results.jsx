@@ -103,7 +103,7 @@ const Results = ({ results, setResults }) => {
     setFeedbackSubmitting(true);
     
     try {
-      const response = await fetch('/submit_feedback', {
+      const response = await fetch('submit_feedback', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -539,6 +539,7 @@ const Results = ({ results, setResults }) => {
 
       <TableModal
         show={showTableModal}
+        llm_response_rows_limit={config.llm_response_rows_limit}
         handleClose={handleCloseTableModal}
         executionResult={selectedTableData}
       />

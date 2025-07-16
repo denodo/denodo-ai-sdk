@@ -63,7 +63,8 @@ async def process_sql_category(request, vector_search_tables, sql_gen_llm, chat_
         if vql_query:
             execution_result, vql_status_code, timings = await execute_query(
                 vql_query=vql_query, 
-                auth=auth, 
+                auth=auth,
+                limit=request.vql_execute_rows_limit,
                 timings=timings
             )
         else:
@@ -72,6 +73,7 @@ async def process_sql_category(request, vector_search_tables, sql_gen_llm, chat_
 
     llm_execution_result = prepare_execution_result(
         execution_result=execution_result, 
+        llm_response_rows_limit=request.llm_response_rows_limit,
         vql_status_code=vql_status_code
     )
 
@@ -147,7 +149,8 @@ async def attempt_query_execution(vql_query, request, auth, llm, timings, vector
     if vql_query:
         execution_result, vql_status_code, timings = await execute_query(
             vql_query=vql_query, 
-            auth=auth, 
+            auth=auth,
+            limit=request.vql_execute_rows_limit,
             timings=timings
         )
     else:
@@ -206,19 +209,19 @@ async def attempt_query_execution(vql_query, request, auth, llm, timings, vector
             
     return vql_query, execution_result, vql_status_code, timings, fixer_history, query_fixer_tokens
 
-async def execute_query(vql_query, auth, timings):
+async def execute_query(vql_query, auth, limit, timings):
     with timing_context("vql_execution_time", timings):
         if vql_query:
-            vql_status_code, execution_result = await execute_vql(vql=vql_query, auth=auth)
+            vql_status_code, execution_result = await execute_vql(vql=vql_query, auth=auth, limit=limit)
         else:
             vql_status_code = 499
             execution_result = "No VQL query was generated."
     return execution_result, vql_status_code, timings
 
-def prepare_execution_result(execution_result, vql_status_code):
-    if vql_status_code == 200 and isinstance(execution_result, dict) and len(execution_result) > 15:
-        llm_execution_result = dict(list(execution_result.items())[:15])
-        llm_execution_result = str(llm_execution_result) + "... Showing only the first 15 rows of the execution result."
+def prepare_execution_result(execution_result, llm_response_rows_limit, vql_status_code):
+    if vql_status_code == 200 and isinstance(execution_result, dict) and len(execution_result) > llm_response_rows_limit:
+        llm_execution_result = dict(list(execution_result.items())[:llm_response_rows_limit])
+        llm_execution_result = str(llm_execution_result) + f"... Showing only the first {llm_response_rows_limit} rows of the execution result."
     else:
         llm_execution_result = str(execution_result)
     return llm_execution_result

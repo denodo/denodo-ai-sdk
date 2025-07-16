@@ -7,7 +7,7 @@ const useSDK = (setResults) => {
     setLoading(true);
 
     try {
-      const eventSource = new EventSource(`/question?query=${encodeURIComponent(question)}&type=${type}`);
+      const eventSource = new EventSource(`question?query=${encodeURIComponent(question)}&type=${type}`);
       let isStreamOff = false;
       let context = null;
       let relatedTables = null;

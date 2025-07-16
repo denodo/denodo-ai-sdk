@@ -309,9 +309,6 @@ class UniformLLM:
         AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
         AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 
-        if AWS_REGION is None:
-            raise ValueError("AWS_REGION environment variable must be set (even when using IAM credentials).")
-
         refreshable_session_instance = RefreshableBotoSession(
             region_name = AWS_REGION,
             profile_name = AWS_PROFILE_NAME,

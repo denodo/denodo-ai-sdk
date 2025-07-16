@@ -16,7 +16,7 @@ from typing import Dict, List, Literal
 
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from api.utils.sdk_utils import (
     timing_context, add_tokens, generate_session_id, 
@@ -24,7 +24,7 @@ from api.utils.sdk_utils import (
 )
 from api.utils import sdk_ai_tools
 from api.utils import sdk_answer_question
-from utils.uniformLLM import UniformLLM
+from api.utils import state_manager
 
 router = APIRouter()
     
@@ -39,8 +39,8 @@ class answerQuestionRequest(BaseModel):
     sql_gen_model: str = os.getenv('SQL_GENERATION_MODEL')
     chat_provider: str = os.getenv('CHAT_PROVIDER')
     chat_model: str = os.getenv('CHAT_MODEL')
-    vdp_database_names: str = os.getenv('VDB_NAMES', '')
-    vdp_tag_names: str = os.getenv('VDB_TAGS', '')
+    vdp_database_names: str = ''
+    vdp_tag_names: str = ''
     use_views: str = ''
     expand_set_views: bool = True
     custom_instructions: str = os.getenv('CUSTOM_INSTRUCTIONS', '')
@@ -50,6 +50,8 @@ class answerQuestionRequest(BaseModel):
     mode: Literal["default", "data", "metadata"] = Field(default = "default")
     disclaimer: bool = True
     verbose: bool = True
+    vql_execute_rows_limit: int = int(os.getenv('VQL_EXECUTE_ROWS_LIMIT', '100'))
+    llm_response_rows_limit: int = int(os.getenv('LLM_RESPONSE_ROWS_LIMIT', '15'))
 
 class answerQuestionResponse(BaseModel):
     answer: str
@@ -93,7 +95,9 @@ async def answer_question_get(
     - SQL_GENERATION_MODEL
     - CHAT_PROVIDER
     - CHAT_MODEL
-    - VDB_NAMES
+    - CUSTOM_INSTRUCTIONS
+    - VQL_EXECUTE_ROWS_LIMIT
+    - LLM_RESPONSE_ROWS_LIMIT
 
     As you can see, you can specify a different provider for SQL generation and chat generation. This is because generating a correct SQL query
     is a complex task that should be handled with a powerful LLM."""
@@ -126,7 +130,9 @@ async def answer_question_post(
     - SQL_GENERATION_MODEL
     - CHAT_PROVIDER
     - CHAT_MODEL
-    - VDB_NAMES
+    - CUSTOM_INSTRUCTIONS
+    - VQL_EXECUTE_ROWS_LIMIT
+    - LLM_RESPONSE_ROWS_LIMIT
 
     As you can see, you can specify a different provider for SQL generation and chat generation. This is because generating a correct SQL query
     is a complex task that should be handled with a powerful LLM."""
@@ -136,14 +142,35 @@ async def process_question(request_data: answerQuestionRequest, auth: str):
     """Main function to process the question and return the answer"""
     # Generate session ID for Langfuse debugging purposes
     session_id = generate_session_id(request_data.question)
-    chat_llm = UniformLLM(request_data.chat_provider, request_data.chat_model)
-    sql_gen_llm = UniformLLM(request_data.sql_gen_provider, request_data.sql_gen_model)
+
+    try:
+        chat_llm = state_manager.get_llm(
+            provider_name=request_data.chat_provider, 
+            model_name=request_data.chat_model
+        )
+        sql_gen_llm = state_manager.get_llm(
+            provider_name=request_data.sql_gen_provider, 
+            model_name=request_data.sql_gen_model
+        )
+
+        vector_store = state_manager.get_vector_store(
+            provider=request_data.vector_store_provider,
+            embeddings_provider=request_data.embeddings_provider,
+            embeddings_model=request_data.embeddings_model
+        )
+        sample_data_vector_store = state_manager.get_vector_store(
+            provider=request_data.vector_store_provider,
+            embeddings_provider=request_data.embeddings_provider,
+            embeddings_model=request_data.embeddings_model,
+            index_name="ai_sdk_sample_data"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}")
 
     vector_search_tables, sample_data, timings = await sdk_ai_tools.get_relevant_tables(
         query=request_data.question,
-        embeddings_provider=request_data.embeddings_provider,
-        embeddings_model=request_data.embeddings_model,
-        vector_store_provider=request_data.vector_store_provider,
+        vector_store=vector_store,
+        sample_data_vector_store=sample_data_vector_store,
         vdb_list=request_data.vdp_database_names,
         tag_list=request_data.vdp_tag_names,
         auth=auth,
@@ -152,6 +179,9 @@ async def process_question(request_data: answerQuestionRequest, auth: str):
         expand_set_views=request_data.expand_set_views,
         vector_search_sample_data_k=request_data.vector_search_sample_data_k
     )
+
+    if not vector_search_tables:
+        raise HTTPException(status_code=404, detail="The vector search result returned 0 views. This could be due to limited permissions or an empty vector store.")
 
     with timing_context("llm_time", timings):
         category, category_response, category_related_questions, sql_category_tokens = await sdk_ai_tools.sql_category(

@@ -1,3 +1,37 @@
+version 0.9 - 20250714
+------------------------
+
+- Added support for AWS instance credentials authentication for Amazon Bedrock
+- Added SENSITIVE_DATA_LOGGING to obfuscate sensitive data.
+- Added an error to /answerQuestion when the vector search result is empty
+
+version 0.9-beta - 20250703
+------------------------
+
+- Fixed VQL generation pipeline issues with ORDER BY and LIMIT clauses
+- Added new deleteMetadata endpoint
+- Added script to stop AI SDK and chatbot processes (provides clean shutdown mechanism via stop.py command)
+- Added support for reverse proxy deployment (via AI_SDK_ROOT_PATH and CHATBOT_ROOT_PATH)
+- Added option to configure incremental vector database from the chatbot UI
+- Exposed execution result limits and llm viewable result limits in both API and Chatbot
+- Added parameter to configure AWS STS endpoint as global or regional
+- Fixed slowness in login process
+- Improved performance with better state management system that preloads vectorDB, LLM and embeddings on API startup
+- Fixed metadata queries with blank question bug
+- Fixed graphics generated through Chatbot appearing blank
+- Fixed index not found error when using certain versions of OpenSearch
+- Fixed issue with production flag in run.py
+- Fixed prefix/suffix filter functionality
+- Fixed bug where last_update vector would be overwritten in PGVector
+- Suppressed Chroma warnings related to embedding deletion
+- Changed log level from ERROR to INFO for Data Catalog 204 responses (empty results)
+- Improved error message parsing and readability in VQL execution
+- Updated requirements.txt to remove security vulnerabilities
+- Enhanced network-restricted environment support with offline Swagger docs
+- Deprecated VDB_NAMES and VDB_TAGS environment variables
+- Removed data complexity filter in graph generation
+- Fixed sample data bug in getMetadata
+
 version 0.8.2 - 20250616
 ------------------------
 

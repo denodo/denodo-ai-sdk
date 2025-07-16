@@ -9,6 +9,7 @@ tests/
 logs/
 venv/
 env/
+.vscode/
 google_service_account.json
 package-lock.json
 chatbot_config.env

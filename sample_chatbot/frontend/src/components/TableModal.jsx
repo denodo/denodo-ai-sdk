@@ -3,7 +3,7 @@ import Modal from 'react-bootstrap/Modal';
 import Table from 'react-bootstrap/Table';
 import Pagination from 'react-bootstrap/Pagination';
 
-const TableModal = ({ show, handleClose, executionResult }) => {
+const TableModal = ({ show, llm_response_rows_limit, handleClose, executionResult }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 10;
 
@@ -127,7 +127,9 @@ const TableModal = ({ show, handleClose, executionResult }) => {
         {totalRows > 0 ? (
           <>
             <div className="alert alert-info mb-3">
-              To avoid sending too many tokens to the LLM, it only has access to the first 15 rows. You can view the complete execution result from Denodo here.
+              To avoid sending too many tokens to the LLM, it only has access to
+              the first {llm_response_rows_limit} rows. You can view the
+              complete execution result from Denodo here.
             </div>
             <div className="table-responsive">
               <Table className="custom-table" striped bordered hover variant="dark">

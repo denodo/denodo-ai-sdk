@@ -16,7 +16,7 @@ const Header = ({ isAuthenticated, setIsAuthenticated, handleClearResults, showC
     // Fetch configuration when component mounts
     const fetchConfig = async () => {
       try {
-        const response = await axios.get('/api/config');
+        const response = await axios.get('api/config');
         setConfig(response.data);
       } catch (error) {
         console.error('Error fetching config:', error);
@@ -34,7 +34,7 @@ const Header = ({ isAuthenticated, setIsAuthenticated, handleClearResults, showC
 
   const handleLogout = async () => {
     try {
-      await axios.post("/logout");
+      await axios.post("logout");
       setIsAuthenticated(false);
     } catch (error) {
       console.error("Logout error:", error);
@@ -138,9 +138,10 @@ const Header = ({ isAuthenticated, setIsAuthenticated, handleClearResults, showC
           </div>
         </Container>
       </Navbar>
-      <VectorDBSyncModal 
-        show={showVectorDBSync} 
-        handleClose={() => setShowVectorDBSync(false)} 
+      <VectorDBSyncModal
+        show={showVectorDBSync}
+        syncTimeout={config.syncTimeout}
+        handleClose={() => setShowVectorDBSync(false)}
       />
       <CustomInstructionsModal
         show={showCustomInstructions}

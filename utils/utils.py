@@ -31,6 +31,9 @@ from langchain.callbacks.base import BaseCallbackHandler
 def log_params(func):
     @functools.wraps(func)
     async def async_wrapper(*args, **kwargs):
+        if os.getenv('SENSITIVE_DATA_LOGGING', '0') != '1':
+            return await func(*args, **kwargs)
+        
         func_name = func.__name__
         
         # Log entry
@@ -56,6 +59,9 @@ def log_params(func):
     
     @functools.wraps(func)
     def sync_wrapper(*args, **kwargs):
+        if os.getenv('SENSITIVE_DATA_LOGGING', '0') != '1':
+            return func(*args, **kwargs)
+
         func_name = func.__name__
         
         # Log entry
@@ -179,23 +185,14 @@ def schema_summary(schema):
         else:
             column_description = None
 
-        examples = schema.get('sample_data', [])
-
-        if len(examples) > 0:
-            example_values = list(set(examples))
-            example_values_str = ', '.join(example_values)
-            example_value = f" Example value: {example_values_str}"
-        else:
-            example_value = ""
-
         if column_logical_name is not None and column_description is not None: 
-            summary += f"- {column_name} ({column_type}) -> {column_logical_name}: {column_description}.{example_value}\n"
+            summary += f"- {column_name} ({column_type}) -> {column_logical_name}: {column_description}\n"
         elif column_logical_name is None and column_description is not None: 
-            summary += f"- {column_name} ({column_type}) -> {column_description}.{example_value}\n"
+            summary += f"- {column_name} ({column_type}) -> {column_description}\n"
         elif column_logical_name is not None and column_description is None:
-            summary += f"- {column_name} ({column_type}) -> {column_logical_name}.{example_value}\n"
+            summary += f"- {column_name} ({column_type}) -> {column_logical_name}\n"
         else:
-            summary += f"- {column_name} ({column_type}).{example_value}\n"
+            summary += f"- {column_name} ({column_type})\n"
     
     if "associations" in schema and len(schema['associations']) != 0:
         summary += "\n"
@@ -272,17 +269,23 @@ def create_chunks(table, embeddings_token_limit):
     for i in range(0, len(column_lines), chunk_size):
         current_lines = column_lines[i:i + chunk_size]
         chunk_content = header + "\n".join(current_lines) + association_footer + "\n"
+
+        document_id = f"{base_id}_{len(chunks)}"
         
         # Create metadata for the chunk
         base_metadata = {
             "view_name": table['tableName'],
             "view_json": json.dumps(table),
             "view_id": base_id,  # Same ID for all chunks of the same table
+            "document_id": document_id,
             "database_name": table['tableName'].split('.')[0]
         }
-        
+
+        for tag in table.get('tagDetails', []):
+            base_metadata[f"tag_{tag['name']}"] = "1"
+
         chunks.append(Document(
-            id=f"{base_id}_{len(chunks)}",  # Unique ID for each chunk
+            id=document_id,  # Unique ID for each chunk
             page_content=chunk_content,
             metadata=base_metadata
         ))
@@ -314,26 +317,28 @@ def prepare_sample_data_schema(schema):
         return [Document(
             id=f"{table_id}_tuple_{i}",
             page_content=','.join(tuple),
-            metadata=base_metadata
+            metadata={**base_metadata, "document_id": f"{table_id}_tuple_{i}"}
         ) for i, tuple in enumerate(tuples)]
     
     return [create_sample_data_document(table) for table in schema['views']]
 
 @timed
-def prepare_last_update_vector(last_update_dict, last_update, source_type, source_name):
+def prepare_last_update_vector(last_update_dict, last_update=None, source_type=None, source_name=None):
     if last_update_dict is None:
         last_update_dict = {}
-    if source_type in last_update_dict:
-        last_update_dict[source_type][source_name] = last_update
-    else:
-        last_update_dict[source_type] = {
-            source_name: last_update
-        }
+
+    if all(param is not None for param in [last_update, source_type, source_name]):
+        if source_type in last_update_dict:
+            last_update_dict[source_type][source_name] = last_update
+        else:
+            last_update_dict[source_type] = {
+                source_name: last_update
+            }
 
     return [Document(
         id="last_update",
         page_content="last_update",
-        metadata={"view_id": "last_update", "last_update": json.dumps(last_update_dict)}
+        metadata={"view_id": "last_update", "document_id": "last_update", "last_update_dict": json.dumps(last_update_dict)}
     )]
 
 @timed
@@ -343,11 +348,14 @@ def prepare_schema(schema, embeddings_token_limit = 0):
         table_summary_tokens = calculate_tokens(table_summary)
         if embeddings_token_limit and table_summary_tokens > embeddings_token_limit:
             return create_chunks(table, embeddings_token_limit)
+        
+        id = str(table['id'])
 
         base_metadata = {
             "view_name": table['tableName'],
             "view_json": json.dumps(table),
-            "view_id": str(table['id']),
+            "view_id": id,
+            "document_id": id,
             "database_name": table['tableName'].split('.')[0],
             "last_update": int(time() * 1000)
         }
@@ -356,12 +364,21 @@ def prepare_schema(schema, embeddings_token_limit = 0):
             base_metadata[f"tag_{tag['name']}"] = "1"
 
         return Document(
-            id=str(table['id']),
+            id=id,
             page_content=schema_summary(table),
             metadata=base_metadata
         )
         
     return [create_document(table, embeddings_token_limit) for table in schema['views']]
+
+def normalize_root_path(root_path):
+    if not root_path:
+        return ""
+    
+    if not root_path.startswith("/"):
+        root_path = "/" + root_path
+
+    return root_path.rstrip('/')
 
 class RefreshableBotoSession:
     def __init__(

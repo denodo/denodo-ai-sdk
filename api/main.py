@@ -1,19 +1,22 @@
 import os
 import sys
 import logging
+import logging.config
 import uvicorn
 import warnings
 import platform
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi_offline import FastAPIOffline as FastAPI
 from fastapi.responses import FileResponse
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.utils import sdk_config_loader
-from api.utils.sdk_utils import check_env_variables, test_data_catalog_connection, configure_uvicorn_logging
+from api.utils import sdk_config_loader, state_manager
+from api.utils.sdk_utils import check_env_variables, test_data_catalog_connection
 from api.endpoints import (
     getMetadata,
+    deleteMetadata,
     similaritySearch,
     streamAnswerQuestion,
     streamAnswerQuestionUsingViews,
@@ -22,6 +25,8 @@ from api.endpoints import (
     answerDataQuestion,
     answerMetadataQuestion
 )
+from utils.logging_utils import get_logging_config
+from utils.utils import normalize_root_path
 
 required_vars = [
     "DATA_CATALOG_URL",
@@ -31,8 +36,6 @@ required_vars = [
     "METADATA_CATEGORY",
     "GENERATE_VISUALIZATION",
     "GENERATE_VISUALIZATION_PYTHON_TEMPLATE",
-    "GROUPBY_VQL",
-    "HAVING_VQL",
     "DATES_VQL",
     "ARITHMETIC_VQL",
     "VQL_RULES",
@@ -43,27 +46,24 @@ required_vars = [
     "RELATED_QUESTIONS"
 ]
 
+log_config = get_logging_config()
+logging.config.dictConfig(log_config)
+
 # Ignore warnings
 warnings.filterwarnings("ignore")
 
 # Load and check configuration variables
 check_env_variables(required_vars)
 
-logging.basicConfig(
-    stream=sys.stdout,
-    level=logging.INFO,
-    format='[%(asctime)s] [%(process)d] [%(levelname)s] %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S %z',
-    encoding='utf-8'
-)
-
 # Suppress matplotlib font warnings for graph generation
 logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
 
-log_config = configure_uvicorn_logging()
+# Suppress Chroma warnings related to embedding deletion
+logging.getLogger('chromadb').setLevel(logging.ERROR)
 
 AI_SDK_HOST = os.getenv("AI_SDK_HOST", "0.0.0.0")
 AI_SDK_PORT = int(os.getenv("AI_SDK_PORT", 8008))
+AI_SDK_ROOT_PATH = normalize_root_path(os.getenv("AI_SDK_ROOT_PATH", ""))
 AI_SDK_WORKERS = int(os.getenv("AI_SDK_WORKERS", '1'))
 AI_SDK_VERSION = os.getenv("AI_SDK_VER")
 AI_SDK_SSL_KEY = os.getenv("AI_SDK_SSL_KEY")
@@ -75,8 +75,6 @@ AI_SDK_SQL_GEN_MODEL = os.getenv("SQL_GENERATION_MODEL")
 AI_SDK_EMBEDDINGS_PROVIDER = os.getenv("EMBEDDINGS_PROVIDER")
 AI_SDK_EMBEDDINGS_MODEL = os.getenv("EMBEDDINGS_MODEL")
 AI_SDK_VECTOR_STORE_PROVIDER = os.getenv("VECTOR_STORE")
-AI_SDK_VDB_NAMES = [db.strip() for db in os.getenv("VDB_NAMES", "").split(",")]
-AI_SDK_TAG_NAMES = [tag.strip() for tag in os.getenv("VDB_TAGS", "").split(",")]
 AI_SDK_DATA_CATALOG_URL = os.getenv("DATA_CATALOG_URL")
 AI_SDK_DATA_CATALOG_VERIFY_SSL = bool(int(os.getenv("DATA_CATALOG_VERIFY_SSL", 0)))
 
@@ -88,6 +86,7 @@ def log_ai_sdk_parameters():
         "OS": platform.platform(),
         "AI SDK Host": AI_SDK_HOST,
         "AI SDK Port": AI_SDK_PORT,
+        "AI SDK Root Path": AI_SDK_ROOT_PATH,
         "AI SDK Version": AI_SDK_VERSION,
         "AI SDK Workers": AI_SDK_WORKERS,
         "Using SSL": bool(AI_SDK_SSL_KEY and AI_SDK_SSL_CERT),
@@ -98,8 +97,6 @@ def log_ai_sdk_parameters():
         "Embeddings Provider": AI_SDK_EMBEDDINGS_PROVIDER,
         "Embeddings Model": AI_SDK_EMBEDDINGS_MODEL,
         "Vector Store Provider": AI_SDK_VECTOR_STORE_PROVIDER,
-        "Database Names": AI_SDK_VDB_NAMES,
-        "Tag Names": AI_SDK_TAG_NAMES,
         "Data Catalog URL": AI_SDK_DATA_CATALOG_URL,
         "Data Catalog Connection": test_data_catalog_connection(AI_SDK_DATA_CATALOG_URL, AI_SDK_DATA_CATALOG_VERIFY_SSL),
         "Data Catalog Verify SSL": AI_SDK_DATA_CATALOG_VERIFY_SSL,
@@ -114,6 +111,16 @@ def log_ai_sdk_parameters():
 
     return ai_sdk_params["Data Catalog Connection"]
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Handles startup and shutdown events for the application.
+    """
+    # On startup, initialize all default resources
+    state_manager.initialize_default_resources()
+    yield
+    logging.info("AI SDK has shut down.")
+
 tags = [
     {"name": "Health Check"},
     {"name": "Vector Store"},
@@ -127,9 +134,11 @@ app = FastAPI(
     title = 'Denodo AI SDK',
     summary = 'Be fearless.',
     version = AI_SDK_VERSION,
-    docs_url = None,
-    openapi_tags = tags
-    )
+    openapi_tags = tags,
+    root_path = AI_SDK_ROOT_PATH,
+    favicon_url = "/favicon.ico",
+    lifespan = lifespan
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -143,14 +152,6 @@ app.add_middleware(
 async def favicon():
     return FileResponse("api/static/favicon.ico")
 
-@app.get("/docs", include_in_schema = False)
-async def swagger_ui_html():
-    return get_swagger_ui_html(
-        openapi_url = "/openapi.json",
-        title = "Denodo AI SDK - Documentation",
-        swagger_favicon_url = "favicon.ico"
-    )
-
 @app.get("/health", tags=["Health Check"])
 async def health_check():
     """
@@ -160,6 +161,7 @@ async def health_check():
     return {"status": "OK"}
 
 app.include_router(getMetadata.router)
+app.include_router(deleteMetadata.router)
 app.include_router(similaritySearch.router)
 app.include_router(streamAnswerQuestion.router)
 app.include_router(streamAnswerQuestionUsingViews.router)

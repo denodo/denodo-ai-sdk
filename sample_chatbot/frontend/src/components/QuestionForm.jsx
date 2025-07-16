@@ -25,6 +25,11 @@ const QuestionForm = ({
     }
   }, [question, setQuestionType]);
 
+  const isOnlyCommand = (input) => {
+    const trimmed = input.trim();
+    return !!getCommandType(trimmed) && trimmed.split(/\s+/).length === 1;
+  };
+
   const getCommandType = (input) => {
     const trimmedInput = input.trim().toLowerCase();
     if (trimmedInput.startsWith("/sql") || trimmedInput.startsWith("/data")) {
@@ -57,9 +62,12 @@ const QuestionForm = ({
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!isAuthenticated || !question.trim()) return;
-    
+
     const commandType = getCommandType(question);
-    const finalQuestion = commandType ? question.replace(/^\/\w+\s*/, '').trim() : question;
+    const finalQuestion = commandType ? question.replace(/^\/\w+\s*/, '').trim() : question.trim();
+
+    if (!finalQuestion) return;
+
     const finalQuestionType = commandType || questionType;
 
     const resultIndex = results.length;
@@ -108,7 +116,7 @@ const QuestionForm = ({
               variant="primary" 
               type="submit" 
               size="sm" 
-              disabled={!isAuthenticated || !question.trim()}
+              disabled={!isAuthenticated || !question.trim() || isOnlyCommand(question)}
             >
               {isLoading ? (
                 <Spinner size="sm" animation="border" role="status">

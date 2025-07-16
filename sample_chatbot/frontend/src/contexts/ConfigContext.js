@@ -14,7 +14,7 @@ export const ConfigProvider = ({ children }) => {
   useEffect(() => {
     const fetchConfig = async () => {
       try {
-        const response = await axios.get('/api/config');
+        const response = await axios.get('api/config');
         setConfig(response.data);
       } catch (error) {
         console.error('Error fetching config:', error);

@@ -6,10 +6,11 @@ import Spinner from 'react-bootstrap/Spinner';
 import Alert from 'react-bootstrap/Alert';
 import axios from 'axios';
 
-const VectorDBSyncModal = ({ show, handleClose }) => {
+const VectorDBSyncModal = ({ show, syncTimeout, handleClose }) => {
   const [vdbs, setVdbs] = useState('');
   const [tags, setTags] = useState('');
   const [examplesPerTable, setExamplesPerTable] = useState(100);
+  const [incremental, setIncremental] = useState(true);
   const [parallel, setParallel] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [response, setResponse] = useState(null);
@@ -20,7 +21,7 @@ const VectorDBSyncModal = ({ show, handleClose }) => {
       // Check if credentials are available when modal is shown
       const checkConfig = async () => {
         try {
-          const response = await axios.get('/api/config');
+          const response = await axios.get('api/config');
           setHasCredentials(response.data.hasAISDKCredentials);
         } catch (error) {
           console.error('Error fetching config:', error);
@@ -38,22 +39,37 @@ const VectorDBSyncModal = ({ show, handleClose }) => {
     setResponse(null);
 
     try {
-      const response = await axios.post('/sync_vdbs', {
+      const response = await axios.post('sync_vdbs', {
         vdbs: vdbs.split(',').map(vdb => vdb.trim()).filter(vdb => vdb),
         tags: tags.split(',').map(tag => tag.trim()).filter(tag => tag),
         examples_per_table: examplesPerTable,
+        incremental,
         parallel
-      }, { timeout: 300000 }); // 300 seconds timeout
+      }, { timeout: syncTimeout });
 
-      setResponse({
-        success: true,
-        message: response.data.message
-      });
+      if (response.status === 204) {
+        setResponse({
+          success: true,
+          message: "No Content: 204"
+        });
+      } else {
+        setResponse({
+          success: true,
+          message: response.data.message
+        });
+      }
     } catch (error) {
-      setResponse({
-        success: false,
-        message: error.response?.data?.message || 'An error occurred during synchronization'
-      });
+      if (axios.isAxiosError(error) && error.code === 'ECONNABORTED') {
+        setResponse({
+          success: false,
+          message: `The synchronization timeout has been exceeded (${syncTimeout}ms).`
+        });
+      } else {
+        setResponse({
+          success: false,
+          message: error.response?.data?.message || 'An error occurred during synchronization.'
+        });
+      }
     } finally {
       setIsLoading(false);
     }
@@ -98,7 +114,7 @@ const VectorDBSyncModal = ({ show, handleClose }) => {
               <Form.Label>VDBs to Sync (comma-separated)</Form.Label>
               <Form.Control
                 type="text"
-                placeholder="Leave blank to sync all VDBs or specify a comma-separated list of VDBs to sync"
+                placeholder="Specify a comma-separated list of VDBs to sync"
                 value={vdbs}
                 onChange={(e) => setVdbs(e.target.value)}
               />
@@ -107,7 +123,7 @@ const VectorDBSyncModal = ({ show, handleClose }) => {
               <Form.Label>Tags to Sync (comma-separated)</Form.Label>
               <Form.Control
                 type="text"
-                placeholder="Leave blank or specify a comma-separated list of tags to sync"
+                placeholder="Specify a comma-separated list of tags to sync"
                 value={tags}
                 onChange={(e) => setTags(e.target.value)}
               />
@@ -119,6 +135,14 @@ const VectorDBSyncModal = ({ show, handleClose }) => {
                 min="0"
                 value={examplesPerTable}
                 onChange={(e) => setExamplesPerTable(parseInt(e.target.value))}
+              />
+            </Form.Group>
+            <Form.Group className="mb-3">
+              <Form.Check
+                type="checkbox"
+                label="Enable incremental loading"
+                checked={incremental}
+                onChange={(e) => setIncremental(e.target.checked)}
               />
             </Form.Group>
             <Form.Group className="mb-3">

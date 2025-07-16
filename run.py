@@ -6,6 +6,7 @@ import requests
 import threading
 import subprocess
 import platform
+import time
 
 from rich.text import Text
 from rich.panel import Panel
@@ -13,6 +14,8 @@ from rich.console import Console
 
 from datetime import datetime
 from dotenv import dotenv_values
+
+from utils.utils import normalize_root_path
 
 console = Console()
 
@@ -27,9 +30,10 @@ def parse_arguments():
     parser.add_argument("--server-id", type=int, default=1, help="Server ID (default: 1)")
     parser.add_argument("--dc-user", default="admin", help="Data Catalog user (default: admin)")
     parser.add_argument("--dc-password", default="admin", help="Data Catalog password (default: admin)")
-    parser.add_argument("--no-logs", action="store_true", help="Output logs to console instead of files")
+    parser.add_argument("--no-logs", action="store_true", help="Output logs to console instead of files (interactive mode only)")
     parser.add_argument("--max-log-size", type=int, default=1, help="Maximum log file size in MB before rotation (default: 1)")
     parser.add_argument("--production", action="store_true", help="Run in production mode")
+    parser.add_argument("--background", action="store_true", help="Run processes in the background and exit after they start.")
     return parser.parse_args()
 
 def empty_file(file_path):
@@ -37,62 +41,6 @@ def empty_file(file_path):
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     with open(file_path, 'w', encoding='utf-8'):
         pass
-
-class RotatingLogFile:
-    """
-    A class that handles log rotation based on file size.
-    Creates a new log file when the current one reaches the max_size.
-    """
-    def __init__(self, base_path, max_size=1024*1024):  # Default max_size is 1MB
-        self.base_path = base_path
-        self.max_size = max_size
-        self.current_file = None
-        self.current_path = None
-        self._create_new_log_file()
-    
-    def _create_new_log_file(self):
-        """Create a new log file with timestamp in the filename."""
-        if self.current_file and not self.current_file.closed:
-            self.current_file.close()
-        
-        # Create directory if it doesn't exist
-        os.makedirs(os.path.dirname(self.base_path), exist_ok=True)
-        
-        # Generate filename with timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        base_dir = os.path.dirname(self.base_path)
-        filename = os.path.basename(self.base_path)
-        name, ext = os.path.splitext(filename)
-        
-        # Create the new path with timestamp
-        self.current_path = os.path.join(base_dir, f"{name}_{timestamp}{ext}")
-        
-        # Create and open the new log file
-        self.current_file = open(self.current_path, "w", encoding='utf-8')
-        return self.current_file
-    
-    def write(self, data):
-        """Write data to the log file, rotating if necessary."""
-        self.current_file.write(data)
-        self.current_file.flush()
-        
-        # Check if rotation is needed
-        if self.current_file.tell() >= self.max_size:
-            self._create_new_log_file()
-    
-    def flush(self):
-        """Flush the current log file."""
-        if self.current_file and not self.current_file.closed:
-            self.current_file.flush()
-    
-    def close(self):
-        """Close the current log file."""
-        if self.current_file and not self.current_file.closed:
-            self.current_file.close()
-    
-    def get_current_path(self):
-        """Get the path of the current log file."""
-        return self.current_path
 
 def print_header():
     """Display a stylized header for the application."""
@@ -103,16 +51,20 @@ def print_header():
         width=60
     ))
 
-def print_status(process_type, urls, version=None):
+def print_status(process_type, urls, version=None, root_path_prefix=""):
     """Display a styled status message for running services."""
+
+    server_url = urls[0]
+    full_url = server_url.rstrip('/') + root_path_prefix
+
     if process_type == "api":
         panel = Panel(
             Text.assemble(
                 ("AI SDK ", "bold red"),
                 ("is running at: ", "bold white"),
-                (f"{urls[0]}\n", "green"),
+                (f"{full_url}\n", "green"),
                 ("Swagger docs: ", "bold white"),
-                (f"{urls[0]}/docs\n", "green"),
+                (f"{full_url}/docs\n", "green"),
                 ("AI SDK version: ", "bold white"),
                 (f"{version or 'Unknown'}", "yellow")
             ),
@@ -124,10 +76,11 @@ def print_status(process_type, urls, version=None):
         # Create the text content using Text.assemble instead of append
         segments = []
         for i, url in enumerate(urls):
+            full_chatbot_url = url.rstrip('/') + root_path_prefix
             segments.extend([
                 ("Sample Chatbot ", "bold blue"),
                 ("is running at: ", "bold white"),
-                (url, "green")
+                (full_chatbot_url, "green")
             ])
             if i < len(urls) - 1:
                 segments.append(("\n", ""))
@@ -140,9 +93,16 @@ def print_status(process_type, urls, version=None):
         )
     console.print(panel)
 
-def run_process(process_type, timeout=30, no_logs=False, max_log_size=1, production=False):
+def run_process(process_type, timeout=30, no_logs=False, max_log_size=1, production=False, background=False):
     env = os.environ.copy()
     env['PYTHONIOENCODING'] = 'utf-8'
+
+    if background:
+        no_logs = False
+
+    env['LOG_FILE_PATH'] = os.path.join("logs", f"{process_type}.log")
+    env['LOG_MAX_SIZE_MB'] = str(max_log_size)
+    env['NO_LOGS_TO_FILE'] = str(no_logs)
     
     # Load environment variables from the appropriate .env file
     if process_type == "api":
@@ -153,6 +113,7 @@ def run_process(process_type, timeout=30, no_logs=False, max_log_size=1, product
             WORKERS = sdk_vars.get("AI_SDK_WORKERS", "1")
             SSL_CERT = sdk_vars.get("AI_SDK_SSL_CERT", None)
             SSL_KEY = sdk_vars.get("AI_SDK_SSL_KEY", None)
+            ROOT_PATH = normalize_root_path(sdk_vars.get("AI_SDK_ROOT_PATH", ""))
         else:
             console.print("[yellow]Warning:[/] Environment file api/utils/sdk_config.env not found.")
     elif process_type == "sample_chatbot":
@@ -163,11 +124,11 @@ def run_process(process_type, timeout=30, no_logs=False, max_log_size=1, product
             WORKERS = chatbot_vars.get("CHATBOT_WORKERS", "1")
             SSL_CERT = chatbot_vars.get("CHATBOT_SSL_CERT", None)
             SSL_KEY = chatbot_vars.get("CHATBOT_SSL_KEY", None)
+            ROOT_PATH = normalize_root_path(chatbot_vars.get("CHATBOT_ROOT_PATH", ""))
         else:
             console.print("[yellow]Warning:[/] Environment file sample_chatbot/chatbot_config.env not found.")
         
     success_event = threading.Event()
-    default_log_path = os.path.join("logs", f"{process_type}.log")
 
     with console.status(f"[bold blue]Starting {process_type}...", spinner="dots"):
         if production:            
@@ -191,7 +152,10 @@ def run_process(process_type, timeout=30, no_logs=False, max_log_size=1, product
                 cmd.extend(["--worker-class", "uvicorn.workers.UvicornWorker"])
             
             if SSL_CERT and SSL_KEY:
-                cmd.extend(["--certfile", SSL_CERT, "--keyfile", SSL_KEY])
+                if server_path == uvicorn_path:
+                    cmd.extend(["--ssl-certfile", SSL_CERT, "--ssl-keyfile", SSL_KEY])
+                else:
+                    cmd.extend(["--certfile", SSL_CERT, "--keyfile", SSL_KEY])
         else:
             # Development mode using Python module directly
             cmd = [sys.executable, "-m", f"{process_type}.main"]
@@ -206,18 +170,13 @@ def run_process(process_type, timeout=30, no_logs=False, max_log_size=1, product
             env=env
         )
 
-    if no_logs:
-        log_thread = threading.Thread(
-            target=log_output, 
-            args=(process, sys.stdout, process_type, success_event, production)
-        )
-    else:
-        # Use rotating log file instead of a simple file
-        log_file = RotatingLogFile(default_log_path, max_size=max_log_size * 1024 * 1024)
-        log_thread = threading.Thread(
-            target=log_output, 
-            args=(process, log_file, process_type, success_event, production)
-        )
+    log_thread = threading.Thread(
+        target=log_output, 
+        args=(process, process_type, success_event, production, ROOT_PATH, no_logs)
+    )
+
+    if background:
+        log_thread.daemon = True
 
     log_thread.start()
 
@@ -228,16 +187,17 @@ def run_process(process_type, timeout=30, no_logs=False, max_log_size=1, product
         console.print(f"[bold red]Error:[/] {process_type} failed to start within {timeout} seconds")
         raise TimeoutError(f"{process_type} failed to start within {timeout} seconds")
     
-    return process, log_thread, log_file if not no_logs else None
+    return process, log_thread
 
-def log_output(process, log_file, process_type, success_event, production=False):
+def log_output(process, process_type, success_event, production=False, root_path_prefix="", print_to_console=False):
     urls = []
     version = None
     
     try:
         for line in process.stdout:
-            log_file.write(line)
-            log_file.flush()
+            if print_to_console:
+                sys.stdout.write(line)
+                sys.stdout.flush()
             
             if process_type == "api":
                 if production and platform.system() != "Windows":
@@ -247,7 +207,7 @@ def log_output(process, log_file, process_type, success_event, production=False)
                         if version_match:
                             version = version_match.group(1)
                             if urls and not success_event.is_set():
-                                print_status("api", urls, version)
+                                print_status("api", urls, version, root_path_prefix=root_path_prefix)
                                 success_event.set()
                     
                     if "Listening at:" in line:
@@ -255,12 +215,12 @@ def log_output(process, log_file, process_type, success_event, production=False)
                         if match:
                             urls.append(match.group(1))
                             if version is not None:
-                                print_status("api", urls, version)
+                                print_status("api", urls, version, root_path_prefix=root_path_prefix)
                                 success_event.set()
                             elif not success_event.is_set():
                                 def delayed_status():
                                     if not success_event.is_set():
-                                        print_status("api", urls, version)
+                                        print_status("api", urls, version, root_path_prefix=root_path_prefix)
                                         success_event.set()
                                 t = threading.Timer(5.0, delayed_status)
                                 t.daemon = True
@@ -272,7 +232,7 @@ def log_output(process, log_file, process_type, success_event, production=False)
                         if version_match:
                             version = version_match.group(1)
                             if urls and not success_event.is_set():
-                                print_status("api", urls, version)
+                                print_status("api", urls, version, root_path_prefix=root_path_prefix)
                                 success_event.set()
                     
                     if "Uvicorn running on" in line:
@@ -280,12 +240,12 @@ def log_output(process, log_file, process_type, success_event, production=False)
                         if match:
                             urls.append(match.group(1))
                             if version is not None:
-                                print_status("api", urls, version)
+                                print_status("api", urls, version, root_path_prefix=root_path_prefix)
                                 success_event.set()
                             elif not success_event.is_set():
                                 def delayed_status():
                                     if not success_event.is_set():
-                                        print_status("api", urls, version)
+                                        print_status("api", urls, version, root_path_prefix=root_path_prefix)
                                         success_event.set()
                                 t = threading.Timer(5.0, delayed_status)
                                 t.daemon = True
@@ -299,7 +259,7 @@ def log_output(process, log_file, process_type, success_event, production=False)
                         if match:
                             urls.append(match.group(1))
                             if not success_event.is_set():
-                                print_status("sample_chatbot", urls)
+                                print_status("sample_chatbot", urls, root_path_prefix=root_path_prefix)
                                 success_event.set()
                 elif production and platform.system() == "Windows":
                     if "running on" in line:
@@ -307,7 +267,7 @@ def log_output(process, log_file, process_type, success_event, production=False)
                         if match:
                             urls.append(match.group(1))
                             if not success_event.is_set():
-                                print_status("sample_chatbot", urls)
+                                print_status("sample_chatbot", urls, root_path_prefix=root_path_prefix)
                                 success_event.set()
                 else:
                     # Development mode patterns
@@ -316,7 +276,7 @@ def log_output(process, log_file, process_type, success_event, production=False)
                         if match:
                             urls.append(match.group(1))
                             if not success_event.is_set():
-                                print_status("sample_chatbot", urls)
+                                print_status("sample_chatbot", urls, root_path_prefix=root_path_prefix)
                                 success_event.set()
                     
     except ValueError as e:
@@ -400,11 +360,40 @@ def load_demo_data(host, grpc_port, catalog_port, server_id, dc_user, dc_passwor
     
     return success
 
+def shutdown_gracefully(processes_to_shutdown, timeout=5):
+    """Gracefully shuts down all running subprocesses, ensuring it only runs once."""
+    if getattr(shutdown_gracefully, 'called', False):
+        return
+    shutdown_gracefully.called = True
+
+    console.print("\n[bold yellow]Shutting down gracefully...[/]")
+    for name, process in processes_to_shutdown:
+        if process.poll() is None:
+            console.print(f"[yellow]Stopping {name} process...[/]")
+            process.terminate()
+            try:
+                process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                console.print(f"[red]Force killing {name} process...[/]")
+                process.kill()
+
+def command_listener(processes_to_shutdown):
+    """Waits for the user to type 'exit' and then shuts down processes."""
+    while True:
+        try:
+            command = input()
+            if command.strip().lower() == 'exit':
+                shutdown_gracefully(processes_to_shutdown)
+                break
+        except (EOFError, KeyboardInterrupt):
+            shutdown_gracefully(processes_to_shutdown)
+            break
+
 if __name__ == "__main__":
     args = parse_arguments()
+    processes_to_run = []
     processes = []
     log_threads = []
-    log_files = []
 
     print_header()
     
@@ -423,51 +412,61 @@ if __name__ == "__main__":
                 sys.exit(1)
 
         if args.mode in ["api", "both"]:
-            api_process, api_log_thread, api_log_file = run_process("api", args.timeout, args.no_logs, args.max_log_size, args.production)
-            processes.append(("API", api_process))
-            log_threads.append(api_log_thread)
-            if api_log_file:
-                log_files.append(api_log_file)
-        
+            processes_to_run.append("api")
         if args.mode in ["sample_chatbot", "both"]:
-            chatbot_process, chatbot_log_thread, chatbot_log_file = run_process("sample_chatbot", args.timeout, args.no_logs, args.max_log_size, args.production)
-            processes.append(("Chatbot", chatbot_process))
-            log_threads.append(chatbot_log_thread)
-            if chatbot_log_file:
-                log_files.append(chatbot_log_file)
+            processes_to_run.append("sample_chatbot")
 
-        # Wait for processes to complete or Ctrl+C
+        any_failures = False
+        for process_name in processes_to_run:
+            try:
+                process, log_thread = run_process(process_name, args.timeout, args.no_logs, args.max_log_size, args.production, args.background)
+                if process_name == "api":
+                    processes.append(("API", process))
+                elif process_name == "sample_chatbot":
+                    processes.append(("Chatbot", process))
+                log_threads.append(log_thread)
+            except TimeoutError as e:
+                console.print(f"[bold red]Error:[/] {e}")
+                any_failures = True
+
+        if args.background:
+            if any_failures:
+                console.print("\n[bold red]One or more services failed to start. Check the logs. Processes that started successfully are running in the background.[/]")
+                sys.exit(1)
+            else:
+                console.print("\n[bold green]All services started successfully in the background.[/]")
+                console.print("[bold cyan]Use stop.py to stop the services.[/bold cyan]")
+                sys.exit(0)
+
+        if processes:
+            console.print("\n[bold cyan]Type 'exit' and press Enter to stop the application(s).[/bold cyan]")
+            cmd_listener_thread = threading.Thread(
+                target=command_listener,
+                args=(processes,),
+                daemon=True
+            )
+            cmd_listener_thread.start()
+
         while any(p[1].poll() is None for p in processes):
-            for name, process in processes:
+            for name, process in list(processes):
                 if process.poll() is not None:
-                    console.print(f"[yellow]{name} process ended.[/]")
-            
+                    console.print(f"[yellow]{name} process ended unexpectedly.[/]")
+                    processes.remove((name, process))
+            time.sleep(1)
+
     except KeyboardInterrupt:
-        console.print("\n[bold yellow]Received interrupt signal. Shutting down gracefully...[/]")
-        for name, process in processes:
-            if process.poll() is None:
-                console.print(f"[yellow]Stopping {name} process...[/]")
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    console.print(f"[red]Force killing {name} process...[/]")
-                    process.kill()
-        
-    except TimeoutError as e:
-        console.print(f"[bold red]Error:[/] {str(e)}")
+        shutdown_gracefully(processes)
 
     except Exception as e:
         console.print(f"[bold red]Error:[/] {e}")
+        shutdown_gracefully(processes)
         sys.exit(1)
     
     finally:
-        # Cleanup
-        for thread in log_threads:
-            thread.join()
-        for file in log_files:
-            if hasattr(file, 'close'):
-                file.close()
-        
-        console.print("[bold green]Shutdown complete.[/]")
-        sys.exit(0)
+        # Cleanup for interactive mode
+        if not args.background:
+            for thread in log_threads:
+                thread.join()
+            
+            console.print("[bold green]Shutdown complete.[/]")
+            sys.exit(0)

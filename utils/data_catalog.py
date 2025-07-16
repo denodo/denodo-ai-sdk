@@ -26,7 +26,9 @@ DATA_CATALOG_EXECUTION_URL = f"{DATA_CATALOG_URL}public/api/askaquestion/execute
 DATA_CATALOG_PERMISSIONS_URL = f"{DATA_CATALOG_URL}public/api/views/allowed-identifiers"
 DATA_CATALOG_INCREMENTAL_UPDATE_URL = f"{DATA_CATALOG_URL}public/api/ai-sdk/configuration"
 
-EXECUTE_VQL_LIMIT = 100
+class DataCatalogAuthError(Exception):
+    """Custom exception for Data Catalog authentication failures."""
+    pass
 
 @timed
 def get_views_metadata_documents(
@@ -201,8 +203,21 @@ def get_views_metadata_documents(
         logging.error("Failed to connect to the server: %s", str(e))
         raise
 
+async def is_empty_result(json_response):
+    if not json_response.get('rows'):
+        return True, "Query executed successfully but returned an empty result (no rows)."
+
+    # Check for single row with single column containing 0 or null
+    if (len(json_response['rows']) == 1 and  # Single row
+        len(json_response['rows'][0]['values']) == 1 and  # Single column
+        (str(json_response['rows'][0]['values'][0]['value']) == '0' or  # Value is 0
+            json_response['rows'][0]['values'][0]['value'] is None)):  # Value is null/None
+        return True, f"Query executed successfully but returned a single row with a value of 0 or null: {parse_execution_json(json_response)}"
+
+    return False, ""
+
 @timed
-async def execute_vql(vql, auth, limit=EXECUTE_VQL_LIMIT, execution_url=DATA_CATALOG_EXECUTION_URL, 
+async def execute_vql(vql, auth, limit, execution_url=DATA_CATALOG_EXECUTION_URL, 
                 server_id=DATA_CATALOG_SERVER_ID, verify_ssl=DATA_CATALOG_VERIFY_SSL):
     """
     Execute VQL against Data Catalog with support for OAuth token or Basic auth.
@@ -240,30 +255,42 @@ async def execute_vql(vql, auth, limit=EXECUTE_VQL_LIMIT, execution_url=DATA_CAT
                 headers=headers,
                 ssl=verify_ssl
             ) as response:
-                response.raise_for_status()
-                json_response = await response.json()
+                status_code = response.status
+                # Try to parse as JSON first
+                try:
+                    json_response = await response.json()
+                    
+                    # Success case
+                    if 200 <= status_code < 300:
+                        # Check for empty results
+                        is_empty, empty_message = await is_empty_result(json_response)
+                        if is_empty:
+                            return 499, empty_message
+                        
+                        return status_code, parse_execution_json(json_response)
+                    
+                    # Error case with JSON response
+                    if isinstance(json_response, dict) and 'message' in json_response:
+                        return status_code, json_response.get('message')
+                    else:
+                        return status_code, str(json_response)
                 
-                # Check for empty results in multiple scenarios
-                if not json_response.get('rows'):
-                    logging.info("Query returned no results.")
-                    return 499, "Query executed succesfully but returned an empty result (no rows)."
-                elif (len(json_response['rows']) == 1 and  # Single row
-                    len(json_response['rows'][0]['values']) == 1 and  # Single column
-                    (str(json_response['rows'][0]['values'][0]['value']) == '0' or  # Value is 0
-                     json_response['rows'][0]['values'][0]['value'] is None)):  # Value is null/None
-                    logging.info("Query returned only one row, one column with a value of 0 or null")
-                    return 499, f"Query executed succesfully but returned a single row with a value of 0 or null: {parse_execution_json(json_response)}"
-                logging.info("Query executed successfully")
-                return response.status, parse_execution_json(json_response)
+                except json.JSONDecodeError:
+                    # Non-JSON response
+                    text_response = await response.text()
+                    return status_code, text_response
     except aiohttp.ClientResponseError as e:
         try:
             error_text = await e.response.text()
-            error_response = json.loads(error_text)
-            error_message = str(error_response.get('message', 'Data Catalog did not return further details'))
+            error_json = json.loads(error_text)
+            # If we have a structured JSON error with a message field, return that
+            if isinstance(error_json, dict) and 'message' in error_json:
+                return e.status, error_json.get('message')
+            else:
+                return e.status, str(error_json)
         except (json.JSONDecodeError, AttributeError):
-            error_message = f"HTTP Error: {e.status} - {e.message}"
-        logging.error(f"Data Catalog execute VQL failed: {error_message}")
-        return e.status, error_message
+            return e.status, f"HTTP Error: {e.status} - {e.message}"
+            
     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         error_message = f"Failed to connect to the server: {str(e)}"
         logging.error(f"{error_message}. VQL: {vql}")
@@ -275,7 +302,8 @@ async def get_allowed_view_ids(
     auth,
     server_id=DATA_CATALOG_SERVER_ID,
     permissions_url=DATA_CATALOG_PERMISSIONS_URL,
-    verify_ssl=DATA_CATALOG_VERIFY_SSL
+    verify_ssl=DATA_CATALOG_VERIFY_SSL,
+    raise_on_auth_error: bool = False
 ):
     """
     Retrieve allowed view IDs for all views accessible to the user.
@@ -285,6 +313,8 @@ async def get_allowed_view_ids(
         server_id: The server ID (default is DATA_CATALOG_SERVER_ID)
         permissions_url: The Data Catalog permissions URL
         verify_ssl: Whether to verify SSL certificates
+        raise_on_auth_error: If True, raises DataCatalogAuthError on 401. 
+                             If False (default), returns an empty list on any error.
 
     Returns:
        List of unique allowed view IDs across all accessible views
@@ -322,6 +352,10 @@ async def get_allowed_view_ids(
                 return unique_view_ids
                 
     except aiohttp.ClientResponseError as e:
+        if e.status == 401 and raise_on_auth_error:
+            msg = "Authentication failed: Invalid credentials for Data Catalog."
+            logging.error(msg)
+            raise DataCatalogAuthError(msg) from e
         try:
             error_text = await e.response.text()
             error_response = json.loads(error_text)
@@ -370,18 +404,18 @@ def parse_metadata_json(
 
     for table in json_response:
         json_table = remove_none_values(table)
-        table_database = json_table['databaseName']
-        table_name = json_table['name']
+        table_database = json_table.get('databaseName', '')
+        table_name = json_table.get('name', '')
         table_name = f"{table_database}.{table_name}"   
         table_name = table_name.replace('"', '')      
 
         if table_name in filter_tables:
             continue
 
-        if view_prefix_filter and not table_name.startswith(view_prefix_filter):
+        if view_prefix_filter and not json_table.get('name', '').startswith(view_prefix_filter):
             continue
 
-        if view_suffix_filter and not table_name.endswith(view_suffix_filter):
+        if view_suffix_filter and not json_table.get('name', '').endswith(view_suffix_filter):
             continue
 
         if 'viewFieldDataList' in json_table:
