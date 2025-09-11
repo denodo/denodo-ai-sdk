@@ -2,9 +2,55 @@
 
 # Denodo AI SDK
 
-The complete user manual for the Denodo AI SDK is available [in the Denodo Connects documentation section](https://community.denodo.com/docs/html/browse/9.0/en/denodoconnects/index).
+Denodo AI SDK helps you quickly build AI chatbots and agents that answer questions using your enterprise data, combining search + generative AI for accurate, context-aware results.
 
-The Denodo AI SDK includes all the necessary components required to deploy a query RAG AI agent.
+It connects to the Denodo Platform, works with popular LLMs and vector stores, and ships with a ready-to-run sample chatbot and simple APIs to get started fast.
+
+The complete user manual for the Denodo AI SDK is available [here](https://community.denodo.com/docs/html/document/denodoconnects/latest/en/Denodo%20AI%20SDK%20-%20User%20Manual).
+
+## DeepQuery
+
+### Requirements to use Denodo DeepQuery
+
+- A thinking model from either OpenAI/AWS Bedrock/Google Vertex (Not Ollama).
+- An minimum allowance of minimum 50RPM OpenAI/AWS Bedrock/Google Vertex.
+- Powerful thinking model with over 128k context length.
+
+### Installation
+
+1. Delete any previous vector store and virtual environment.
+2. Create a new virtual environment (`python -m venv venv`), activate it (`source venv/bin/activate` or `.\venv\Scripts\activate`) and install the requirements.txt (`python -m pip install -r requirements.txt`)
+3. Run `venv/bin/playwright install`
+
+### Configuration
+
+Depending on your LLM provider, here's a guide on how to configure Denodo DeepQuery:
+
+#### OpenAI (recommended model: o4-mini)
+```
+THINKING_PROVIDER=openai
+THINKING_MODEL=o4-mini
+```
+
+#### AWS Bedrock (recommended model: claude-4-sonnet)
+```
+THINKING_PROVIDER = bedrock
+THINKING_MODEL = us.anthropic.claude-sonnet-4-20250514-v1:0
+
+AWS_CLAUDE_THINKING = 1
+AWS_CLAUDE_THINKING_TOKENS = 2048
+```
+Please note that AWS Bedrock requires the previously mentioned extra env variables in sdk_config.env to activate thinking.
+
+#### Google Vertex (recommended model: gemini-2.5-pro)
+```
+THINKING_PROVIDER = google
+THINKING_MODEL = gemini-2.5-pro
+
+GOOGLE_THINKING = 1
+GOOGLE_THINKING_TOKENS = 2048
+```
+Please note that Google requires the previously mentioned extra env variables in sdk_config.env to activate thinking.
 
 ## AI SDK Benchmarks
 

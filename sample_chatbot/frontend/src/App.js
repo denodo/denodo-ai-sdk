@@ -3,22 +3,29 @@ import Header from "./components/Header/Header";
 import Results from "./components/Results";
 import QuestionForm from "./components/QuestionForm";
 import SignInModal from "./components/SignInModal";
+import PDFManagementModal from "./components/PDFManagementModal";
 import axios from 'axios';
 import CSVUploadModal from "./components/CSVUploadModal";
+import useSDK from './hooks/useSDK';
 
 const App = () => {
   const [results, setResults] = useState([]);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [showSignInModal, setShowSignInModal] = useState(false);
-  const [conversationHistory, setConversationHistory] = useState([]);
-  const [conversationTokens, setConversationTokens] = useState(0);
   const [questionType, setQuestionType] = useState("general");
-  const [processSteps, setProcessSteps] = useState([]); // New state for process steps
   const [showCSVModal, setShowCSVModal] = useState(false);
+  const [currentQuestion, setCurrentQuestion] = useState("");
+  const [completedRequestId, setCompletedRequestId] = useState(null);
 
-  const handleSignIn = async (userCredentials) => {
+  const handleRequestCompletion = (requestId) => {
+    setCompletedRequestId(requestId);
+  };
+
+  const sdk = useSDK(setResults, handleRequestCompletion);
+
+  const handleSignIn = async (userInformation) => {
     try {
-      const response = await axios.post('login', userCredentials);
+      const response = await axios.post('login', userInformation);
       if (response.data.success) {
         setIsAuthenticated(true);
         setShowSignInModal(false);
@@ -65,7 +72,7 @@ const App = () => {
   };
 
   return (
-    <div className="d-flex flex-column vh-100" style={{ backgroundColor: "#343a40" }}>
+    <div className="d-flex flex-column vh-100" style={{ backgroundColor: "#fff" }}>
       <Header 
         isAuthenticated={isAuthenticated} 
         setIsAuthenticated={setIsAuthenticated}
@@ -76,14 +83,20 @@ const App = () => {
       <div className="flex-grow-1 overflow-auto" style={{ marginTop: "76px", marginBottom: "100px", padding: "0 20px" }}>
         {!isAuthenticated && (
           <div className="d-flex justify-content-center align-items-center h-100">
-            <button onClick={() => setShowSignInModal(true)} className="btn btn-primary btn-lg">
+            <button 
+              onClick={() => setShowSignInModal(true)} 
+              className="btn btn-primary btn-lg"
+              style={{ backgroundColor: '#112533', borderColor: '#112533', borderRadius: '1.25em' }}
+            >
               Sign in
             </button>
           </div>
         )}
         <Results 
           results={results} 
-          setResults={setResults} 
+          setResults={setResults}
+          setCurrentQuestion={setCurrentQuestion}
+          setQuestionType={setQuestionType}
         />
       </div>
       <QuestionForm 
@@ -92,6 +105,10 @@ const App = () => {
         isAuthenticated={isAuthenticated}
         questionType={questionType}
         setQuestionType={setQuestionType}
+        currentQuestion={currentQuestion}
+        setCurrentQuestion={setCurrentQuestion}
+        sdk={sdk}
+        completedRequestId={completedRequestId}
       />
       <SignInModal
         show={showSignInModal}
@@ -103,6 +120,7 @@ const App = () => {
         handleClose={() => setShowCSVModal(false)}
         onUpload={handleCSVUpload}
       />
+      <PDFManagementModal />
     </div>
   );
 };

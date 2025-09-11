@@ -1,152 +1,399 @@
+/* Loading border animation - ONLY for Results cards */
+.card-loading-pulse {
+  border: 2px solid #6c757d !important;
+  animation: loading-pulse 1.5s ease-in-out infinite !important;
+}
+
+@keyframes loading-pulse {
+  0% {
+    border-color: #6c757d;
+    box-shadow: 0 0 0 0 rgba(108, 117, 125, 0.7);
+  }
+  50% {
+    border-color: #adb5bd;
+    box-shadow: 0 0 0 10px rgba(173, 181, 189, 0);
+  }
+  100% {
+    border-color: #6c757d;
+    box-shadow: 0 0 0 0 rgba(108, 117, 125, 0);
+  }
+}
+
+/* Badge pulse animation for intermediate loading */
+.badge-pulse {
+  animation: badge-pulse 1.5s ease-in-out infinite !important;
+}
+
+@keyframes badge-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Query loading text styling */
+.query-loading-text {
+  color: #112533 !important;
+  font-style: italic;
+  margin-bottom: 1rem;
+}
+
+.query-loading-text .spinner-border {
+  color: #112533;
+  flex-shrink: 0; /* Prevent spinner from shrinking */
+}
+
+.query-loading-text span {
+  word-break: break-word; /* Allow long words to break */
+  overflow-wrap: break-word; /* Handle long text gracefully */
+  line-height: 1.4; /* Better line spacing for multi-line text */
+}
+
+
 .w-60 {
-    width: 60% !important;
-    max-width: 60% !important;
-  }
-  .modal-content {
-    border: 1px solid white !important;
-  }
-  .modal-header .btn-close {
-    color: white;
-    filter: invert(1) grayscale(100%) brightness(200%);
-  }
-  .custom-header-modal .btn-close{
-    filter: none;
-  }
-  .csv-link {
-    display: block;
-  }
-  .cursor-pointer {
-    cursor: pointer;
-  }
-  table {
-    border-collapse: collapse;
-    width: 100%;
-    margin-bottom: 1rem;
-    color: white;
-    table-layout: fixed;
-  }
-  th, td {
-    border: 1px solid #444;
-    padding: 8px;
-    text-align: left;
-    word-wrap: break-word;
-    overflow-wrap: break-word;
-  }
-  th {
-    background-color: #333;
-    font-weight: bold;
-  }
-  tr:nth-child(even) {
-    background-color: #2a2a2a;
-  }
-  .graph-image {
-    max-width: 100%;
-    height: auto;
-    object-fit: contain;
-  }
-  .related-tables {
-    margin-top: 10px;
-  }
-  .w-100 {
-    width: 100% !important;
-  }
-  .table-responsive {
-    overflow-x: auto;
-    max-width: 100%;
-  }
-  .custom-table {
-    width: 100%;
-    min-width: 300px;
-  }
-  .custom-table th,
-  .custom-table td {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 200px;
-  }
-  .mt-2 {
-    margin-top: 0.5rem;
-  }
-  .card {
-    width: 100%;
-    overflow-wrap: break-word;
-    word-wrap: break-word;
-  }
-  .card-body {
-    overflow: hidden;
-  }
-  .context-badges-container {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin-top: 4px;
-  }
+  width: 60% !important;
+  max-width: 60% !important;
+}
+.w-70 {
+  width: 70% !important;
+  max-width: 70% !important;
+}
+.modal-content {
+  border: 1px solid white !important;
+}
+.modal-header .btn-close {
+  color: white;
+  filter: invert(1) grayscale(100%) brightness(200%);
+}
+.custom-header-modal .btn-close{
+  color: white;
+  filter: invert(1) grayscale(100%) brightness(200%);
+}
+.csv-link {
+  display: block;
+}
+.cursor-pointer {
+  cursor: pointer;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 1rem;
+  color: white;
+  table-layout: fixed;
+}
+th, td {
+  border: 1px solid #ddd;
+  padding: 8px;
+  text-align: left;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+th {
+  background-color: #112533;
+  font-weight: bold;
+  color: white;
+}
+tr:nth-child(odd) {
+  background-color: #112533;
+  color: white;
+}
+tr:nth-child(even) {
+  background-color: #1a3a4d;
+  color: white;
+}
+.graph-image {
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+.related-tables {
+  margin-top: 10px;
+}
+.w-100 {
+  width: 100% !important;
+}
+.table-responsive {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.custom-table {
+  width: 100%;
+  min-width: 300px;
+}
+.custom-table th,
+.custom-table td {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+.mt-2 {
+  margin-top: 0.5rem;
+}
+.card {
+  width: 100%;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+}
+.card-body {
+  overflow: hidden;
+}
+.context-badges-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
 
-  .card-body .card-text pre,
-  .card-body .card-text table {
-    max-width: 100%; 
-    overflow-x: auto; 
-    display: block; 
+.card-body .card-text pre,
+.card-body .card-text table {
+  max-width: 100%; 
+  overflow-x: auto; 
+}
+
+.card-body .card-text table {
+  border-collapse: collapse;
+  margin-bottom: 1rem;
+}
+
+.card-body .card-text pre::-webkit-scrollbar,
+.card-body .card-text table::-webkit-scrollbar {
+  height: 8px;
+}
+
+.card-body .card-text pre::-webkit-scrollbar-track,
+.card-body .card-text table::-webkit-scrollbar-track {
+  background: #444; 
+  border-radius: 4px;
+}
+
+.card-body .card-text pre::-webkit-scrollbar-thumb,
+.card-body .card-text table::-webkit-scrollbar-thumb {
+  background: #888; 
+  border-radius: 4px;
+}
+
+.card-body .card-text pre::-webkit-scrollbar-thumb:hover,
+.card-body .card-text table::-webkit-scrollbar-thumb:hover {
+  background: #aaa;
+}
+
+.markdown-container {
+  width: 100%;
+  overflow-x: auto;
+}
+
+
+.markdown-container table {
+  max-width: none; 
+  border-collapse: collapse;
+  margin-bottom: 1rem;
+}
+
+.markdown-container::-webkit-scrollbar {
+  height: 8px;
+}
+
+.markdown-container::-webkit-scrollbar-track {
+  background: #444;
+  border-radius: 4px;
+}
+
+.markdown-container::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+.markdown-container::-webkit-scrollbar-thumb:hover {
+  background: #aaa;
+}
+
+.card-content-area {
+  min-width: 0; /* Allows flex items to shrink below their content size */
+}
+
+/* Analytical Question Styling - Only for Results component */
+.card-content-area .analyst-question-btn {
+  background: linear-gradient(135deg, #ED342A 0%, #413581 100%) !important;
+  border: 2px solid #ED342A !important;
+  box-shadow: 0 2px 8px rgba(237, 52, 42, 0.3) !important;
+  transition: all 0.3s ease !important;
+  position: relative !important;
+  overflow: hidden !important;
+  min-height: 44px !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+.card-content-area .analyst-question-btn:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 4px 12px rgba(237, 52, 42, 0.5) !important;
+  border-color: #ED342A !important;
+}
+
+.card-content-area .analyst-question-btn:before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left 0.5s;
+}
+
+.card-content-area .analyst-question-btn:hover:before {
+  left: 100%;
+}
+
+.analyst-mode-badge {
+  background: #112533 !important;
+  color: white !important;
+  font-weight: bold !important;
+  font-size: 0.7rem !important;
+  padding: 0.2rem 0.4rem !important;
+  margin: 0 !important;
+}
+
+
+
+/* Context more button styling */
+.context-more-btn {
+  border: 2px solid #28a745 !important;
+  background: transparent !important;
+  color: #28a745 !important;
+  font-weight: bold !important;
+  transition: all 0.3s ease !important;
+}
+
+.context-more-btn:hover {
+  background: #28a745 !important;
+  color: white !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 2px 4px rgba(40, 167, 69, 0.3) !important;
+}
+
+/* Override Bootstrap h3 font size */
+h3 {
+  font-size: 1.25em !important;
+}
+
+
+
+/* Related Questions Styling */
+.related-question-btn {
+  transition: all 0.3s ease !important;
+  min-height: 44px !important;
+  display: flex !important;
+  align-items: center !important;
+  color: #112533 !important;
+  border-color: #112533 !important;
+}
+
+.related-question-btn:hover {
+  border-color: #112533 !important;
+  transform: translateY(-1px) !important;
+  background-color: rgba(17, 37, 51, 0.1) !important;
+  color: #112533 !important;
+  box-shadow: 0 2px 8px rgba(17, 37, 51, 0.2) !important;
+}
+
+/* Fix arrow visibility on hover - ensure arrows stay visible with original button styling */
+.related-question-btn:hover .carousel-arrow-inner {
+  color: rgba(17, 37, 51, 0.9) !important;
+}
+
+.related-question-btn:hover .carousel-arrow-inner:hover {
+  color: #112533 !important;
+  background: rgba(17, 37, 51, 0.2) !important;
+}
+
+/* Carousel arrows inside buttons */
+.carousel-arrow-inner {
+  font-size: 16px;
+  color: rgba(17, 37, 51, 0.7);
+  cursor: pointer;
+  padding: 4px 8px;
+  transition: all 0.3s ease;
+  border-radius: 4px;
+  margin: 0 8px;
+}
+
+.carousel-arrow-inner:hover {
+  color: #112533;
+  background: rgba(17, 37, 51, 0.1);
+  transform: scale(1.2);
+}
+
+/* Related question text with animation */
+.related-question-text {
+  transition: all 0.4s ease;
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* VectorDB Management Modal Tab Styling */
+#vdb-management-tabs .nav-link {
+  color: white !important;
+}
+
+#vdb-management-tabs .nav-link:hover {
+  color: white !important;
+}
+
+#vdb-management-tabs .nav-link.active {
+  color: #000000 !important;
+  background-color: white !important;
+}
+
+/* Form check input styling */
+.form-check-input:checked {
+  background-color: #2D3E4B !important;
+  border-color: #2D3E4B !important;
+}
+
+/* Question form placeholder text styling */
+.form-control::placeholder {
+  color: #6c757d !important;
+  opacity: 0.7;
+}
+
+/* Animation classes for question transitions */
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
   }
-
-  .card-body .card-text table {
-    border-collapse: collapse;
-    margin-bottom: 1rem;
+  to {
+    opacity: 1;
+    transform: translateX(0);
   }
+}
 
-  .card-body .card-text pre::-webkit-scrollbar,
-  .card-body .card-text table::-webkit-scrollbar {
-    height: 8px;
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
   }
-
-  .card-body .card-text pre::-webkit-scrollbar-track,
-  .card-body .card-text table::-webkit-scrollbar-track {
-    background: #444; 
-    border-radius: 4px;
+  to {
+    opacity: 1;
+    transform: translateX(0);
   }
+}
 
-  .card-body .card-text pre::-webkit-scrollbar-thumb,
-  .card-body .card-text table::-webkit-scrollbar-thumb {
-    background: #888; 
-    border-radius: 4px;
-  }
+.related-question-text.slide-in-right {
+  animation: slideInRight 0.4s ease;
+}
 
-  .card-body .card-text pre::-webkit-scrollbar-thumb:hover,
-  .card-body .card-text table::-webkit-scrollbar-thumb:hover {
-    background: #aaa;
-  }
-
-  .markdown-container {
-    width: 100%;
-    overflow-x: auto;
-  }
-
-
-  .markdown-container table {
-    max-width: none; 
-    border-collapse: collapse;
-    margin-bottom: 1rem;
-  }
-
-  .markdown-container::-webkit-scrollbar {
-    height: 8px;
-  }
-
-  .markdown-container::-webkit-scrollbar-track {
-    background: #444;
-    border-radius: 4px;
-  }
-
-  .markdown-container::-webkit-scrollbar-thumb {
-    background: #888;
-    border-radius: 4px;
-  }
-
-  .markdown-container::-webkit-scrollbar-thumb:hover {
-    background: #aaa;
-  }
-
-  .card-content-area {
-    min-width: 0; /* Allows flex items to shrink below their content size */
-  }  
+.related-question-text.slide-in-left {
+  animation: slideInLeft 0.4s ease;
+}  

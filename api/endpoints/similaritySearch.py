@@ -1,5 +1,5 @@
 """
- Copyright (c) 2024. DENODO Technologies.
+ Copyright (c) 2025. DENODO Technologies.
  http://www.denodo.com
  All rights reserved.
 
@@ -26,7 +26,7 @@ from api.utils.sdk_utils import filter_non_allowed_associations, handle_endpoint
 router = APIRouter()
 security_basic = HTTPBasic(auto_error = False)
 security_bearer = HTTPBearer(auto_error = False)
-    
+
 def authenticate(
         basic_credentials: Annotated[HTTPBasicCredentials, Depends(security_basic)],
         bearer_credentials: Annotated[HTTPAuthorizationCredentials, Depends(security_bearer)]
@@ -50,7 +50,7 @@ class similaritySearchRequest(BaseModel):
 
 class similaritySearchResponse(BaseModel):
     views: List[str]
-    
+
 @router.get(
         '/similaritySearch',
         response_class = JSONResponse,
@@ -104,8 +104,8 @@ async def similaritySearch(endpoint_request: similaritySearchRequest = Depends()
                 ),
                 "view_text": (result[0] if endpoint_request.scores else result).page_content,
                 "database_name": (result[0] if endpoint_request.scores else result).metadata["database_name"],
-                **{key: (result[0] if endpoint_request.scores else result).metadata[key] 
-                    for key in (result[0] if endpoint_request.scores else result).metadata 
+                **{key: (result[0] if endpoint_request.scores else result).metadata[key]
+                    for key in (result[0] if endpoint_request.scores else result).metadata
                     if key.startswith('tag_')},
                 **({"scores": result[1]} if endpoint_request.scores else {})
             } for result in search_results

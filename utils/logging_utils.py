@@ -10,8 +10,20 @@
 """
 import os
 import glob
+import logging
 from datetime import datetime
+from contextvars import ContextVar
 from logging.handlers import RotatingFileHandler
+
+transaction_id_var: ContextVar[str] = ContextVar('transaction_id', default='system')
+
+class TransactionIdFilter(logging.Filter):
+    """
+    This filter injects the transaction ID from the context variable into the log record.
+    """
+    def filter(self, record):
+        record.transaction_id = transaction_id_var.get()
+        return True
 
 class RotatingLogFileHandler(RotatingFileHandler):
     """
@@ -22,7 +34,7 @@ class RotatingLogFileHandler(RotatingFileHandler):
     def __init__(self, filename, mode='a', maxBytes=0, backupCount=0, encoding=None, delay=False):
         # We store the original filename template (e.g., 'logs/app.log')
         self._base_filename_template = filename
-        
+
         # Generate the name for the first log file with a timestamp
         initial_filename = self._generate_new_filename()
 
@@ -34,10 +46,10 @@ class RotatingLogFileHandler(RotatingFileHandler):
         base_dir = os.path.dirname(self._base_filename_template)
         filename = os.path.basename(self._base_filename_template)
         name, ext = os.path.splitext(filename)
-        
+
         # Create the base directory if it doesn't exist
         os.makedirs(base_dir, exist_ok=True)
-        
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return os.path.join(base_dir, f"{name}_{timestamp}{ext}")
 
@@ -49,7 +61,7 @@ class RotatingLogFileHandler(RotatingFileHandler):
         if self.stream:
             self.stream.close()
             self.stream = None
-        
+
         # 2. Manage backups BEFORE creating the new file
         self._manage_backups()
 
@@ -64,12 +76,12 @@ class RotatingLogFileHandler(RotatingFileHandler):
             base_dir = os.path.dirname(self._base_filename_template)
             filename = os.path.basename(self._base_filename_template)
             name, ext = os.path.splitext(filename)
-            
+
             search_glob = os.path.join(base_dir, f"{name}_*{ext}")
-            
+
             # We sort the files by name (the timestamp ensures chronological order)
             log_files = sorted(glob.glob(search_glob))
-            
+
             # The current file hasn't been created yet, so we compare with backupCount.
             # If backupCount is 3, and there are already 3 files, we delete the oldest.
             while len(log_files) >= self.backupCount:
@@ -80,17 +92,24 @@ def get_logging_config():
     """
     Builds the logging configuration dictionary by reading environment variables.
     """
-    no_logs_to_file = os.environ.get("NO_LOGS_TO_FILE", "false").lower() == "true"
+    log_level_str = os.environ.get("LOG_LEVEL", "INFO").upper()
+    log_level = getattr(logging, log_level_str, logging.INFO)
 
+    no_logs_to_file = os.environ.get("NO_LOGS_TO_FILE", "false").lower() == "true"
     handlers_to_use = ['console']
 
     LOGGING_CONFIG = {
         "version": 1,
         "disable_existing_loggers": False,
+        "filters": {
+            "transaction_id_filter": {
+                "()": TransactionIdFilter,
+            }
+        },
         "formatters": {
             "default": {
                 "()": "uvicorn.logging.DefaultFormatter",
-                "fmt": "[%(asctime)s] [%(process)d] [%(levelname)s] %(message)s",
+                "fmt": "[%(asctime)s] [%(process)d] [%(levelname)s] [%(transaction_id)s] %(message)s",
                 "datefmt": "%Y-%m-%d %H:%M:%S %z",
             },
         },
@@ -99,20 +118,21 @@ def get_logging_config():
                 "class": "logging.StreamHandler",
                 "formatter": "default",
                 "stream": "ext://sys.stdout",
+                "filters": ["transaction_id_filter"],
             },
         },
         "loggers": {
             # Root logger for the application
-            "": {"handlers": handlers_to_use, "level": "INFO"},
+            "": {"handlers": handlers_to_use, "level": log_level},
             # Uvicorn loggers captured to use the same handlers
             "uvicorn.error": {
                 "handlers": handlers_to_use,
-                "level": "INFO",
+                "level": log_level,
                 "propagate": False
             },
             "uvicorn.access": {
                 "handlers": handlers_to_use,
-                "level": "INFO",
+                "level": log_level,
                 "propagate": False
             }
         },
@@ -129,7 +149,9 @@ def get_logging_config():
             "backupCount": 5,
             "encoding": "utf-8",
             "formatter": "default",
+            "filters": ["transaction_id_filter"],
         }
-        LOGGING_CONFIG["loggers"][""]["handlers"].append('rotating_file')
+        for logger in LOGGING_CONFIG["loggers"].values():
+            logger['handlers'].append('rotating_file')
 
     return LOGGING_CONFIG

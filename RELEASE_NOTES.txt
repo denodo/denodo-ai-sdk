@@ -1,3 +1,44 @@
+version 0.10 - 20250911
+------------------------
+
+- Added support for plots in Arabic (mirrored for right-to-left languages)
+- Implemented complete chatbot UI overhaul to become more similar to the Denodo platform UI.
+- Fixed bug in DeepQuery where it would fail to correctly render Markdown tables.
+- Fixed bug in DeepQuery where it would fail to generate specific sections.
+- Added auth control to deleteMetadata endpoint.
+- Fixed bug in getMetadata when using tags and insert = False.
+
+version 0.10-beta - 20250904
+------------------------
+
+- Included feature to excluded views associated to certain tags from vectorizing
+- Fixed breaking errors for Ollama models
+- Added blocking mechanism for new queries while a previous one is processing in the chatbot UI
+- Added remote MCP support
+- Added custom SSL certificate variables to config files for external endpoints
+- Clarified between union and intersection between databases and tags in getMetadata
+- Updated the prompts and VQL restrictions to consider function types other than Arithmetic and Date-related
+- Added an option in the Chatbot UI to delete metadata
+- Fixed issue where the new DeepQuery reports button overlapped with the "Clear Results" button
+- Fixed error on getMetadata API when both insert and incremental set to False
+- Added capability to run AI SDK as a service with systemd
+- Added verbose logging for AI SDK
+- Updated example.py
+- Updated Langchain Ollama connector to support latest gpt-oss model
+- Added Transaction ID to SDK Logs for End-to-End Tracking
+- Created AI_SDK_VERIFY_SSL variable to allow AI SDK/DeepQuery calls to verify SSL
+- Added DATA_CATALOG_URL parameter used by SDK and Chatbot
+- Increased M and _ef values and changed views to tables for closer similarity and avoid errors with Chroma
+- Added LLM early exit capability if no relevant schema found
+- Specified limit of only 1 VQL query
+- Added prompt improvements to ask for granularity and expected output
+- Added support for OpenAI reasoning efforts in a standardized way
+- Added DeepQuery functionality
+- Fixed issue where untagged views should be deleted from the vector store or updated during synchronization
+- Fixed ROOT_PATH parameters not being usable as environment variables in the Docker container
+- Added translation of Query explanation displayed in the chatbot UI to desired language
+- Made Azure OpenAI Embedding Endpoint API version configurable in two (or multiple) different providers
+
 version 0.9 - 20250714
 ------------------------
 

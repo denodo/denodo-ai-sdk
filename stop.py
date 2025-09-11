@@ -53,8 +53,8 @@ def main():
         formatter_class=argparse.RawTextHelpFormatter
     )
     parser.add_argument(
-        "service", 
-        choices=["api", "sample_chatbot", "both"], 
+        "service",
+        choices=["api", "sample_chatbot", "both"],
         help="The service to stop:\n"
              "  api            - Stops only the AI SDK API.\n"
              "  sample_chatbot - Stops only the Sample Chatbot.\n"
@@ -70,7 +70,7 @@ def main():
         find_and_terminate_process(PROCESS_IDENTIFIERS['api'], 'API')
     elif args.service == 'sample_chatbot':
         find_and_terminate_process(PROCESS_IDENTIFIERS['sample_chatbot'], 'Sample Chatbot')
-    
+
     console.print("[bold cyan]Stop script finished.")
 
 if __name__ == "__main__":

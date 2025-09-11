@@ -118,7 +118,8 @@ const TableModal = ({ show, llm_response_rows_limit, handleClose, executionResul
       onHide={handleClose} 
       size="lg" 
       centered
-      contentClassName="bg-dark text-white border border-white"
+      style={{ '--bs-modal-bg': '#112533' }}
+      contentClassName="text-white border border-white"
     >
       <Modal.Header closeButton className="border-bottom border-white">
         <Modal.Title>Execution Result</Modal.Title>

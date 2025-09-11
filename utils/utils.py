@@ -1,5 +1,5 @@
 """
- Copyright (c) 2024. DENODO Technologies.
+ Copyright (c) 2025. DENODO Technologies.
  http://www.denodo.com
  All rights reserved.
 
@@ -17,81 +17,98 @@ import asyncio
 import logging
 import tiktoken
 import functools
+import contextvars
 
 from time import time
 from uuid import uuid4
 from boto3 import Session
-from functools import wraps, lru_cache
 from datetime import datetime
+from functools import wraps, cache
 from botocore.session import get_session
 from langchain_core.documents.base import Document
 from botocore.credentials import RefreshableCredentials
-from langchain.callbacks.base import BaseCallbackHandler
+
+# ContextVar to store the current endpoint name
+current_endpoint: contextvars.ContextVar[str] = contextvars.ContextVar('current_endpoint', default=None)
 
 def log_params(func):
     @functools.wraps(func)
     async def async_wrapper(*args, **kwargs):
         if os.getenv('SENSITIVE_DATA_LOGGING', '0') != '1':
             return await func(*args, **kwargs)
-        
+
         func_name = func.__name__
-        
+        endpoint_name = current_endpoint.get()
+
+        # Format the log prefix
+        if endpoint_name:
+            log_prefix = f"[{endpoint_name}] [{func_name}]"
+        else:
+            log_prefix = func_name
+
         # Log entry
         def format_param(key, value):
             if key == "auth":
                 return f"{key}=<redacted>"
             str_value = str(value)
             return f"{key}={str_value[:500] + '...' if len(str_value) > 500 else str_value}"
-        
+
         params = ", ".join([format_param(f"arg{i}", arg) for i, arg in enumerate(args)] +
                            [format_param(k, v) for k, v in kwargs.items()])
-        logging.info(f"{func_name} - Entry: Parameters({params})")
-        
+        logging.info(f"{log_prefix} - Entry: Parameters({params})")
+
         # Call the original function
         result = await func(*args, **kwargs)
-        
+
         # Log exit
         str_result = str(result)
         truncated_result = str_result[:500] + '...' if len(str_result) > 500 else str_result
-        logging.info(f"{func_name} - Exit: Returned({truncated_result})")
-        
+        logging.info(f"{log_prefix} - Exit: Returned({truncated_result})")
+
         return result
-    
+
     @functools.wraps(func)
     def sync_wrapper(*args, **kwargs):
         if os.getenv('SENSITIVE_DATA_LOGGING', '0') != '1':
             return func(*args, **kwargs)
 
         func_name = func.__name__
-        
+        endpoint_name = current_endpoint.get()
+
+        # Format the log prefix
+        if endpoint_name:
+            log_prefix = f"[{endpoint_name}] [{func_name}]"
+        else:
+            log_prefix = func_name
+
         # Log entry
         def format_param(key, value):
             if key == "auth":
                 return f"{key}=<redacted>"
             str_value = str(value)
             return f"{key}={str_value[:500] + '...' if len(str_value) > 500 else str_value}"
-        
+
         params = ", ".join([format_param(f"arg{i}", arg) for i, arg in enumerate(args)] +
                            [format_param(k, v) for k, v in kwargs.items()])
-        logging.info(f"{func_name} - Entry: Parameters({params})")
-        
+        logging.info(f"{log_prefix} - Entry: Parameters({params})")
+
         # Call the original function
         result = func(*args, **kwargs)
-        
+
         # Log exit
         str_result = str(result)
         truncated_result = str_result[:500] + '...' if len(str_result) > 500 else str_result
-        logging.info(f"{func_name} - Exit: Returned({truncated_result})")
-        
+        logging.info(f"{log_prefix} - Exit: Returned({truncated_result})")
+
         return result
-    
+
     # Check if the function is a coroutine function
     if asyncio.iscoroutinefunction(func):
         return async_wrapper
     else:
         return sync_wrapper
 
-@lru_cache(maxsize=None)
+@cache
 def get_langfuse_callback(model_id, session_id = None):
     if os.getenv('LANGFUSE_PUBLIC_KEY') and os.getenv('LANGFUSE_USER'):
         from langfuse.callback import CallbackHandler
@@ -117,8 +134,12 @@ def generate_langfuse_session_id():
     else:
         return None
 
-def add_langfuse_callback(base_callback, model_id, session_id = None):
-    callbacks = [base_callback]
+def generate_transaction_id():
+    """Generates a unique transaction ID (UUID4) for tracking a request."""
+    return str(uuid4())
+
+def add_langfuse_callback(model_id, session_id = None):
+    callbacks = []
     langfuse_callback = get_langfuse_callback(model_id, session_id)
     if langfuse_callback:
         callbacks.append(langfuse_callback)
@@ -128,22 +149,40 @@ def add_langfuse_callback(base_callback, model_id, session_id = None):
 def timed(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
+        func_name = func.__name__
+        endpoint_name = current_endpoint.get()
+
+        # Format the log prefix
+        if endpoint_name:
+            log_prefix = f"[{endpoint_name}] [{func_name}]"
+        else:
+            log_prefix = func_name
+
         start = time()
         result = func(*args, **kwargs)
         end = time()
         elapsed_time = round(end - start, 2)
-        logging.info("{} ran in {}s".format(func.__name__, elapsed_time))
+        logging.info(f"{log_prefix} ran in {elapsed_time}s")
 
         wrapper.elapsed_time = elapsed_time
         return result
 
     @wraps(func)
     async def async_wrapper(*args, **kwargs):
+        func_name = func.__name__
+        endpoint_name = current_endpoint.get()
+
+        # Format the log prefix
+        if endpoint_name:
+            log_prefix = f"[{endpoint_name}] [{func_name}]"
+        else:
+            log_prefix = func_name
+
         start = time()
         result = await func(*args, **kwargs)
         end = time()
         elapsed_time = round(end - start, 2)
-        logging.info("{} ran in {}s".format(func.__name__, elapsed_time))
+        logging.info(f"{log_prefix} ran in {elapsed_time}s")
 
         async_wrapper.elapsed_time = elapsed_time
         return result
@@ -185,22 +224,22 @@ def schema_summary(schema):
         else:
             column_description = None
 
-        if column_logical_name is not None and column_description is not None: 
-            summary += f"- {column_name} ({column_type}) -> {column_logical_name}: {column_description}\n"
-        elif column_logical_name is None and column_description is not None: 
-            summary += f"- {column_name} ({column_type}) -> {column_description}\n"
+        if column_logical_name is not None and column_description is not None:
+            summary += f"- {column_name} ({column_type}) -> {column_logical_name}: {column_description}.\n"
+        elif column_logical_name is None and column_description is not None:
+            summary += f"- {column_name} ({column_type}) -> {column_description}.\n"
         elif column_logical_name is not None and column_description is None:
-            summary += f"- {column_name} ({column_type}) -> {column_logical_name}\n"
+            summary += f"- {column_name} ({column_type}) -> {column_logical_name}.\n"
         else:
             summary += f"- {column_name} ({column_type})\n"
-    
+
     if "associations" in schema and len(schema['associations']) != 0:
         summary += "\n"
         for association in schema['associations']:
             summary += f"This table is also associated with table {association['table_name']} on {association['where']}\n"
     summary += "\n"
     return summary
-            
+
 # Calculate the tokens of a given string
 def calculate_tokens(string, encoding = 'cl100k_base'):
     encoding = tiktoken.get_encoding(encoding)
@@ -211,13 +250,13 @@ def calculate_tokens(string, encoding = 'cl100k_base'):
 def custom_tag_parser(text, tag, default=[]):
     if text is None:
         return [default] if not isinstance(default, list) else []
-    
+
     pattern = re.compile(fr'<{tag}>(.*?)</{tag}>', re.DOTALL)
     matches = re.findall(pattern, text)
-    
+
     if not matches:
         return [default] if not isinstance(default, list) else []
-    
+
     return matches
 
 def flatten_list(list_of_lists):
@@ -241,7 +280,7 @@ def create_chunks(table, embeddings_token_limit):
     lines = content.split("\n")
     column_lines = []
     association_lines = []
-    
+
     # Separate column lines from association information
     for line in lines:
         if line.startswith("This table is also associated"):
@@ -257,21 +296,21 @@ def create_chunks(table, embeddings_token_limit):
     base_content = header + association_footer
     base_tokens = calculate_tokens(base_content)
     available_tokens = (embeddings_token_limit - 500) - base_tokens
-    
+
     column_content = "\n".join(column_lines)
     total_tokens = calculate_tokens(column_content)
     target_chunks = (total_tokens // available_tokens) + 1
     chunk_size = max(1, len(column_lines) // target_chunks)
-        
+
     chunks = []
     base_id = str(table['id'])
-    
+
     for i in range(0, len(column_lines), chunk_size):
         current_lines = column_lines[i:i + chunk_size]
         chunk_content = header + "\n".join(current_lines) + association_footer + "\n"
 
         document_id = f"{base_id}_{len(chunks)}"
-        
+
         # Create metadata for the chunk
         base_metadata = {
             "view_name": table['tableName'],
@@ -303,7 +342,7 @@ def prepare_sample_data_schema(schema):
             columns.append(column.get('columnName'))
             examples.append(column.get('sample_data', []))
             max_sample_data_length = max(max_sample_data_length, len(column.get('sample_data', [])))
-        
+
         for example in examples:
             if len(example) < max_sample_data_length:
                 example.extend([''] * (max_sample_data_length - len(example)))
@@ -319,7 +358,7 @@ def prepare_sample_data_schema(schema):
             page_content=','.join(tuple),
             metadata={**base_metadata, "document_id": f"{table_id}_tuple_{i}"}
         ) for i, tuple in enumerate(tuples)]
-    
+
     return [create_sample_data_document(table) for table in schema['views']]
 
 @timed
@@ -343,12 +382,12 @@ def prepare_last_update_vector(last_update_dict, last_update=None, source_type=N
 
 @timed
 def prepare_schema(schema, embeddings_token_limit = 0):
-    def create_document(table, embeddings_token_limit):      
+    def create_document(table, embeddings_token_limit):
         table_summary = schema_summary(table)
         table_summary_tokens = calculate_tokens(table_summary)
         if embeddings_token_limit and table_summary_tokens > embeddings_token_limit:
             return create_chunks(table, embeddings_token_limit)
-        
+
         id = str(table['id'])
 
         base_metadata = {
@@ -368,13 +407,13 @@ def prepare_schema(schema, embeddings_token_limit = 0):
             page_content=schema_summary(table),
             metadata=base_metadata
         )
-        
+
     return [create_document(table, embeddings_token_limit) for table in schema['views']]
 
 def normalize_root_path(root_path):
     if not root_path:
         return ""
-    
+
     if not root_path.startswith("/"):
         root_path = "/" + root_path
 
@@ -450,24 +489,3 @@ class RefreshableBotoSession:
         autorefresh_session = Session(botocore_session = session)
 
         return autorefresh_session
-    
-# Token Counter for LLMs
-class TokenCounter(BaseCallbackHandler):
-    def __init__(self, llm):
-        self.llm = llm.llm
-        self.tokens = llm.tokens
-
-    def on_llm_start(self, serialized, prompts, **kwargs):
-        for p in prompts:
-            self.tokens['input_tokens'] += calculate_tokens(p)
-
-    def on_llm_end(self, response, **kwargs):
-        results = response.flatten()
-        for r in results:
-            self.tokens['output_tokens'] = calculate_tokens(r.generations[0][0].text)
-        self.tokens['total_tokens'] = self.tokens['input_tokens'] + self.tokens['output_tokens']
-
-    def reset_tokens(self):
-        self.tokens['input_tokens'] = 0
-        self.tokens['output_tokens'] = 0
-        self.tokens['total_tokens'] = 0

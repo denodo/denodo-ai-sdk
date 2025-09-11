@@ -1,5 +1,5 @@
 {
-    "denodo_aisdk": {
+    "denodo_aisdk_local": {
         "command": "uv",
         "args": [
         "run",
@@ -7,7 +7,7 @@
         "fastmcp",
         "fastmcp",
       "run",
-      "{ABSOLUTE_PATH}/mcp/stdio.py"
+      "{ABSOLUTE_PATH}/mcp/server.py"
     ],
     "env": {
         "MCP_AI_SDK_ENDPOINT": "http://localhost:8008",

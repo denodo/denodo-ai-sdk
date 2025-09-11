@@ -1,9 +1,11 @@
 import os
 import sys
-import httpx
+import base64
+import requests
 import traceback
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_http_headers
 
 mcp = FastMCP("denodo_aisdk")
 
@@ -13,7 +15,7 @@ AI_SDK_PASSWORD = os.getenv("MCP_AI_SDK_PASSWORD", "admin")
 AI_SDK_VERIFY_SSL = os.getenv("MCP_AI_SDK_VERIFY_SSL", "false").lower() == "true"
 
 @mcp.tool()
-async def ask_database(question: str, mode: str = "data") -> str:
+def ask_database(question, mode = "data"):
     """Query the user's database in natural language.
 
     Accepts a mode parameter to specify the mode to use for the query:
@@ -31,19 +33,26 @@ async def ask_database(question: str, mode: str = "data") -> str:
         "markdown_response": True
     }
 
+    headers = get_http_headers()
+    auth = headers.get("Authorization")
+
     try:
-        async with httpx.AsyncClient(verify=AI_SDK_VERIFY_SSL) as client:
-            response = await client.post(f"{AI_SDK_ENDPOINT}/answerQuestion", json=params, auth=(AI_SDK_USER, AI_SDK_PASSWORD), timeout=120.0)
-            response.raise_for_status()
-            data = response.json()
-            if mode == "data":
-                return data.get('execution_result', 'The AI SDK did not return a result.')
-            else:
-                return data.get('answer', 'The AI SDK did not return a result.')
+        response = requests.post(
+            f"{AI_SDK_ENDPOINT}/answerQuestion",
+            json=params,
+            headers=headers if auth else {"Authorization": f"Basic {base64.b64encode(f'{AI_SDK_USER}:{AI_SDK_PASSWORD}'.encode()).decode()}"},
+            timeout=120.0,
+            verify=AI_SDK_VERIFY_SSL
+        )
+        response.raise_for_status()
+        data = response.json()
+        if mode == "data":
+            return data.get('execution_result', 'The AI SDK did not return a result.')
+        else:
+            return data.get('answer', 'The AI SDK did not return a result.')
     except Exception as e:
-            traceback.print_exc(file=sys.stderr) 
+            traceback.print_exc(file=sys.stderr)
             return f"Error fetching response: {str(e)}"
 
 if __name__ == "__main__":
-    print("Starting the Denodo AI SDK MCP server in STDIO mode...")
-    mcp.run(transport="stdio")
+    mcp.run()

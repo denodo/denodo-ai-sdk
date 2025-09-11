@@ -40,7 +40,7 @@ const CSVUploadModal = ({ show, handleClose, onUpload }) => {
   };
 
   return (
-    <Modal show={show} onHide={handleClose}>
+    <Modal show={show} onHide={handleClose} style={{ '--bs-modal-bg': '#112533' }} contentClassName="text-white border border-white">
       <Modal.Header closeButton className="custom-header-modal">
         <Modal.Title>Upload CSV File</Modal.Title>
       </Modal.Header>
@@ -64,7 +64,7 @@ const CSVUploadModal = ({ show, handleClose, onUpload }) => {
               onChange={(e) => setDelimiter(e.target.value)}
               maxLength={1}
             />
-            <Form.Text className="text-muted">
+            <Form.Text className="text-white">
               Default is semicolon (;). Use comma (,) for comma-separated files.
             </Form.Text>
           </Form.Group>
@@ -78,7 +78,7 @@ const CSVUploadModal = ({ show, handleClose, onUpload }) => {
               onChange={(e) => setDescription(e.target.value)}
             />
           </Form.Group>
-          <Button variant="primary" type="submit" disabled={isLoading}>
+          <Button variant="primary" type="submit" disabled={isLoading} style={{ backgroundColor: '#2D3E4B', borderColor: '#2D3E4B' }}>
             {isLoading ? (
               <>
                 <Spinner

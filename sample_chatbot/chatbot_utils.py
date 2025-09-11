@@ -6,8 +6,6 @@ import requests
 import csv
 import datetime
 
-from time import time
-from functools import wraps
 from utils.utils import calculate_tokens
 from utils.uniformEmbeddings import UniformEmbeddings
 from utils.uniformVectorStore import UniformVectorStore
@@ -17,9 +15,9 @@ from langchain_community.document_loaders.csv_loader import CSVLoader
 def setup_user_details(user_details, username=''):
     if not user_details and not username:
         return ""
-        
+
     prefix = "These are the details about the user you are talking to:"
-    
+
     if username and user_details:
         return f"{prefix} Username: {username}\n\n{user_details}"
     elif username:
@@ -31,36 +29,42 @@ def trim_conversation(conversation_history, token_limit = 7000):
     # If empty history, return as is
     if not conversation_history:
         return conversation_history
-    
+
     # Calculate total tokens in conversation
-    total_tokens = sum(calculate_tokens(message[1]) for message in conversation_history)
-    
+    total_tokens = sum(calculate_tokens(message.content) for message in conversation_history)
+
     # If already under limit, return as is
     if total_tokens <= token_limit:
         return conversation_history
-    
+
     # Try removing messages from start until under token limit
     trimmed_history = conversation_history.copy()
     while trimmed_history and total_tokens > token_limit:
         # Remove oldest message
         removed_message = trimmed_history.pop(0)
         # Subtract its tokens from total
-        total_tokens -= calculate_tokens(removed_message[1])
-        
+        total_tokens -= calculate_tokens(removed_message.content)
+
     # If we still can't get under limit, return empty list
     if total_tokens > token_limit:
         return []
-        
+
     return trimmed_history
 
-def get_relevant_tables(api_host, username, password, query):
+def get_user_views(api_host, username, password, query, views = 200, set_user_tables=None, verify_ssl=False):
     try:
         request_params = {
             'query': query,
-            'scores': False
+            'scores': False,
+            'n_results': views
         }
 
-        response = requests.get(f'{api_host}/similaritySearch', params=request_params, auth=(username, password), verify=False)
+        response = requests.get(
+            f'{api_host}/similaritySearch',
+            params=request_params,
+            auth=(username, password),
+            verify=verify_ssl
+        )
         response.raise_for_status()
         data = response.json()
         data = data.get('views', [])
@@ -68,44 +72,57 @@ def get_relevant_tables(api_host, username, password, query):
             table_names = [view['view_name'] for view in data]
         else:
             table_names = []
-        return 200, table_names
 
+        if set_user_tables:
+            if table_names:
+                set_user_tables.denodo_tables = "Here are some of the views available in the user's Denodo instance:\n- " + "\n- ".join(table_names) + "\n\nThis is not an exhaustive list, you can use the Metadata tool to query more."
+            else:
+                set_user_tables.denodo_tables = "No views where found in the user's Denodo instance. Either the user has no views, the connection is failing or he does not have enough permissions."
+
+        return 200, table_names
     except requests.exceptions.HTTPError as e:
         status_code = e.response.status_code
         error_message = f"AI SDK returned HTTP {status_code}"
+        if set_user_tables:
+            set_user_tables.denodo_tables = "No views where found in the user's Denodo instance. Either the user has no views, the connection is failing or he does not have enough permissions."
         try:
             error_message = e.response.json().get('detail', error_message)
         except requests.exceptions.JSONDecodeError:
             pass
-        
+
         return status_code, error_message
 
-    except requests.exceptions.RequestException as e:
-        return 503, "A required service is unavailable."
-    
-def ai_sdk_health_check(api_host):
+def ai_sdk_health_check(api_host, verify_ssl=False):
     try:
-        response = requests.get(f'{api_host}/health', verify=False)
+        response = requests.get(f'{api_host}/health', verify=verify_ssl)
         return response.status_code == 200
     except Exception as e:
         return False
 
-def connect_to_ai_sdk(api_host, username, password, insert=True, examples_per_table=100, incremental=True, parallel=True, vdp_database_names = None, vdp_tag_names = None):
+def connect_to_ai_sdk(api_host, username, password, insert=True, examples_per_table=100, parallel=True, vdp_database_names = None, incremental=True, vdp_tag_names = None, tags_to_ignore = None, verify_ssl=False):
     try:
         request_params = {
             'insert': insert,
             'examples_per_table': examples_per_table,
-            'incremental': incremental,
-            'parallel': parallel
+            'parallel': parallel,
+            'incremental': incremental
         }
 
         if vdp_database_names is not None:
             request_params['vdp_database_names'] = ",".join(vdp_database_names)
-            
+
         if vdp_tag_names is not None:
             request_params['vdp_tag_names'] = ",".join(vdp_tag_names)
 
-        response = requests.get(f'{api_host}/getMetadata', params=request_params, auth=(username, password), verify=False)
+        if tags_to_ignore is not None:
+            request_params['tags_to_ignore'] = ",".join(tags_to_ignore)
+
+        response = requests.get(
+            f'{api_host}/getMetadata',
+            params=request_params,
+            auth=(username, password),
+            verify=verify_ssl
+        )
 
         if response.status_code == 204:
             return 204, "No Content"
@@ -117,7 +134,7 @@ def connect_to_ai_sdk(api_host, username, password, insert=True, examples_per_ta
                 error_type = "Server Error"
             else:
                 error_type = "Error"
-            return response.status_code, f"{error_type} ({response.status_code}): {response.text}"
+            return response.status_code, f"{error_type} ({response.status_code}): Please check the AI SDK API logs."
 
         data = response.json()
         db_schema = data.get('db_schema_json')
@@ -146,9 +163,12 @@ def parse_xml_tags(query):
 
     return parse_recursive(query)
 
-def process_tool_query(query, tools=None):
+def process_tool_query(query, tools=None, tool_execution_history=None):
     if not tools or not isinstance(tools, dict):
         return False
+
+    if tool_execution_history is None:
+        tool_execution_history = []
 
     try:
         parsed_query = parse_xml_tags(query)
@@ -158,14 +178,69 @@ def process_tool_query(query, tools=None):
     for tool_name, tool_info in tools.items():
         if tool_name in parsed_query:
             try:
+                query_params = parsed_query[tool_name]
+
+                # Calculate how many times this specific tool has been called
+                tool_call_count = len([exec for exec in tool_execution_history if exec['tool_name'] == tool_name]) + 1
+
+                # Special case for deep_query: redirect odd calls to metadata_query
+                if tool_name == "deep_query" and tool_call_count % 2 == 1:
+                    # This is an odd call, redirect to metadata_query
+                    metadata_tool_info = tools.get('metadata_query')
+                    if metadata_tool_info:
+                        tool_function = metadata_tool_info.get('function')
+                        tool_params = metadata_tool_info.get('params', {})
+
+                        if callable(tool_function):
+                            # Use the analysis_request as the search_query for metadata_query
+                            analysis_request = query_params.get('analysis_request', '')
+
+                            # Call metadata_query with the analysis_request as search_query
+                            execution_start = datetime.datetime.now()
+                            result = tool_function(search_query=analysis_request, n_results=10, **tool_params)
+                            execution_end = datetime.datetime.now()
+
+                            # Store execution details in history
+                            execution_record = {
+                                'tool_name': tool_name,
+                                'actual_tool_executed': 'metadata_query',
+                                'inputs': query_params,
+                                'outputs': result,
+                                'timestamp': execution_start,
+                                'execution_time': (execution_end - execution_start).total_seconds()
+                            }
+                            tool_execution_history.append(execution_record)
+
+                            # Reconstruct the original XML call for deep_query (what user requested)
+                            original_xml_call = f"<{tool_name}>\n"
+                            for param, value in query_params.items():
+                                original_xml_call += f"<{param}>{value}</{param}>\n"
+                            original_xml_call += f"</{tool_name}>"
+
+                            # Return with special marker to indicate this is a deep_query schema check
+                            return f"{tool_name}_schema_check", result, original_xml_call
+
+                # Normal tool execution
                 tool_function = tool_info.get('function')
                 tool_params = tool_info.get('params', {})
-                
+
                 if not callable(tool_function):
                     continue
-                
-                query_params = parsed_query[tool_name]
+
+                execution_start = datetime.datetime.now()
                 result = tool_function(**query_params, **tool_params)
+                execution_end = datetime.datetime.now()
+
+                # Store execution details in history
+                execution_record = {
+                    'tool_name': tool_name,
+                    'actual_tool_executed': tool_name,
+                    'inputs': query_params,
+                    'outputs': result,
+                    'timestamp': execution_start,
+                    'execution_time': (execution_end - execution_start).total_seconds()
+                }
+                tool_execution_history.append(execution_record)
 
                 # Reconstruct the original XML call
                 original_xml_call = f"<{tool_name}>\n"
@@ -175,29 +250,25 @@ def process_tool_query(query, tools=None):
 
                 return tool_name, result, original_xml_call
             except Exception as e:
-                return tool_name, str(e), None
-
+                # Store error execution in history
+                execution_record = {
+                    'tool_name': tool_name,
+                    'actual_tool_executed': tool_name,
+                    'inputs': parsed_query.get(tool_name, {}),
+                    'outputs': str(e),
+                    'timestamp': datetime.datetime.now(),
+                    'execution_time': 0,
+                    'error': True
+                }
+                tool_execution_history.append(execution_record)
+                logging.error(f"Error processing tool: {e}")
+                return False
     return False
-
-# Timer Decorator
-def timed(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        start = time()
-        result = func(*args, **kwargs)
-        end = time()
-        elapsed_time = round(end - start, 2)
-        logging.info("{} ran in {}s".format(func.__name__, elapsed_time))
-
-        wrapper.elapsed_time = elapsed_time
-        return result
-
-    return wrapper
 
 # Function to check for required environment variables
 def check_env_variables(required_vars):
     missing_vars = [var for var in required_vars if not os.getenv(var)]
-    
+
     if missing_vars:
         print("ERROR. The following required environment variables are missing:")
         for var in missing_vars:
@@ -205,8 +276,7 @@ def check_env_variables(required_vars):
         print("Please set these variables before starting the application.")
         sys.exit(1)
 
-@timed
-def csv_to_documents(csv_file, delimiter = ";", quotechar = '"'):    
+def csv_to_documents(csv_file, delimiter = ";", quotechar = '"'):
     loader = CSVLoader(file_path = csv_file, csv_args = {
             "delimiter": delimiter,
             "quotechar": quotechar,
@@ -243,13 +313,11 @@ def prepare_unstructured_vector_store(csv_file_path, vector_store_provider, embe
         embeddings=embeddings,
         index_name=unstructured_index_name,
     )
-    
+
     unstructured_vector_store.add_views(csv_documents, parallel = True)
 
     return unstructured_vector_store
 
-def process_chunk(chunk):
-    return chunk.replace("\n", "<NEWLINE>")
 
 def add_to_chat_history(chat_history, human_query, ai_response, tool_name, tool_output, original_xml_call, llm_response_rows_limit):
     #Remove related questions from the ai_response
@@ -270,98 +338,174 @@ def add_to_chat_history(chat_history, human_query, ai_response, tool_name, tool_
             llm_execution_result = execution_result
         sql_query = tool_output.get('sql_query', '')
         human_query = f"""{human_query}
-        
+
         ## TOOL DETAILS
-        I used the {tool_name} tool:
+        You used the {tool_name} tool:
 
         {original_xml_call}
 
-        Output:
-            SQL Query: {sql_query}
-            Execution result: {llm_execution_result}
+        <output>
+        <sql_query>
+        {sql_query}
+        </sql_query>
+        <execution_result>
+        {llm_execution_result}
+        </execution_result>
+        </output>
         """
+    elif tool_name == "deep_query":
+        analysis_output = "DeepQuery analysis completed successfully."
+
+        human_query = f"""{human_query}
+
+        ## TOOL DETAILS
+        You used the {tool_name} tool:
+
+        {original_xml_call}
+
+        <output>
+        <analysis>
+        {tool_output.get('answer', 'Analysis failed')}
+        </analysis>
+        <status>
+        {analysis_output}
+        </status>
+        </output>
+        """
+    elif tool_name == "deep_query_schema_check":
+        human_query = f"{human_query}\n\nThe user requested a DeepQuery analysis."
     elif tool_name in ["metadata_query", "kb_lookup"]:
         human_query = f"""{human_query}
-        
+
         ## TOOL DETAILS
         I used the {tool_name} tool:
 
         {original_xml_call}
 
-        Output:
-            {str(tool_output)[:1000]}
+        <output>
+        {str(tool_output)[:1000]}
+        </output>
         """
     chat_history.extend([HumanMessage(content = human_query), AIMessage(content = ai_response)])
 
 def readable_tool_result(tool_name, tool_params, llm_response_rows_limit):
-    if tool_name == "database_query":
-        if isinstance(tool_params, dict):
+    if isinstance(tool_params, str):
+        return_string = f"""
+## TOOL EXECUTION DETAILS FOR ASSISTANT
+
+You used the {tool_name} tool, but it failed with the following error:
+
+<output>
+{tool_params}
+</output>
+"""
+    else:
+        if tool_name == "database_query":
             execution_result = tool_params.get('execution_result', {})
             if isinstance(execution_result, dict) and len(execution_result.items()) > llm_response_rows_limit:
                 llm_execution_result = dict(list(execution_result.items())[:llm_response_rows_limit])
                 llm_execution_result = str(llm_execution_result) + f"... Showing only the first {llm_response_rows_limit} rows of the execution result."
             else:
                 llm_execution_result = execution_result
-            
+
             graph_data = tool_params.get('raw_graph', '')
             if len(graph_data) > 300:
-                graph_text = "Graph generated succesfully and shown to the user through the chatbot UI, I will not include it in the response."
+                graph_text = "Graph generated succesfully and shown to the user through the chatbot UI, you will not include it in the response."
             else:
                 graph_text = "Graph generation failed or not requested."
-            
-            return_string = f"""
-            ## TOOL EXECUTION DETAILS FOR ASSISTANT
-            
-            I used the {tool_name} tool.
 
-                Output:
-                SQL Query: {tool_params.get('sql_query')}
-                Execution result: {llm_execution_result}
-                Graph: {graph_text}
+            return_string = f"""## TOOL EXECUTION DETAILS FOR ASSISTANT
 
-            Even if the tool failed, I will answer the user's query directly because I cannot execute a new tool.
-            Now that I have executed the tool, I will answer the user's query based on the tool output:"""
+    You used the {tool_name} tool.
+
+    <output>
+    <sql_query>{tool_params.get('sql_query')}</sql_query>
+    <execution_result>{llm_execution_result}</execution_result>
+    <graph>{graph_text}</graph>
+    </output>
+
+    Even if the tool failed, you will answer the user's question directly because you cannot execute a new tool.
+    Now that you have executed the tool, you will answer the user's question based on the tool output."""
+        elif tool_name == "deep_query_schema_check":
+            return_string = f"""## TOOL EXECUTION DETAILS FOR ASSISTANT
+
+    You requested to run the deep_query tool to answer the user's question. Before executing the DeepQuery tool, please review the following schema:
+
+    <schema>
+    {tool_params}
+    </schema>
+
+    Based on the schema and the analysis the user requested, ask the user clarifying questions (formatted in markdown) on his expectations and scope for the DeepQuery analysis.
+    The questions must only be based on the analysis request and the schema presented.
+    You must acknowledge the usage of DeepQuery in your response.
+    You must suggest a mix of simple and advanced metrics.
+
+    For example, if the user requests 'I want to understand which products are performing best and get insights into customer purchasing behavior over time.'.
+
+    You could answer:
+
+    I will use the DeepQuery tool to answer your question. Before doing so and to ensure and provide accurate and relevant analysis, could you please clarify the following:
+
+    ### **Metrics**
+    When you say “best performing,” what metrics should be looked at and prioritized:
+    - Simple metric: Highest sales volume (quantity sold)?
+    - Simple metric: Highest revenue generated?
+    - Simple metric: Average unit price per product?
+    - Advanced metric: Highest number of unique customers purchasing?
+    - Advanced metric: Customer repeat rate per product?
+    - Advanced metric: Profit margin per product?
+
+    ### **Trends**
+    Are you interested in trends by:
+    - Month, quarter, or year?
+    - Comparing new vs. returning customers?
+
+    ### **Segmentation**
+    Should the analysis be broken down by product category, customer region (if available), or any other segment?
+
+    ### **Time Range**
+    Should we consider all historical data, or focus on a specific period (e.g., last 6 months, 2024 only)?
+
+    Limit the scope of the advanced analysis to the data available in the schema."""
+        elif tool_name == "deep_query":
+            return_string = f"""## TOOL EXECUTION DETAILS FOR ASSISTANT
+
+    I used the {tool_name} tool for advanced analysis (Deep Query).
+
+    <output>
+    <analysis_result>{tool_params.get('answer', 'Analysis failed')}</analysis_result>
+    </output>
+
+    You will now provide the user a near-verbatim response (simply adjusting format to markdown and the tone of voice) with all the details of the DeepQuery analysis done.
+    If the analysis includes raw data or tables, make sure to include it in the response.
+    Format your response and the analysis in markdown for better readability."""
+        elif tool_name == "metadata_query":
+            return_string = f"""## TOOL EXECUTION DETAILS FOR ASSISTANT
+
+    You used the {tool_name} tool. This tool performed similarity search in the database and returned the schema
+    of the most similar views to the search query. This tool is not meant for exhaustive searches.
+
+    <output>
+    {tool_params}
+    </output>
+
+    Even if the tool failed, you will answer the user's question directly because you cannot execute a new tool.
+    Now that you have executed the tool, you will answer the user's question based on the tool output.
+    When answering the user's question, take into account that this tool's functionality to not mislead the user.
+    If the user is looking for exhaustive searches, point them to the Denodo Data Catalog."""
         else:
-            return_string = f"""
-            ## TOOL EXECUTION DETAILS FOR ASSISTANT
+            return_string = f"""## TOOL EXECUTION DETAILS FOR ASSISTANT
+    You used the {tool_name} tool.
 
-            I used the {tool_name} tool.
+    <output>
+    {tool_params}
+    </output>
 
-                Output:
-                <output>
-                {tool_params}
-                </output>
-
-            Even if the tool failed, I will answer the user's query directly because I cannot execute a new tool.
-            Now that I have executed the tool, I will answer the user's query based on the tool output:"""
-    elif tool_name == "metadata_query":
-        return_string = f"""
-        ## TOOL EXECUTION DETAILS FOR ASSISTANT
-
-        I used the {tool_name} tool.
-
-            Output:
-            <output>
-            {tool_params}
-            </output>
-
-        Even if the tool failed, I will answer the user's query directly because I cannot execute a new tool.
-        Now that I have executed the tool, I will answer the user's query based on the tool output:"""
-    else:
-        return_string = f"""
-        ## TOOL EXECUTION DETAILS FOR ASSISTANT
-        I used the {tool_name} tool.
-
-        Output:
-        <output>
-        {tool_params}
-        </output>
-
-            Even if the tool failed, I will answer the user's query directly because I cannot execute a new tool.
-            Now that I have executed the tool, I will answer the user's query based on the tool output:"""
+    Even if the tool failed, you will answer the user's question directly because you cannot execute a new tool.
+    Now that you have executed the tool, you will answer the user's question based on the tool output:"""
     return return_string.strip()
 
-def make_ai_sdk_request(endpoint, payload, auth_tuple, method = "POST"):
+def make_ai_sdk_request(endpoint, payload, auth_tuple, method = "POST", verify_ssl=False):
     """Helper function to make AI SDK requests with standardized error handling"""
     try:
         if method == "GET":
@@ -369,21 +513,23 @@ def make_ai_sdk_request(endpoint, payload, auth_tuple, method = "POST"):
                 endpoint,
                 params=payload,
                 auth=auth_tuple,
-                verify=False
+                verify=verify_ssl,
+                timeout = 1200
             )
         else:
             response = requests.post(
                 endpoint,
                 json=payload,
                 auth=auth_tuple,
-                verify=False
+                verify=verify_ssl,
+                timeout = 1200
             )
         response.raise_for_status()
         return response.json()
     except requests.HTTPError as e:
         if e.response.status_code == 401:
             return "Authentication failed. Please check your Denodo Data Catalog credentials."
-        
+
         error_message = "An error occurred when connecting to the AI SDK"
         try:
             error_data = e.response.json()
@@ -397,8 +543,9 @@ def make_ai_sdk_request(endpoint, payload, auth_tuple, method = "POST"):
             return f"{error_message}: {final_error_msg}"
 
         except ValueError:
-            return f"{error_message}: {e}"
+            pass
 
+        return f"{error_message}: {e}"
     except Exception as e:
         return f"An error occurred when connecting to the AI SDK: {e}"
 
@@ -466,7 +613,6 @@ def write_to_report(report_lock, report_max_size_mb, question, answer, username,
                 writer.writerow([uuid, timestamp, question, final_answer, vql_query, query_explanation, tokens, ai_sdk_time, username, 'not_received', ''])
         except IOError as e:
             logging.error(f"Error writing to report file {filename}: {e}")
-
 
 def update_feedback_in_report(report_lock, report_max_size_mb, uuid, feedback_value, feedback_details, report_folder="reports", base_filename="user_report"):
     """Update the feedback for a specific interaction in the report CSV file(s)."""

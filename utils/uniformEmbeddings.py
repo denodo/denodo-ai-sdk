@@ -9,7 +9,7 @@ from langchain.embeddings import CacheBackedEmbeddings
 class UniformEmbeddings:
     VALID_PROVIDERS = [
         "OpenAI",
-        "AzureOpenAI",
+        "Azure",
         "Bedrock",
         "Google",
         "Ollama",
@@ -25,17 +25,9 @@ class UniformEmbeddings:
         self.store = LocalFileStore("./cache/embeddings/")
         self.base_embeddings = None
 
-        if self.provider_name.lower() not in list(map(str.lower, self.VALID_PROVIDERS)):
-            logging.warning(f"Provider '{self.provider_name}' not in standard list. Creating custom OpenAI-compatible provider.")
-            logging.info("Expected environment variables for custom provider:")
-            logging.info(f"- {self.provider_name.upper()}_API_KEY (required)")
-            logging.info(f"- {self.provider_name.upper()}_BASE_URL (required)")
-            logging.info(f"- {self.provider_name.upper()}_PROXY (optional)")
-            self.setup_custom()
-
         if self.provider_name.lower() == "openai":
             self.setup_openai()
-        elif self.provider_name.lower() == "azureopenai":
+        elif self.provider_name.lower() == "azure":
             self.setup_azure_openai()
         elif self.provider_name.lower() == "bedrock":
             self.setup_bedrock()
@@ -49,6 +41,21 @@ class UniformEmbeddings:
             self.setup_nvidia()
         elif self.provider_name.lower() == "googleaistudio":
             self.setup_google_ai_studio()
+        elif self.provider_name.lower().startswith("azure_"):
+            logging.info(f"Provider '{self.provider_name}' detected as custom Azure-compatible provider.")
+            logging.info("Expected environment variables for custom Azure provider:")
+            logging.info(f"- {self.provider_name.upper()}_API_KEY (required if no proxy)")
+            logging.info(f"- {self.provider_name.upper()}_ENDPOINT (required)")
+            logging.info(f"- {self.provider_name.upper()}_API_VERSION (required)")
+            logging.info(f"- {self.provider_name.upper()}_PROXY (optional)")
+            self.setup_custom_azure()
+        elif self.provider_name.lower() not in list(map(str.lower, self.VALID_PROVIDERS)):
+            logging.warning(f"Provider '{self.provider_name}' not in standard list. Creating custom OpenAI-compatible provider.")
+            logging.info("Expected environment variables for custom provider:")
+            logging.info(f"- {self.provider_name.upper()}_API_KEY (required)")
+            logging.info(f"- {self.provider_name.upper()}_BASE_URL (required)")
+            logging.info(f"- {self.provider_name.upper()}_PROXY (optional)")
+            self.setup_custom()
 
         if ":" in self.model_name:
             self.model = self.base_embeddings
@@ -66,17 +73,17 @@ class UniformEmbeddings:
         api_key = os.getenv('GOOGLE_AI_STUDIO_API_KEY')
         if api_key is None:
             raise ValueError("GOOGLE_AI_STUDIO_API_KEY environment variable not set.")
-        
+
         self.base_embeddings = GoogleGenerativeAIEmbeddings(
             model=self.model_name,
             google_api_key=api_key
         )
 
-    
+
     def setup_ollama(self):
         from langchain_community.embeddings import OllamaEmbeddings
         base_url = os.getenv('OLLAMA_API_BASE_URL')
-        
+
         if base_url:
             self.base_embeddings = OllamaEmbeddings(model = self.model_name, base_url = base_url)
         else:
@@ -90,7 +97,7 @@ class UniformEmbeddings:
 
         if api_key is None:
             raise ValueError("NVIDIA_API_KEY environment variable not set.")
-        
+
         kwargs = {
             "model": self.model_name,
             "api_key": api_key,
@@ -118,7 +125,7 @@ class UniformEmbeddings:
         proxy = os.getenv('OPENAI_PROXY_URL')
         organization_id = os.getenv('OPENAI_ORG_ID')
         dimensions = os.getenv('OPENAI_EMBEDDINGS_DIMENSIONS')
-        
+
         if api_key is None:
             raise ValueError("OPENAI_API_KEY environment variable not set.")
 
@@ -150,16 +157,16 @@ class UniformEmbeddings:
         from langchain_openai import AzureOpenAIEmbeddings
 
         api_version = os.getenv("AZURE_API_VERSION")
-        api_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-        api_key = os.getenv("AZURE_OPENAI_API_KEY")
-        api_proxy = os.getenv("AZURE_OPENAI_PROXY")
-        dimensions = os.getenv('AZUREOPENAI_EMBEDDINGS_DIMENSIONS')
+        api_endpoint = os.getenv("AZURE_ENDPOINT")
+        api_key = os.getenv("AZURE_API_KEY")
+        api_proxy = os.getenv("AZURE_PROXY")
+        dimensions = os.getenv('AZURE_EMBEDDINGS_DIMENSIONS')
 
         if api_version is None or api_endpoint is None:
-            raise ValueError("AzureOpenAI environment variables not set.")
+            raise ValueError("Azure environment variables not set.")
 
         if api_key is None and api_proxy is None:
-            raise ValueError("AzureOpenAI API key or proxy not set. One of them is required as authentication method.")
+            raise ValueError("Azure API key or proxy not set. One of them is required as authentication method.")
 
         kwargs = {
             "azure_endpoint": api_endpoint,
@@ -171,7 +178,7 @@ class UniformEmbeddings:
         if api_key is not None:
             kwargs["openai_api_key"] = api_key
         else:
-            logging.warning("AzureOpenAI API key not set. Using proxy for authentication.")
+            logging.warning("Azure API key not set. Using proxy for authentication.")
 
         if api_proxy is not None:
             _http_client = httpx.Client(proxy = api_proxy, verify = False)
@@ -180,7 +187,49 @@ class UniformEmbeddings:
             kwargs["http_client"] = _http_client
             kwargs["http_async_client"] = _http_async_client
         else:
-            logging.warning("AzureOpenAI proxy not set. Using API key for authentication.")
+            logging.warning("Azure proxy not set. Using API key for authentication.")
+
+        if dimensions is not None:
+            kwargs["dimensions"] = int(dimensions)
+
+        self.base_embeddings = AzureOpenAIEmbeddings(**kwargs)
+
+    def setup_custom_azure(self):
+        from langchain_openai import AzureOpenAIEmbeddings
+
+        provider_upper = self.provider_name.upper()
+        api_version = os.getenv(f"{provider_upper}_API_VERSION")
+        api_endpoint = os.getenv(f"{provider_upper}_ENDPOINT")
+        api_key = os.getenv(f"{provider_upper}_API_KEY")
+        api_proxy = os.getenv(f"{provider_upper}_PROXY")
+        dimensions = os.getenv(f'{provider_upper}_EMBEDDINGS_DIMENSIONS')
+
+        if api_version is None or api_endpoint is None:
+            raise ValueError(f"Custom Azure provider '{self.provider_name}' environment variables not set.")
+
+        if api_key is None and api_proxy is None:
+            raise ValueError(f"Custom Azure provider '{self.provider_name}' API key or proxy not set. One of them is required as authentication method.")
+
+        kwargs = {
+            "azure_endpoint": api_endpoint,
+            "openai_api_version": api_version,
+            "deployment": self.model_name,
+            "check_embedding_ctx_length": False,
+        }
+
+        if api_key is not None:
+            kwargs["openai_api_key"] = api_key
+        else:
+            logging.warning(f"Custom Azure provider '{self.provider_name}' API key not set. Using proxy for authentication.")
+
+        if api_proxy is not None:
+            _http_client = httpx.Client(proxy = api_proxy, verify = False)
+            _http_async_client = httpx.AsyncClient(proxy = api_proxy, verify = False)
+
+            kwargs["http_client"] = _http_client
+            kwargs["http_async_client"] = _http_async_client
+        else:
+            logging.warning(f"Custom Azure provider '{self.provider_name}' proxy not set. Using API key for authentication.")
 
         if dimensions is not None:
             kwargs["dimensions"] = int(dimensions)
@@ -229,7 +278,7 @@ class UniformEmbeddings:
         api_key = os.getenv(f'{provider_upper}_API_KEY')
         base_url = os.getenv(f'{provider_upper}_BASE_URL')
         proxy = os.getenv(f'{provider_upper}_PROXY')
-        
+
         if api_key is None:
             raise ValueError(f"{provider_upper}_API_KEY environment variable not set.")
         if base_url is None:

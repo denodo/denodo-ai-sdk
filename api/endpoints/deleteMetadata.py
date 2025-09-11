@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException
 
+from utils.data_catalog import get_allowed_view_ids, DataCatalogAuthError
 from api.utils import state_manager
 from api.utils.sdk_utils import (
     handle_endpoint_error, authenticate, delete_by_db_or_tag
@@ -52,6 +53,12 @@ async def deleteMetadata(endpoint_request: deleteMetadataRequest = Depends(), au
 
     This behavior ensures that only views that unambiguously match the deletion criteria are removed, while preserving any entries that may be linked to other synchronized sources.
     """
+    try:
+        allowed_view_ids = await get_allowed_view_ids(auth=auth, raise_on_auth_error=True)
+        allowed_view_ids = [str(view_id) for view_id in allowed_view_ids]
+    except DataCatalogAuthError as e:
+        raise HTTPException(status_code=401, detail=f"Authentication failed during deleteMetadata: {str(e)}")
+
     vdp_database_names = [db.strip() for db in endpoint_request.vdp_database_names.split(',') if db]
     vdp_tag_names = [tag.strip() for tag in endpoint_request.vdp_tag_names.split(',') if tag]
 
@@ -79,7 +86,8 @@ async def deleteMetadata(endpoint_request: deleteMetadataRequest = Depends(), au
             sample_data_vector_store=sample_data_vector_store,
             vdp_database_names=vdp_database_names,
             vdp_tag_names=vdp_tag_names,
-            delete_conflicting=endpoint_request.delete_conflicting
+            delete_conflicting=endpoint_request.delete_conflicting,
+            allowed_view_ids=allowed_view_ids
         )
 
     except Exception as e:

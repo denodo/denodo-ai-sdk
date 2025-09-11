@@ -13,19 +13,14 @@ const CustomInstructionsModal = ({ show, handleClose }) => {
 
   useEffect(() => {
     if (show) {
-      const getLoggedInUsername = async () => {
-        try {
-          const response = await axios.get('current_user');
-          if (response.data && response.data.username) {
-            setUsername(response.data.username);
-          }
-        } catch (error) {
-          console.error('Error fetching username:', error);
-          setUsername('Unknown user');
-        }
-      };
+      const currentUser = localStorage.getItem('currentLoggedInUser');
+      if (!currentUser) return;
+      const savedUserDetails = localStorage.getItem(`${currentUser}_userDetails`) || '';
+      const savedCustomInstructions = localStorage.getItem(`${currentUser}_customInstructions`) || '';
       
-      getLoggedInUsername();
+      setUsername(currentUser);
+      setUserDetails(savedUserDetails);
+      setCustomInstructions(savedCustomInstructions);
     }
   }, [show]);
 
@@ -33,6 +28,8 @@ const CustomInstructionsModal = ({ show, handleClose }) => {
     e.preventDefault();
     setIsLoading(true);
     try {
+      localStorage.setItem(`${username}_userDetails`, userDetails);
+      localStorage.setItem(`${username}_customInstructions`, customInstructions);
       const response = await axios.post('update_custom_instructions', {
         custom_instructions: customInstructions,
         user_details: userDetails
@@ -51,7 +48,7 @@ const CustomInstructionsModal = ({ show, handleClose }) => {
   };
 
   return (
-    <Modal show={show} onHide={handleClose}>
+    <Modal show={show} onHide={handleClose} style={{ '--bs-modal-bg': '#112533' }} contentClassName="text-white border border-white">
       <Modal.Header closeButton className="custom-header-modal">
         <Modal.Title>User Profile</Modal.Title>
       </Modal.Header>
@@ -89,7 +86,7 @@ const CustomInstructionsModal = ({ show, handleClose }) => {
             />
           </Form.Group>
           
-          <Button variant="primary" type="submit" disabled={isLoading}>
+          <Button variant="primary" type="submit" disabled={isLoading} style={{ backgroundColor: '#2D3E4B', borderColor: '#2D3E4B' }}>
             {isLoading ? (
               <>
                 <Spinner

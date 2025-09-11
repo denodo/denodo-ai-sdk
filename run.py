@@ -1,20 +1,18 @@
 import os
 import re
 import sys
+import time
 import argparse
 import requests
 import threading
 import subprocess
 import platform
-import time
+import signal
 
 from rich.text import Text
 from rich.panel import Panel
 from rich.console import Console
-
-from datetime import datetime
 from dotenv import dotenv_values
-
 from utils.utils import normalize_root_path
 
 console = Console()
@@ -34,6 +32,7 @@ def parse_arguments():
     parser.add_argument("--max-log-size", type=int, default=1, help="Maximum log file size in MB before rotation (default: 1)")
     parser.add_argument("--production", action="store_true", help="Run in production mode")
     parser.add_argument("--background", action="store_true", help="Run processes in the background and exit after they start.")
+    parser.add_argument("--log-level", choices=["DEBUG", "INFO"], default="INFO", help="Set the logging level (default: INFO)")
     return parser.parse_args()
 
 def empty_file(file_path):
@@ -84,7 +83,7 @@ def print_status(process_type, urls, version=None, root_path_prefix=""):
             ])
             if i < len(urls) - 1:
                 segments.append(("\n", ""))
-        
+
         panel = Panel(
             Text.assemble(*segments),
             title="[bold]Chatbot Status",
@@ -93,45 +92,59 @@ def print_status(process_type, urls, version=None, root_path_prefix=""):
         )
     console.print(panel)
 
-def run_process(process_type, timeout=30, no_logs=False, max_log_size=1, production=False, background=False):
+def run_process(process_type, args):
     env = os.environ.copy()
     env['PYTHONIOENCODING'] = 'utf-8'
 
-    if background:
+    if args.background:
         no_logs = False
+    else:
+        no_logs = args.no_logs
 
     env['LOG_FILE_PATH'] = os.path.join("logs", f"{process_type}.log")
-    env['LOG_MAX_SIZE_MB'] = str(max_log_size)
+    env['LOG_MAX_SIZE_MB'] = str(args.max_log_size)
     env['NO_LOGS_TO_FILE'] = str(no_logs)
-    
+    env['LOG_LEVEL'] = args.log_level
+
     # Load environment variables from the appropriate .env file
     if process_type == "api":
         if os.path.exists("api/utils/sdk_config.env"):
             sdk_vars = dotenv_values("api/utils/sdk_config.env")
-            HOST = sdk_vars.get("AI_SDK_HOST", "0.0.0.0")
-            PORT = sdk_vars.get("AI_SDK_PORT", "8008")
-            WORKERS = sdk_vars.get("AI_SDK_WORKERS", "1")
-            SSL_CERT = sdk_vars.get("AI_SDK_SSL_CERT", None)
-            SSL_KEY = sdk_vars.get("AI_SDK_SSL_KEY", None)
-            ROOT_PATH = normalize_root_path(sdk_vars.get("AI_SDK_ROOT_PATH", ""))
         else:
             console.print("[yellow]Warning:[/] Environment file api/utils/sdk_config.env not found.")
+            sdk_vars = {}
+
+        HOST = sdk_vars.get("AI_SDK_HOST") or os.getenv("AI_SDK_HOST", "0.0.0.0")
+        PORT = sdk_vars.get("AI_SDK_PORT") or os.getenv("AI_SDK_PORT", "8008")
+        WORKERS = sdk_vars.get("AI_SDK_WORKERS") or os.getenv("AI_SDK_WORKERS", "1")
+        SSL_CERT = sdk_vars.get("AI_SDK_SSL_CERT") or os.getenv("AI_SDK_SSL_CERT")
+        SSL_KEY = sdk_vars.get("AI_SDK_SSL_KEY") or os.getenv("AI_SDK_SSL_KEY")
+        TIMEOUT = sdk_vars.get("AI_SDK_TIMEOUT") or os.getenv("AI_SDK_TIMEOUT", "1200")
+
+        root_path_value = sdk_vars.get("AI_SDK_ROOT_PATH") or os.getenv("AI_SDK_ROOT_PATH")
+        ROOT_PATH = normalize_root_path(root_path_value or "")
+
     elif process_type == "sample_chatbot":
         if os.path.exists("sample_chatbot/chatbot_config.env"):
             chatbot_vars = dotenv_values("sample_chatbot/chatbot_config.env")
-            HOST = chatbot_vars.get("CHATBOT_HOST", "0.0.0.0")
-            PORT = chatbot_vars.get("CHATBOT_PORT", "9992")
-            WORKERS = chatbot_vars.get("CHATBOT_WORKERS", "1")
-            SSL_CERT = chatbot_vars.get("CHATBOT_SSL_CERT", None)
-            SSL_KEY = chatbot_vars.get("CHATBOT_SSL_KEY", None)
-            ROOT_PATH = normalize_root_path(chatbot_vars.get("CHATBOT_ROOT_PATH", ""))
         else:
             console.print("[yellow]Warning:[/] Environment file sample_chatbot/chatbot_config.env not found.")
-        
+            chatbot_vars = {}
+
+        HOST = chatbot_vars.get("CHATBOT_HOST") or os.getenv("CHATBOT_HOST", "0.0.0.0")
+        PORT = chatbot_vars.get("CHATBOT_PORT") or os.getenv("CHATBOT_PORT", "9992")
+        WORKERS = chatbot_vars.get("CHATBOT_WORKERS") or os.getenv("CHATBOT_WORKERS", "1")
+        SSL_CERT = chatbot_vars.get("CHATBOT_SSL_CERT") or os.getenv("CHATBOT_SSL_CERT")
+        SSL_KEY = chatbot_vars.get("CHATBOT_SSL_KEY") or os.getenv("CHATBOT_SSL_KEY")
+        TIMEOUT = chatbot_vars.get("CHATBOT_TIMEOUT") or os.getenv("CHATBOT_TIMEOUT", "1200")
+
+        root_path_value = chatbot_vars.get("CHATBOT_ROOT_PATH") or os.getenv("CHATBOT_ROOT_PATH")
+        ROOT_PATH = normalize_root_path(root_path_value or "")
+
     success_event = threading.Event()
 
     with console.status(f"[bold blue]Starting {process_type}...", spinner="dots"):
-        if production:            
+        if args.production:
             venv_path = sys.prefix
             gunicorn_path = os.path.join(venv_path, "bin", "gunicorn")
             uvicorn_path = os.path.join(venv_path, "Scripts", "uvicorn.exe")
@@ -145,12 +158,17 @@ def run_process(process_type, timeout=30, no_logs=False, max_log_size=1, product
 
             if server_path == uvicorn_path:
                 cmd.extend(["--host", HOST, "--port", PORT])
+                # Add timeout for Uvicorn (Windows)
+                cmd.extend(["--timeout-keep-alive", TIMEOUT])
             else:
                 cmd.extend(["--bind", f"{HOST}:{PORT}"])
+                # Add timeout for Gunicorn (Unix/Linux/macOS)
+                cmd.extend(["--timeout", TIMEOUT])
+                cmd.extend(["--graceful-timeout", TIMEOUT])
 
             if process_type == "api" and server_path == gunicorn_path:
                 cmd.extend(["--worker-class", "uvicorn.workers.UvicornWorker"])
-            
+
             if SSL_CERT and SSL_KEY:
                 if server_path == uvicorn_path:
                     cmd.extend(["--ssl-certfile", SSL_CERT, "--ssl-keyfile", SSL_KEY])
@@ -171,34 +189,47 @@ def run_process(process_type, timeout=30, no_logs=False, max_log_size=1, product
         )
 
     log_thread = threading.Thread(
-        target=log_output, 
-        args=(process, process_type, success_event, production, ROOT_PATH, no_logs)
+        target=log_output,
+        args=(process, process_type, success_event, args.production, ROOT_PATH, no_logs)
     )
 
-    if background:
+    if args.background:
         log_thread.daemon = True
 
     log_thread.start()
 
     # Wait for success signal or timeout
-    if not success_event.wait(timeout):
+    if not success_event.wait(args.timeout):
         process.kill()
         log_thread.join()
-        console.print(f"[bold red]Error:[/] {process_type} failed to start within {timeout} seconds")
-        raise TimeoutError(f"{process_type} failed to start within {timeout} seconds")
-    
+        console.print(f"[bold red]Error:[/] {process_type} failed to start within {args.timeout} seconds")
+        raise TimeoutError(f"{process_type} failed to start within {args.timeout} seconds")
+
     return process, log_thread
 
 def log_output(process, process_type, success_event, production=False, root_path_prefix="", print_to_console=False):
     urls = []
     version = None
-    
+    data_catalog_warning_shown = False
+
     try:
         for line in process.stdout:
             if print_to_console:
                 sys.stdout.write(line)
                 sys.stdout.flush()
-            
+
+            # Check for data catalog connection failure warning (only for API process)
+            if (process_type == "api" and
+                not data_catalog_warning_shown and
+                "Could not establish connection to Data Catalog" in line):
+                console.print(Panel(
+                    "[bold yellow]WARNING: Data Catalog Connection Failed[/]\n"
+                    "[yellow]Could not establish connection to Data Catalog. Please check your configuration.",
+                    border_style="yellow",
+                    width=60
+                ))
+                data_catalog_warning_shown = True
+
             if process_type == "api":
                 if production and platform.system() != "Windows":
                     # Production mode patterns (Gunicorn)
@@ -209,7 +240,7 @@ def log_output(process, process_type, success_event, production=False, root_path
                             if urls and not success_event.is_set():
                                 print_status("api", urls, version, root_path_prefix=root_path_prefix)
                                 success_event.set()
-                    
+
                     if "Listening at:" in line:
                         match = re.search(r"Listening at: (https?://[\w.:]+)", line)
                         if match:
@@ -234,7 +265,7 @@ def log_output(process, process_type, success_event, production=False, root_path
                             if urls and not success_event.is_set():
                                 print_status("api", urls, version, root_path_prefix=root_path_prefix)
                                 success_event.set()
-                    
+
                     if "Uvicorn running on" in line:
                         match = re.search(r"Uvicorn running on (https?://[\w.:]+)", line)
                         if match:
@@ -250,7 +281,7 @@ def log_output(process, process_type, success_event, production=False, root_path
                                 t = threading.Timer(5.0, delayed_status)
                                 t.daemon = True
                                 t.start()
-            
+
             elif process_type == "sample_chatbot":
                 if production and platform.system() != "Windows":
                     # Production mode patterns (Gunicorn)
@@ -278,7 +309,7 @@ def log_output(process, process_type, success_event, production=False, root_path
                             if not success_event.is_set():
                                 print_status("sample_chatbot", urls, root_path_prefix=root_path_prefix)
                                 success_event.set()
-                    
+
     except ValueError as e:
         if "I/O operation on closed file" in str(e):
             console.print("[yellow]Warning:[/] Log file was closed before all output was written.")
@@ -288,7 +319,7 @@ def log_output(process, process_type, success_event, production=False, root_path
 def sync_vdp(url, server_id = 1, dc_user = 'admin', dc_password = 'admin'):
     endpoint = "/denodo-data-catalog/public/api/element-management/VIEWS/synchronize"
     full_url = f"{url}{endpoint}?serverId={server_id}"
-    
+
     payload = {
         "proceedWithConflicts": "SERVER",
     }
@@ -313,7 +344,7 @@ def load_demo_data(host, grpc_port, catalog_port, server_id, dc_user, dc_passwor
         border_style="blue",
         width=60
     ))
-    
+
     from adbc_driver_flightsql.dbapi import connect
     console.print("[bold blue]Loading demo banking data into samples_bank VDB...")
     success = False
@@ -329,21 +360,21 @@ def load_demo_data(host, grpc_port, catalog_port, server_id, dc_user, dc_passwor
                 },
                 autocommit=True
             )
-            
+
             with conn.cursor() as cur:
                 cur.execute("METADATA ENCRYPTION PASSWORD 'denodo';")
                 cur.fetchall()
-                
+
                 with open('sample_chatbot/sample_data/structured/samples_bank.vql', 'r', encoding='utf-8') as f:
                     sql_statements = f.read().split(';')
                     for statement in sql_statements:
                         if statement.strip():
                             cur.execute(statement.strip() + ";")
                             cur.fetchall()
-                            
+
                 cur.execute("METADATA ENCRYPTION DEFAULT;")
                 cur.fetchall()
-            
+
         console.print("[bold green]✓[/] Demo data loaded successfully!")
         success = True
     except Exception as e:
@@ -357,7 +388,7 @@ def load_demo_data(host, grpc_port, catalog_port, server_id, dc_user, dc_passwor
                 console.print("[bold yellow]Warning:[/] Data Catalog synchronization failed.")
                 return False
             console.print("[bold green]✓[/] Database synchronized successfully!")
-    
+
     return success
 
 def shutdown_gracefully(processes_to_shutdown, timeout=5):
@@ -396,7 +427,12 @@ if __name__ == "__main__":
     log_threads = []
 
     print_header()
-    
+
+    # Set the tiktoken cache dir to be able to use the AI SDK in offline environments
+    # The tiktoken dependency tries to download from the Internet the tokenizer model for the LLM if not
+    # Comment out if you're fine with this behavior
+    os.environ["TIKTOKEN_CACHE_DIR"] = "./cache/tiktoken/"
+
     # Show production mode warning if enabled
     if args.production:
         console.print(Panel(
@@ -419,7 +455,7 @@ if __name__ == "__main__":
         any_failures = False
         for process_name in processes_to_run:
             try:
-                process, log_thread = run_process(process_name, args.timeout, args.no_logs, args.max_log_size, args.production, args.background)
+                process, log_thread = run_process(process_name, args)
                 if process_name == "api":
                     processes.append(("API", process))
                 elif process_name == "sample_chatbot":
@@ -439,13 +475,17 @@ if __name__ == "__main__":
                 sys.exit(0)
 
         if processes:
-            console.print("\n[bold cyan]Type 'exit' and press Enter to stop the application(s).[/bold cyan]")
-            cmd_listener_thread = threading.Thread(
-                target=command_listener,
-                args=(processes,),
-                daemon=True
-            )
-            cmd_listener_thread.start()
+            if sys.stdin.isatty():
+                console.print("\n[bold cyan]Type 'exit' and press Enter to stop the application(s).[/bold cyan]")
+                cmd_listener_thread = threading.Thread(
+                    target=command_listener,
+                    args=(processes,),
+                    daemon=True
+                )
+                cmd_listener_thread.start()
+            else:
+                signal.signal(signal.SIGTERM, lambda *_: shutdown_gracefully(processes))
+                signal.signal(signal.SIGINT, lambda *_: shutdown_gracefully(processes))
 
         while any(p[1].poll() is None for p in processes):
             for name, process in list(processes):
@@ -461,12 +501,12 @@ if __name__ == "__main__":
         console.print(f"[bold red]Error:[/] {e}")
         shutdown_gracefully(processes)
         sys.exit(1)
-    
+
     finally:
         # Cleanup for interactive mode
         if not args.background:
             for thread in log_threads:
                 thread.join()
-            
+
             console.print("[bold green]Shutdown complete.[/]")
             sys.exit(0)

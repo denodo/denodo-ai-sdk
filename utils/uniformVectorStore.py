@@ -15,7 +15,7 @@ class UniformVectorStore:
         self.dimensions = self.get_dimensions()
         self.chunk_factor = chunk_factor
         self._connect()
-        
+
     def _connect(self):
         if self.provider == "chroma":
             import platform
@@ -31,9 +31,9 @@ class UniformVectorStore:
                 persist_directory=self.index_name,
                 collection_metadata={
                     "hnsw:space": "cosine",
-                    "hnsw:construction_ef": 128,
-                    "hnsw:search_ef": 128,
-                    "hnsw:M": 128
+                    "hnsw:construction_ef": 512,
+                    "hnsw:search_ef": 256,
+                    "hnsw:M": 256
                 },
                 client_settings = Settings(
                     anonymized_telemetry=False,
@@ -77,13 +77,13 @@ class UniformVectorStore:
                     engine="faiss"
                 )
         else:
-            raise ValueError(f"Unsupported provider: {self.provider}")
+            raise ValueError(f"Unsupported vector store provider: {self.provider}")
 
-    @timed          
+    @timed
     def get_dimensions(self):
         test_vector = self.embeddings.embed_query("test")
         return len(test_vector)
-    
+
     def get_last_update_dict(self):
         search_vector = self.search_by_vector([0] * self.dimensions, k = 1, view_ids = ["last_update"])
         if search_vector and 'last_update_dict' in search_vector[0].metadata:
@@ -98,7 +98,7 @@ class UniformVectorStore:
             return int(last_update_dict[source_type][source_name])
         else:
             return None
-        
+
     @timed
     def update_last_update(self, last_update_dict):
         self.client.delete(ids=["last_update"])
@@ -144,7 +144,7 @@ class UniformVectorStore:
         # Otherwise, no filter on view_ids
         else:
             search_filter = None
-                    
+
         if scores:
             if self.provider == "opensearch":
                 return self.client.similarity_search_with_score(query, k=k, search_type="script_scoring", pre_filter=search_filter)
@@ -169,7 +169,7 @@ class UniformVectorStore:
             search_filter = self._build_metadata_search_filter(database_names, tag_names)
         else:
             search_filter = self._build_get_view_ids_search_filter(view_names)
-        
+
         if self.provider == "opensearch":
             return self.client.similarity_search_by_vector(vector, k=k, search_type="script_scoring", pre_filter=search_filter)
         elif self.provider in ["chroma", "pgvector"]:
@@ -196,7 +196,7 @@ class UniformVectorStore:
                     or_conditions.append({"match": {f"metadata.tag_{tag_name}": "1"}})
                 elif self.provider in ["chroma", "pgvector"]:
                     or_conditions.append({f"tag_{tag_name}": {"$eq": "1"}})
-        
+
         if not or_conditions:
             return None # No filter to apply if no conditions were added
 
@@ -224,7 +224,7 @@ class UniformVectorStore:
     def _build_search_filter(self, view_ids, database_names=None, tag_names=None, view_names=None):
         # Check if any additional filters are provided
         has_additional_filters = database_names or tag_names or view_names
-        
+
         if self.provider == "opensearch":
             # If no additional filters, return a simple terms filter for view_ids
             if not has_additional_filters:
@@ -233,7 +233,7 @@ class UniformVectorStore:
                         "metadata.view_id": view_ids
                     }
                 }
-            
+
             # Otherwise, create the more complex filter with boolean logic
             filter_query = {
                 "bool": {
@@ -246,10 +246,10 @@ class UniformVectorStore:
                     ]
                 }
             }
-            
+
             # Add additional filters if provided
             or_conditions = []
-            
+
             # Add database name conditions
             if database_names:
                 for db_name in database_names:
@@ -258,7 +258,7 @@ class UniformVectorStore:
                             "metadata.database_name": db_name
                         }
                     })
-            
+
             # Add tag conditions
             if tag_names:
                 for tag_name in tag_names:
@@ -267,7 +267,7 @@ class UniformVectorStore:
                             f"metadata.tag_{tag_name}": "1"
                         }
                     })
-            
+
             # Add view name conditions
             if view_names:
                 for view_name in view_names:
@@ -276,7 +276,7 @@ class UniformVectorStore:
                             "metadata.view_name": view_name
                         }
                     })
-            
+
             # Add the conditions to the filter
             if len(or_conditions) == 1:
                 # If only one condition, add it directly to must
@@ -289,39 +289,39 @@ class UniformVectorStore:
                         "minimum_should_match": 1
                     }
                 })
-            
+
             return filter_query
-            
+
         elif self.provider in ['chroma', 'pgvector']:
             # If no additional filters, return a simple filter for view_ids
             if not has_additional_filters:
                 return {"view_id": {"$in": view_ids}}
-            
+
             # Otherwise, create the more complex filter with $and
             filter_query = {
                 "$and": [
                     {"view_id": {"$in": view_ids}}
                 ]
             }
-            
+
             # Add additional filters if provided
             or_conditions = []
-            
+
             # Add database name conditions
             if database_names:
                 for db_name in database_names:
                     or_conditions.append({"database_name": {"$eq": db_name}})
-            
+
             # Add tag conditions
             if tag_names:
                 for tag_name in tag_names:
                     or_conditions.append({f"tag_{tag_name}": {"$eq": "1"}})
-            
+
             # Add view name conditions
             if view_names:
                 for view_name in view_names:
                     or_conditions.append({"view_name": {"$eq": view_name}})
-            
+
             # Add the conditions to the filter
             if len(or_conditions) == 1:
                 # If only one condition, add it directly to $and
@@ -329,11 +329,11 @@ class UniformVectorStore:
             elif len(or_conditions) > 1:
                 # If multiple conditions, use $or
                 filter_query["$and"].append({"$or": or_conditions})
-            
+
             return filter_query
         else:
             return None
-        
+
     def delete(self, ids, batch_size = 1000):
         for i in range(0, len(ids), batch_size):
             batch_ids = ids[i:i+batch_size]
@@ -352,7 +352,7 @@ class UniformVectorStore:
                     ids_to_delete_set.add(view.metadata.get('view_id'))
                 else:
                     ids_to_delete_set.add(view.id)
-            
+
             ids_to_delete = list(ids_to_delete_set)
 
             if ids_to_delete:
@@ -361,19 +361,19 @@ class UniformVectorStore:
             view_ids = [view.id for view in views]
             if view_ids:
                 self.delete(ids = view_ids)
-                    
+
         # If rate limiting is enabled, process views in batches
         if self.rate_limit_rpm and len(view_ids) > self.rate_limit_rpm:
             logging.info(f"Rate limiting enabled: {self.rate_limit_rpm} views per minute. Total views: {len(view_ids)}")
-            
+
             # Process views in batches based on rate limit
             for i in range(0, len(view_ids), self.rate_limit_rpm):
                 batch_end = min(i + self.rate_limit_rpm, len(view_ids))
                 batch_views = views[i:batch_end]
                 batch_ids = view_ids[i:batch_end]
-                
+
                 logging.info(f"Processing batch {i//self.rate_limit_rpm + 1}: {len(batch_views)} views")
-                
+
                 # Process this batch using existing methods
                 if parallel:
                     try:
@@ -383,7 +383,7 @@ class UniformVectorStore:
                         self.client.add_documents(batch_views, ids=batch_ids)
                 else:
                     self.client.add_documents(batch_views, ids=batch_ids)
-                
+
                 # If there are more batches to process, wait for the next minute
                 if batch_end < len(views):
                     wait_time = 60  # Wait 1 minute
@@ -409,14 +409,14 @@ class UniformVectorStore:
 
     def _add_views_parallel(self, views, ids, batch_size=5, max_retries=3):
         """Add views in parallel with batching and error handling."""
-        
+
         def process_batch(batch_views, batch_ids, attempt=1):
             try:
                 self.client.add_documents(batch_views, ids=batch_ids)
                 return True, None
             except Exception as e:
                 if attempt < max_retries:
-                    logging.warning(f"Attempt {attempt} failed: {str(e)}. Retrying...")
+                    logging.warning(f"Attempt {attempt} failed: {str(e)}. Retrying...", exc_info=True)
                     time.sleep(5**attempt)
                     return process_batch(batch_views, batch_ids, attempt + 1)
                 return False, (batch_views, batch_ids, str(e))
@@ -428,14 +428,14 @@ class UniformVectorStore:
         ]
 
         failed_batches = []
-        
+
         # Process batches in parallel
         with concurrent.futures.ThreadPoolExecutor() as executor:
             futures = [
                 executor.submit(process_batch, batch_views, batch_ids)
                 for batch_views, batch_ids in batches
             ]
-            
+
             # Collect results and handle failures
             for future in concurrent.futures.as_completed(futures):
                 success, result = future.result()
@@ -455,17 +455,17 @@ class UniformVectorStore:
                     raise RuntimeError(f"Failed to process views after all retries: {str(e)}")
 
     @log_params
-    def get_view_ids(self, view_names):            
+    def get_view_ids(self, view_names):
         view_ids = self.search_by_vector([0]*self.dimensions, k = len(view_names) * self.chunk_factor, view_names = view_names)
         return [view.metadata['view_id'] for view in view_ids]
-    
+
     @log_params
     def get_views(self, view_ids):
         if len(view_ids) == 0:
             return []
-        
+
         views = self.search_by_vector([0]*self.dimensions, k=len(view_ids) * self.chunk_factor, view_ids=view_ids)
-        
+
         # Create a dictionary to keep only unique views based on view_name
         # Necessary because now there might be chunks of the same view
         unique_views = {}
@@ -473,17 +473,17 @@ class UniformVectorStore:
             view_name = view.metadata['view_name']
             if view_name not in unique_views:
                 unique_views[view_name] = view
-        
+
         return list(unique_views.values())
-    
+
     @log_params
     def delete_views(self, view_names):
         # Create tasks for each view name
         results = [self.get_view_ids([view_name]) for view_name in view_names]
-                
+
         # Flatten the results and convert to strings
         view_ids = [str(id) for sublist in results for id in sublist]
-        
+
         if view_ids:
             self.delete(view_ids)
 

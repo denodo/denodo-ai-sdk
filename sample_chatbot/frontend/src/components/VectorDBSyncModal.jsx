@@ -4,17 +4,29 @@ import Button from 'react-bootstrap/Button';
 import Form from 'react-bootstrap/Form';
 import Spinner from 'react-bootstrap/Spinner';
 import Alert from 'react-bootstrap/Alert';
+import Tabs from 'react-bootstrap/Tabs';
+import Tab from 'react-bootstrap/Tab';
 import axios from 'axios';
 
 const VectorDBSyncModal = ({ show, syncTimeout, handleClose }) => {
-  const [vdbs, setVdbs] = useState('');
-  const [tags, setTags] = useState('');
-  const [examplesPerTable, setExamplesPerTable] = useState(100);
-  const [incremental, setIncremental] = useState(true);
-  const [parallel, setParallel] = useState(true);
+  // Common state
+  const [activeTab, setActiveTab] = useState('sync');
   const [isLoading, setIsLoading] = useState(false);
   const [response, setResponse] = useState(null);
   const [hasCredentials, setHasCredentials] = useState(true);
+
+  // Sync state
+  const [syncVdbs, setSyncVdbs] = useState('');
+  const [syncTags, setSyncTags] = useState('');
+  const [ignoreTags, setIgnoreTags] = useState('');
+  const [examplesPerTable, setExamplesPerTable] = useState(100);
+  const [incremental, setIncremental] = useState(true);
+  const [parallel, setParallel] = useState(true);
+
+  // Delete state
+  const [deleteVdbs, setDeleteVdbs] = useState('');
+  const [deleteTags, setDeleteTags] = useState('');
+  const [deleteConflicting, setDeleteConflicting] = useState(false);
 
   useEffect(() => {
     if (show) {
@@ -33,15 +45,16 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose }) => {
     }
   }, [show]);
 
-  const handleSubmit = async (e) => {
+  const handleSyncSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     setResponse(null);
 
     try {
       const response = await axios.post('sync_vdbs', {
-        vdbs: vdbs.split(',').map(vdb => vdb.trim()).filter(vdb => vdb),
-        tags: tags.split(',').map(tag => tag.trim()).filter(tag => tag),
+        vdbs: syncVdbs.split(',').map(vdb => vdb.trim()).filter(vdb => vdb),
+        tags: syncTags.split(',').map(tag => tag.trim()).filter(tag => tag),
+        tags_to_ignore: ignoreTags.split(',').map(tag => tag.trim()).filter(tag => tag),
         examples_per_table: examplesPerTable,
         incremental,
         parallel
@@ -74,16 +87,60 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose }) => {
       setIsLoading(false);
     }
   };
+  
+  const handleDeleteSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setResponse(null);
+
+    try {
+        const response = await axios.delete('/delete_metadata', {
+            data: {
+                vdp_database_names: deleteVdbs,
+                vdp_tag_names: deleteTags,
+                delete_conflicting: deleteConflicting
+            }
+        });
+
+        if (response.status === 204) {
+            setResponse({
+                success: true,
+                message: "No Content: No metadata found matching the specified criteria for deletion."
+            });
+        } else {
+            setResponse({
+                success: true,
+                message: response.data.message
+            });
+        }
+    } catch (error) {
+        setResponse({
+            success: false,
+            message: error.response?.data?.message || 'An error occurred during deletion.'
+        });
+    } finally {
+        setIsLoading(false);
+    }
+  };
 
   const handleCloseAndReset = () => {
     setResponse(null);
+    setActiveTab('sync');
+    // Reset sync form
+    setSyncVdbs('');
+    setSyncTags('');
+    setIgnoreTags('');
+    // Reset delete form
+    setDeleteVdbs('');
+    setDeleteTags('');
+    setDeleteConflicting(false);
     handleClose();
   };
 
   return (
-    <Modal show={show} onHide={handleCloseAndReset}>
+    <Modal show={show} onHide={handleCloseAndReset} style={{ '--bs-modal-bg': '#112533' }} contentClassName="text-white border border-white">
       <Modal.Header closeButton className="custom-header-modal">
-        <Modal.Title>Sync VectorDB</Modal.Title>
+        <Modal.Title>VectorDB Management</Modal.Title>
       </Modal.Header>
       <Modal.Body>
         {!hasCredentials ? (
@@ -109,71 +166,120 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose }) => {
             )}
           </div>
         ) : (
-          <Form onSubmit={handleSubmit}>
-            <Form.Group className="mb-3">
-              <Form.Label>VDBs to Sync (comma-separated)</Form.Label>
-              <Form.Control
-                type="text"
-                placeholder="Specify a comma-separated list of VDBs to sync"
-                value={vdbs}
-                onChange={(e) => setVdbs(e.target.value)}
-              />
-            </Form.Group>
-            <Form.Group className="mb-3">
-              <Form.Label>Tags to Sync (comma-separated)</Form.Label>
-              <Form.Control
-                type="text"
-                placeholder="Specify a comma-separated list of tags to sync"
-                value={tags}
-                onChange={(e) => setTags(e.target.value)}
-              />
-            </Form.Group>
-            <Form.Group className="mb-3">
-              <Form.Label>Examples per Table</Form.Label>
-              <Form.Control
-                type="number"
-                min="0"
-                value={examplesPerTable}
-                onChange={(e) => setExamplesPerTable(parseInt(e.target.value))}
-              />
-            </Form.Group>
-            <Form.Group className="mb-3">
-              <Form.Check
-                type="checkbox"
-                label="Enable incremental loading"
-                checked={incremental}
-                onChange={(e) => setIncremental(e.target.checked)}
-              />
-            </Form.Group>
-            <Form.Group className="mb-3">
-              <Form.Check
-                type="checkbox"
-                label="Enable parallel processing"
-                checked={parallel}
-                onChange={(e) => setParallel(e.target.checked)}
-              />
-            </Form.Group>
-            <Button variant="primary" type="submit" disabled={isLoading}>
-              {isLoading ? (
-                <>
-                  <Spinner
-                    as="span"
-                    animation="border"
-                    size="sm"
-                    role="status"
-                    aria-hidden="true"
+          <Tabs activeKey={activeTab} onSelect={(k) => setActiveTab(k)} id="vdb-management-tabs" className="mb-3">
+            <Tab eventKey="sync" title="Sync">
+              <Form onSubmit={handleSyncSubmit}>
+                <Form.Group className="mb-3">
+                  <Form.Label>VDBs to Sync (comma-separated)</Form.Label>
+                  <Form.Control
+                    type="text"
+                    placeholder="Specify a comma-separated list of VDBs to sync"
+                    value={syncVdbs}
+                    onChange={(e) => setSyncVdbs(e.target.value)}
                   />
-                  <span className="ms-2">Syncing...</span>
-                </>
-              ) : (
-                'Sync'
-              )}
-            </Button>
-          </Form>
+                </Form.Group>
+                <Form.Group className="mb-3">
+                  <Form.Label>Tags to Sync (comma-separated)</Form.Label>
+                  <Form.Control
+                    type="text"
+                    placeholder="Specify a comma-separated list of tags to sync"
+                    value={syncTags}
+                    onChange={(e) => setSyncTags(e.target.value)}
+                  />
+                </Form.Group>
+                <Form.Group className="mb-3">
+                  <Form.Label>Tags to ignore (comma-separated)</Form.Label>
+                  <Form.Control
+                    type="text"
+                    placeholder="Specify a comma-separated list of tags to ignore"
+                    value={ignoreTags}
+                    onChange={(e) => setIgnoreTags(e.target.value)}
+                  />
+                </Form.Group>
+                <Form.Group className="mb-3">
+                  <Form.Label>Examples per Table</Form.Label>
+                  <Form.Control
+                    type="number"
+                    min="0"
+                    value={examplesPerTable}
+                    onChange={(e) => setExamplesPerTable(parseInt(e.target.value))}
+                  />
+                </Form.Group>
+                <Form.Group className="mb-3">
+                  <Form.Check
+                    type="checkbox"
+                    label="Enable incremental loading"
+                    checked={incremental}
+                    onChange={(e) => setIncremental(e.target.checked)}
+                  />
+                </Form.Group>
+                <Form.Group className="mb-3">
+                  <Form.Check
+                    type="checkbox"
+                    label="Enable parallel processing"
+                    checked={parallel}
+                    onChange={(e) => setParallel(e.target.checked)}
+                  />
+                </Form.Group>
+                <Button variant="primary" type="submit" disabled={isLoading} style={{ backgroundColor: '#2D3E4B', borderColor: '#2D3E4B' }}>
+                  {isLoading ? (
+                    <>
+                      <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" />
+                      <span className="ms-2">Syncing...</span>
+                    </>
+                  ) : ( 'Sync' )}
+                </Button>
+              </Form>
+            </Tab>
+            <Tab eventKey="delete" title="Delete">
+              <Form onSubmit={handleDeleteSubmit}>
+                <Form.Group className="mb-3">
+                  <Form.Label>VDBs to Delete (comma-separated)</Form.Label>
+                  <Form.Control
+                    type="text"
+                    placeholder="Leave empty to ignore, or list VDBs"
+                    value={deleteVdbs}
+                    onChange={(e) => setDeleteVdbs(e.target.value)}
+                  />
+                </Form.Group>
+                <Form.Group className="mb-3">
+                  <Form.Label>Tags to Delete (comma-separated)</Form.Label>
+                  <Form.Control
+                    type="text"
+                    placeholder="Leave empty to ignore, or list tags"
+                    value={deleteTags}
+                    onChange={(e) => setDeleteTags(e.target.value)}
+                  />
+                  <Form.Text className="text-white">
+                    At least one VDB or tag must be provided.
+                  </Form.Text>
+                </Form.Group>
+                <Form.Group className="mb-3">
+                  <Form.Check
+                    type="checkbox"
+                    label="Delete conflicting entries"
+                    checked={deleteConflicting}
+                    onChange={(e) => setDeleteConflicting(e.target.checked)}
+                  />
+                   <Form.Text className="text-white">
+                    If unchecked, entries linked to other synchronized sources will be preserved.
+                  </Form.Text>
+                </Form.Group>
+                <Button variant="danger" type="submit" disabled={isLoading}>
+                  {isLoading ? (
+                    <>
+                      <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" />
+                      <span className="ms-2">Deleting...</span>
+                    </>
+                  ) : ( 'Delete' )}
+                </Button>
+              </Form>
+            </Tab>
+          </Tabs>
         )}
       </Modal.Body>
     </Modal>
   );
 };
 
-export default VectorDBSyncModal; 
+export default VectorDBSyncModal;

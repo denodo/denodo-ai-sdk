@@ -5,7 +5,6 @@ import Button from 'react-bootstrap/Button';
 import Spinner from 'react-bootstrap/Spinner';
 
 const SignInModal = ({ show, handleClose, onSignIn }) => {
-  const [authType, setAuthType] = useState('Basic');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -13,8 +12,12 @@ const SignInModal = ({ show, handleClose, onSignIn }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
+
+    const savedUserDetails = localStorage.getItem(`${username}_userDetails`) || '';
+    const savedCustomInstructions = localStorage.getItem(`${username}_customInstructions`) || '';
     try {
-      await onSignIn({ username, password, authType });
+      await onSignIn({ username, password, authType: 'Basic', user_details: savedUserDetails, custom_instructions: savedCustomInstructions });
+      localStorage.setItem('currentLoggedInUser', username);
     } finally {
       setIsLoading(false);
       handleClose();
@@ -22,7 +25,7 @@ const SignInModal = ({ show, handleClose, onSignIn }) => {
   };
 
   return (
-    <Modal show={show} onHide={handleClose}>
+    <Modal show={show} onHide={handleClose} style={{ '--bs-modal-bg': '#112533' }} contentClassName="text-white border border-white">
       <Modal.Header closeButton className="custom-header-modal">
         <Modal.Title>Sign In</Modal.Title>
       </Modal.Header>
@@ -48,7 +51,7 @@ const SignInModal = ({ show, handleClose, onSignIn }) => {
               required
             />
           </Form.Group>
-          <Button variant="primary" type="submit" disabled={isLoading}>
+          <Button variant="primary" type="submit" disabled={isLoading} style={{ backgroundColor: '#2D3E4B', borderColor: '#2D3E4B' }}>
             {isLoading ? (
               <>
                 <Spinner

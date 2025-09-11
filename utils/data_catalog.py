@@ -1,5 +1,5 @@
 """
- Copyright (c) 2024. DENODO Technologies.
+ Copyright (c) 2025. DENODO Technologies.
  http://www.denodo.com
  All rights reserved.
 
@@ -18,7 +18,12 @@ import aiohttp
 import asyncio
 from utils.utils import timed, log_params
 
-DATA_CATALOG_URL = os.getenv('DATA_CATALOG_URL', 'http://localhost:9090/denodo-data-catalog').rstrip('/') + '/'    
+DATA_CATALOG_URL = (
+    os.getenv("AI_SDK_DATA_CATALOG_URL") or
+    os.getenv('DATA_CATALOG_URL') or
+    'http://localhost:9090/denodo-data-catalog'
+).rstrip('/') + '/'
+
 DATA_CATALOG_VERIFY_SSL = os.getenv('DATA_CATALOG_VERIFY_SSL', '0') == '1'
 DATA_CATALOG_SERVER_ID = int(os.getenv('DATA_CATALOG_SERVER_ID', 1))
 DATA_CATALOG_METADATA_URL = f"{DATA_CATALOG_URL}public/api/askaquestion/data"
@@ -44,12 +49,15 @@ def get_views_metadata_documents(
     verify_ssl=DATA_CATALOG_VERIFY_SSL,
     last_update_timestamp_ms=None,
     view_prefix_filter='',
-    view_suffix_filter=''
+    view_suffix_filter='',
+    tagged_views=None,
+    incremental=True,
+    tags_to_ignore=None
 ):
     """
     Retrieve JSON documents from views metadata with support for OAuth token or Basic auth.
     Handles both legacy and paginated API versions automatically.
-    
+
     Args:
         database_name: Name of the database to query (mutually exclusive with tag_name)
         auth: Either (username, password) tuple for basic auth or OAuth token string
@@ -62,24 +70,25 @@ def get_views_metadata_documents(
         server_id: Server identifier
         verify_ssl: Whether to verify SSL certificates (default: DATA_CATALOG_VERIFY_SSL)
         metadata_url: Data Catalog metadata URL (default: DATA_CATALOG_METADATA_URL)
-        
+
     Returns:
         Parsed metadata JSON response
     """
     # Validate that only one of database_name or tag_name is provided
     if (database_name is None and tag_name is None) or (database_name is not None and tag_name is not None):
         raise ValueError("Exactly one of database_name or tag_name must be provided")
-    
+
     # Set data_mode based on which parameter is provided
     data_mode = 'DATABASE' if database_name is not None else 'TAG'
-    
+
     # Set the appropriate logging message based on which parameter is provided
     entity_name = database_name if database_name is not None else tag_name
     entity_type = "database" if database_name is not None else "tag"
 
     logging.info(f"Starting to retrieve views metadata with {examples_per_table} examples per view on {entity_type} '{entity_name}'")
-    
+
     delete_view_ids = []
+    detagged_view_ids = []
 
     def prepare_request_data(offset=None, limit=None):
         data = {
@@ -89,25 +98,27 @@ def get_views_metadata_documents(
 
         if last_update_timestamp_ms:
             data["updatedSince"] = last_update_timestamp_ms
-        
+
         # Add the appropriate parameter based on data_mode
         if data_mode == 'DATABASE':
             data["databaseName"] = database_name
         else:  # data_mode == 'TAG'
             data["tagName"] = tag_name
-        
+            if incremental and tagged_views:
+                data["taggedViewIdentifiers"] = tagged_views
+
         if examples_per_table > 0:
             data["dataUsageConfiguration"] = {
                 "tuplesToUse": examples_per_table,
                 "samplingMethod": "random"
             }
-        
+
         # Add pagination parameters only if specified
         if offset is not None:
             data["offset"] = offset
         if limit is not None:
             data["limit"] = limit
-            
+
         return data
 
     def make_request(data):
@@ -144,14 +155,17 @@ def get_views_metadata_documents(
     try:
         # Initial request without pagination to detect DC API version
         initial_response = make_request(prepare_request_data())
-        
-        # If it's not a list, it's the old DC API (<9.1.0)
+
+        # If it's a list, it's the old DC API (<9.1.0)
         if not isinstance(initial_response, list):
             views = initial_response.get('viewsDetails', initial_response)
             delete_view_ids.extend(initial_response.get('deletedViewIdentifiers', []))
+            if incremental and data_mode == 'TAG':
+                detagged_view_ids.extend(initial_response.get('detaggedViewIdentifiers', []))
+
             total_views = len(views)
             logging.info(f"Total views retrieved: {total_views}")
-        
+
             # If we got less than 1000 views we can exit
             if total_views < 1000:
                 logging.info(f"Retrieved {total_views} views in single request. No pagination needed")
@@ -161,7 +175,7 @@ def get_views_metadata_documents(
                 logging.info("Dealing with the pagination API. Making requests with pagination.")
                 all_views = views
                 offset = 1000
-                
+
                 while True:
                     data = prepare_request_data(offset=offset, limit=1000)
                     page_response = make_request(data)
@@ -169,18 +183,42 @@ def get_views_metadata_documents(
                     page_views = page_response.get('viewsDetails', page_response)
                     if not page_views:
                         break
-                        
+
                     all_views.extend(page_views)
                     offset += 1000
                     logging.info(f"Retrieved {len(all_views)} views so far")
-                    
+
                     if len(page_views) < 1000:
                         break
         else:
             all_views = initial_response
 
+        if not incremental and data_mode == 'TAG' and tagged_views is not None:
+            current_view_ids = {view['id'] for view in all_views if 'id' in view}
+            detagged_ids_set = set(tagged_views) - current_view_ids
+            detagged_view_ids = list(detagged_ids_set)
+
         logging.info(f"Total views retrieved: {len(all_views)}")
-        
+
+        # Filter out views that have any of the tags to be ignored.
+        if tags_to_ignore:
+            tags_to_ignore_set = set(tags_to_ignore)
+            original_count = len(all_views)
+            
+            views_to_keep = []
+            
+            for view in all_views:
+                view_tags = {tag_info['name'] for tag_info in view.get('tagDetails', []) if 'name' in tag_info}
+                
+                if not tags_to_ignore_set.intersection(view_tags):
+                    views_to_keep.append(view)
+                    
+            all_views = views_to_keep
+            
+            filtered_count = original_count - len(all_views)
+            if filtered_count > 0:
+                logging.info(f"Filtered out {filtered_count} views based on tags_to_ignore.")
+
         processed_views = parse_metadata_json(
             json_response=all_views,
             use_associations=table_associations,
@@ -191,7 +229,7 @@ def get_views_metadata_documents(
             view_suffix_filter=view_suffix_filter
         )
 
-        return processed_views, delete_view_ids
+        return processed_views, list(set(delete_view_ids)), list(set(detagged_view_ids))
 
     except requests.HTTPError as e:
         error_response = json.loads(e.response.text)
@@ -217,11 +255,11 @@ async def is_empty_result(json_response):
     return False, ""
 
 @timed
-async def execute_vql(vql, auth, limit, execution_url=DATA_CATALOG_EXECUTION_URL, 
+async def execute_vql(vql, auth, limit, execution_url=DATA_CATALOG_EXECUTION_URL,
                 server_id=DATA_CATALOG_SERVER_ID, verify_ssl=DATA_CATALOG_VERIFY_SSL):
     """
     Execute VQL against Data Catalog with support for OAuth token or Basic auth.
-    
+
     Args:
         vql: VQL query to execute
         auth: Either (username, password) tuple for basic auth or OAuth token string
@@ -229,12 +267,11 @@ async def execute_vql(vql, auth, limit, execution_url=DATA_CATALOG_EXECUTION_URL
         execution_url: Data Catalog execution endpoint
         server_id: Server identifier
         verify_ssl: Whether to verify SSL certificates
-        
+
     Returns:
         Status code and parsed response or error message
     """
-    logging.info("Preparing execution request")
-        
+
     # Prepare headers based on auth type
     headers = {'Content-Type': 'application/json'}
     if isinstance(auth, tuple):
@@ -259,22 +296,22 @@ async def execute_vql(vql, auth, limit, execution_url=DATA_CATALOG_EXECUTION_URL
                 # Try to parse as JSON first
                 try:
                     json_response = await response.json()
-                    
+
                     # Success case
                     if 200 <= status_code < 300:
                         # Check for empty results
                         is_empty, empty_message = await is_empty_result(json_response)
                         if is_empty:
                             return 499, empty_message
-                        
+
                         return status_code, parse_execution_json(json_response)
-                    
+
                     # Error case with JSON response
                     if isinstance(json_response, dict) and 'message' in json_response:
                         return status_code, json_response.get('message')
                     else:
                         return status_code, str(json_response)
-                
+
                 except json.JSONDecodeError:
                     # Non-JSON response
                     text_response = await response.text()
@@ -290,7 +327,7 @@ async def execute_vql(vql, auth, limit, execution_url=DATA_CATALOG_EXECUTION_URL
                 return e.status, str(error_json)
         except (json.JSONDecodeError, AttributeError):
             return e.status, f"HTTP Error: {e.status} - {e.message}"
-            
+
     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         error_message = f"Failed to connect to the server: {str(e)}"
         logging.error(f"{error_message}. VQL: {vql}")
@@ -313,7 +350,7 @@ async def get_allowed_view_ids(
         server_id: The server ID (default is DATA_CATALOG_SERVER_ID)
         permissions_url: The Data Catalog permissions URL
         verify_ssl: Whether to verify SSL certificates
-        raise_on_auth_error: If True, raises DataCatalogAuthError on 401. 
+        raise_on_auth_error: If True, raises DataCatalogAuthError on 401.
                              If False (default), returns an empty list on any error.
 
     Returns:
@@ -324,8 +361,8 @@ async def get_allowed_view_ids(
         'accept': 'application/json',
         'Content-Type': 'application/json',
         'Authorization': (
-            calculate_basic_auth_authorization_header(*auth) 
-            if isinstance(auth, tuple) 
+            calculate_basic_auth_authorization_header(*auth)
+            if isinstance(auth, tuple)
             else f'Bearer {auth}'
         )
     }
@@ -343,14 +380,14 @@ async def get_allowed_view_ids(
             ) as response:
                 response.raise_for_status()
                 view_ids = await response.json()
-                
+
                 if not isinstance(view_ids, list) or not all(isinstance(id, int) for id in view_ids):
                     raise ValueError("Unexpected response format: not a list of integers")
-                
+
                 # Ensure unique values
                 unique_view_ids = list(set(view_ids))
                 return unique_view_ids
-                
+
     except aiohttp.ClientResponseError as e:
         if e.status == 401 and raise_on_auth_error:
             msg = "Authentication failed: Invalid credentials for Data Catalog."
@@ -406,8 +443,8 @@ def parse_metadata_json(
         json_table = remove_none_values(table)
         table_database = json_table.get('databaseName', '')
         table_name = json_table.get('name', '')
-        table_name = f"{table_database}.{table_name}"   
-        table_name = table_name.replace('"', '')      
+        table_name = f"{table_database}.{table_name}"
+        table_name = table_name.replace('"', '')
 
         if table_name in filter_tables:
             continue
@@ -456,7 +493,7 @@ def parse_metadata_json(
                 if 'description' in item:
                     item.pop('description')
             json_table['schema'][i] = column_name | item
-        
+
         if "associationData" in json_table:
             if use_associations is False:
                 json_table.pop('associationData')
@@ -486,7 +523,7 @@ def parse_metadata_json(
 
         if "description" in json_table and use_descriptions is False:
             json_table.pop('description')
-            
+
         json_metadata['views'].append(json_table)
     return json_metadata
 
@@ -513,14 +550,14 @@ def activate_incremental(
 ):
     """
     Enable or disable incremental metadata updates for the Data Catalog.
-    
+
     Args:
         auth: Either (username, password) tuple for basic auth or OAuth token string
         enabled: Boolean flag to enable (True) or disable (False) incremental metadata updates
         server_id: Server identifier (default is DATA_CATALOG_SERVER_ID)
         incremental_update_url: The Data Catalog incremental update configuration URL
         verify_ssl: Whether to verify SSL certificates
-        
+
     Returns:
         Tuple containing (status_code, response_message)
     """
@@ -529,17 +566,17 @@ def activate_incremental(
         'accept': 'application/json',
         'Content-Type': 'application/json',
         'Authorization': (
-            calculate_basic_auth_authorization_header(*auth) 
-            if isinstance(auth, tuple) 
+            calculate_basic_auth_authorization_header(*auth)
+            if isinstance(auth, tuple)
             else f'Bearer {auth}'
         )
     }
-    
+
     # Prepare request data
     data = {
         "metadataChangesEnabled": enabled
     }
-    
+
     try:
         response = requests.post(
             f"{DATA_CATALOG_INCREMENTAL_UPDATE_URL}?serverId={server_id}",
@@ -550,7 +587,7 @@ def activate_incremental(
         response.raise_for_status()
         logging.info(f"Incremental metadata updates {'enabled' if enabled else 'disabled'} successfully")
         return response.status_code, f"Incremental metadata updates {'enabled' if enabled else 'disabled'} successfully"
-                
+
     except requests.HTTPError as e:
         try:
             error_response = json.loads(e.response.text)
@@ -559,7 +596,7 @@ def activate_incremental(
             error_message = f"HTTP Error: {e.response.status_code} - {str(e)}"
         logging.error(f"Failed to configure incremental metadata updates: {error_message}")
         return e.response.status_code, error_message
-    
+
     except requests.RequestException as e:
         error_message = f"Failed to connect to the server: {str(e)}"
         logging.error(error_message)

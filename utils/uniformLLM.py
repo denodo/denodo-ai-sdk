@@ -2,12 +2,12 @@ import os
 import httpx
 import logging
 
-from utils.utils import TokenCounter, RefreshableBotoSession
+from utils.utils import RefreshableBotoSession
 
 class UniformLLM:
     VALID_PROVIDERS = [
         "OpenAI",
-        "AzureOpenAI",
+        "Azure",
         "Bedrock",
         "Google",
         "GoogleAIStudio",
@@ -19,34 +19,22 @@ class UniformLLM:
         "SambaNova",
         "OpenRouter"
         ]
-    
-    def __init__(self, provider_name, model_name, temperature = 0, max_tokens = 2048): 
+
+    def __init__(self, provider_name, model_name, temperature = 0.0, max_tokens = 2048):
         self.provider_name = provider_name
         self.model_name = model_name
         self.llm = None
-        self.temperature = temperature # Temperature in OpenAI goes from 0 to 2, in AWS/Vertex from 0 to 1
+        self.temperature = temperature # NOTE: Temperature in OpenAI goes from 0 to 2
         self.max_tokens = max_tokens
-        self.callback = None
         self.tokens = {
             'input_tokens': 0,
             'output_tokens': 0,
             'total_tokens': 0
         }
 
-        if "deepseek-r1" in self.model_name.lower() or (self.model_name.startswith("o") and self.provider_name.lower() == "openai"):
-            self.max_tokens = self.max_tokens * 5
-
-        if self.provider_name.lower() not in list(map(str.lower, self.VALID_PROVIDERS)):
-            logging.warning(f"Provider '{self.provider_name}' not in standard list. Creating custom OpenAI-compatible provider.")
-            logging.info("Expected environment variables for custom provider:")
-            logging.info(f"- {self.provider_name.upper()}_API_KEY (required)")
-            logging.info(f"- {self.provider_name.upper()}_BASE_URL (required)")
-            logging.info(f"- {self.provider_name.upper()}_PROXY (optional)")
-            self.setup_custom()
-
         if self.provider_name.lower() == "openai":
             self.setup_openai()
-        elif self.provider_name.lower() == "azureopenai":
+        elif self.provider_name.lower() == "azure":
             self.setup_azure_openai()
         elif self.provider_name.lower() == "bedrock":
             self.setup_bedrock()
@@ -68,6 +56,21 @@ class UniformLLM:
             self.setup_sambanova()
         elif self.provider_name.lower() == "openrouter":
             self.setup_openrouter()
+        elif self.provider_name.lower().startswith("azure_"):
+            logging.info(f"Provider '{self.provider_name}' detected as custom Azure-compatible provider.")
+            logging.info("Expected environment variables for custom Azure provider:")
+            logging.info(f"- {self.provider_name.upper()}_API_KEY (required if no proxy)")
+            logging.info(f"- {self.provider_name.upper()}_ENDPOINT (required)")
+            logging.info(f"- {self.provider_name.upper()}_API_VERSION (required)")
+            logging.info(f"- {self.provider_name.upper()}_PROXY (optional)")
+            self.setup_custom_azure()
+        elif self.provider_name.lower() not in list(map(str.lower, self.VALID_PROVIDERS)):
+            logging.warning(f"Provider '{self.provider_name}' not in standard list. Creating custom OpenAI-compatible provider.")
+            logging.info("Expected environment variables for custom provider:")
+            logging.info(f"- {self.provider_name.upper()}_API_KEY (required)")
+            logging.info(f"- {self.provider_name.upper()}_BASE_URL (required)")
+            logging.info(f"- {self.provider_name.upper()}_PROXY (optional)")
+            self.setup_custom()
 
     def setup_openrouter(self):
         from langchain_openai import ChatOpenAI
@@ -97,7 +100,6 @@ class UniformLLM:
             }
 
         self.llm = ChatOpenAI(**kwargs)
-        self.callback = TokenCounter(llm = self)
 
     def setup_sambanova(self):
         from langchain_sambanova import ChatSambaNovaCloud
@@ -111,7 +113,6 @@ class UniformLLM:
             sambanova_api_key = api_key,
             temperature = self.temperature,
             max_tokens = self.max_tokens)
-        self.callback = TokenCounter(llm = self)
 
     def setup_google_ai_studio(self):
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -119,50 +120,47 @@ class UniformLLM:
         google_ai_studio_api_key = os.getenv('GOOGLE_AI_STUDIO_API_KEY')
         if google_ai_studio_api_key is None:
             raise ValueError("GOOGLE_AI_STUDIO_API_KEY environment variable not set.")
-        
+
         self.llm = ChatGoogleGenerativeAI(
             model = self.model_name,
             api_key = google_ai_studio_api_key,
             temperature = self.temperature,
             max_tokens = self.max_tokens)
-        self.callback = TokenCounter(llm = self)
-    
+
     def setup_ollama(self):
         from langchain_ollama.chat_models import ChatOllama
-        
+
         kwargs = {
             "model": self.model_name,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
         }
-        
+
         if base_url := os.getenv('OLLAMA_API_BASE_URL'):
             kwargs["base_url"] = base_url
-            
+
         self.llm = ChatOllama(**kwargs)
-        self.callback = TokenCounter(llm = self)
 
     def setup_nvidia(self):
         from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
         api_key = os.getenv('NVIDIA_API_KEY')
         base_url = os.getenv('NVIDIA_BASE_URL')
-        
+
         if api_key is None:
             raise ValueError("NVIDIA_API_KEY environment variable not set.")
-        
+
         kwargs = {
             "model": self.model_name,
             "api_key": api_key,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
         }
-        
+
         if base_url is not None:
             kwargs["base_url"] = base_url
-            
+
         self.llm = ChatNVIDIA(**kwargs)
-        self.callback = TokenCounter(llm = self)
 
     def setup_anthropic(self):
         from langchain_anthropic import ChatAnthropic
@@ -177,7 +175,6 @@ class UniformLLM:
             temperature = self.temperature,
             max_tokens = self.max_tokens,
         )
-        self.callback = TokenCounter(llm = self)
 
     def setup_groq(self):
         from langchain_groq import ChatGroq
@@ -193,8 +190,7 @@ class UniformLLM:
             max_tokens = self.max_tokens,
             streaming = True,
         )
-        self.callback = TokenCounter(llm = self)
-    
+
     def setup_google(self):
         from langchain_google_vertexai import ChatVertexAI
         from vertexai.generative_models import HarmCategory, HarmBlockThreshold
@@ -202,7 +198,10 @@ class UniformLLM:
         google_credentials_file = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
         if google_credentials_file is None:
             raise ValueError("GOOGLE_APPLICATION_CREDENTIALS environment variable not set.")
-                
+
+        GOOGLE_THINKING = os.getenv("GOOGLE_THINKING", "0")
+        GOOGLE_THINKING_TOKENS = os.getenv("GOOGLE_THINKING_TOKENS", "2000")
+
         safety_settings={
             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
             HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_ONLY_HIGH,
@@ -210,14 +209,23 @@ class UniformLLM:
             HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_ONLY_HIGH
         }
 
+        # Configure thinking mode based on environment variables
+        if GOOGLE_THINKING == "1":
+            thinking_budget = int(GOOGLE_THINKING_TOKENS)
+            include_thoughts = True
+        else:
+            thinking_budget = 0
+            include_thoughts = False
+
         self.llm = ChatVertexAI(
             model_name=self.model_name,
             temperature=self.temperature,
             max_output_tokens=self.max_tokens,
             safety_settings=safety_settings,
+            thinking_budget=thinking_budget,
+            include_thoughts=include_thoughts
         )
         self.llm = self.llm.bind(safety_settings=safety_settings)
-        self.callback = TokenCounter(llm = self)
 
     def setup_openai(self):
         from langchain_openai import ChatOpenAI
@@ -235,16 +243,18 @@ class UniformLLM:
             "api_key": api_key,
         }
 
-        # For reasoning models (starting with 'o')
-        if self.model_name.startswith('o'):
+        OPENAI_REASONING_EFFORTS = ["minimal", "low", "medium", "high"]
+
+        # Allow to set the reasoning effort via model_id, like o1-high, o1-medium, gpt-5-high
+        if any(effort in self.model_name for effort in OPENAI_REASONING_EFFORTS):
             kwargs["max_completion_tokens"] = self.max_tokens
             reasoning_strengh = self.model_name.split('-')
-            if len(reasoning_strengh) > 1 and reasoning_strengh[-1] in ['high', 'medium', 'low']:
+            if len(reasoning_strengh) > 1 and reasoning_strengh[-1] in OPENAI_REASONING_EFFORTS:
                 kwargs["reasoning_effort"] = reasoning_strengh[-1]
                 kwargs["model"] = self.model_name.replace(f'-{reasoning_strengh[-1]}', '')
         else:
             kwargs["max_tokens"] = self.max_tokens
-            kwargs["temperature"] = self.temperature * 2  # Only set temperature for non-reasoning models
+            kwargs["temperature"] = self.temperature
 
         if base_url is not None:
             kwargs["base_url"] = base_url
@@ -260,33 +270,32 @@ class UniformLLM:
             kwargs["organization"] = organization_id
 
         self.llm = ChatOpenAI(**kwargs)
-        self.callback = TokenCounter(llm = self)
 
     def setup_azure_openai(self):
         from langchain_openai import AzureChatOpenAI
 
         api_version = os.getenv("AZURE_API_VERSION")
-        api_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-        api_key = os.getenv("AZURE_OPENAI_API_KEY")
-        api_proxy = os.getenv("AZURE_OPENAI_PROXY")
+        api_endpoint = os.getenv("AZURE_ENDPOINT")
+        api_key = os.getenv("AZURE_API_KEY")
+        api_proxy = os.getenv("AZURE_PROXY")
 
         if api_version is None or api_endpoint is None:
-            raise ValueError("AzureOpenAI environment variables not set.")
+            raise ValueError("Azure environment variables not set.")
 
         if api_key is None and api_proxy is None:
-            raise ValueError("AzureOpenAI API key or proxy not set. One of them is required as authentication method.")
+            raise ValueError("Azure API key or proxy not set. One of them is required as authentication method.")
 
         kwargs = {
             "azure_endpoint": api_endpoint,
             "openai_api_version": api_version,
             "azure_deployment": self.model_name,
-            "temperature": self.temperature * 2,
+            "temperature": self.temperature,
         }
 
         if api_key is not None:
             kwargs["openai_api_key"] = api_key
         else:
-            logging.warning("AzureOpenAI API key not set. Using default authentication.")
+            logging.warning("Azure API key not set. Using default authentication.")
 
         if api_proxy is not None:
             _http_client = httpx.Client(proxy = api_proxy, verify = False)
@@ -295,10 +304,47 @@ class UniformLLM:
             kwargs["http_client"] = _http_client
             kwargs["http_async_client"] = _http_async_client
         else:
-            logging.warning("AzureOpenAI proxy not set. Using direct connection.")
+            logging.warning("Azure proxy not set. Using direct connection.")
 
         self.llm = AzureChatOpenAI(**kwargs)
-        self.callback = TokenCounter(llm = self)
+
+    def setup_custom_azure(self):
+        from langchain_openai import AzureChatOpenAI
+
+        provider_upper = self.provider_name.upper()
+        api_version = os.getenv(f"{provider_upper}_API_VERSION")
+        api_endpoint = os.getenv(f"{provider_upper}_ENDPOINT")
+        api_key = os.getenv(f"{provider_upper}_API_KEY")
+        api_proxy = os.getenv(f"{provider_upper}_PROXY")
+
+        if api_version is None or api_endpoint is None:
+            raise ValueError(f"Custom Azure provider '{self.provider_name}' environment variables not set.")
+
+        if api_key is None and api_proxy is None:
+            raise ValueError(f"Custom Azure provider '{self.provider_name}' key or proxy not set. One of them is required as authentication method.")
+
+        kwargs = {
+            "azure_endpoint": api_endpoint,
+            "openai_api_version": api_version,
+            "azure_deployment": self.model_name,
+            "temperature": self.temperature,
+        }
+
+        if api_key is not None:
+            kwargs["openai_api_key"] = api_key
+        else:
+            logging.warning(f"Custom Azure provider '{self.provider_name}' API key not set. Using default authentication if available.")
+
+        if api_proxy is not None:
+            _http_client = httpx.Client(proxy = api_proxy, verify = False)
+            _http_async_client = httpx.AsyncClient(proxy = api_proxy, verify = False)
+
+            kwargs["http_client"] = _http_client
+            kwargs["http_async_client"] = _http_async_client
+        else:
+            logging.warning(f"Custom Azure provider '{self.provider_name}' proxy not set. Using direct connection.")
+
+        self.llm = AzureChatOpenAI(**kwargs)
 
     def setup_bedrock(self):
         from langchain_aws import ChatBedrock
@@ -308,6 +354,8 @@ class UniformLLM:
         AWS_ROLE_ARN = os.getenv("AWS_ROLE_ARN")
         AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
         AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+        AWS_CLAUDE_THINKING = os.getenv("AWS_CLAUDE_THINKING", "0")
+        AWS_CLAUDE_THINKING_TOKENS = os.getenv("AWS_CLAUDE_THINKING_TOKENS", "2000")
 
         refreshable_session_instance = RefreshableBotoSession(
             region_name = AWS_REGION,
@@ -320,15 +368,24 @@ class UniformLLM:
         session = refreshable_session_instance.refreshable_session()
         client = session.client('bedrock-runtime')
 
-        self.llm = ChatBedrock(
-            client = client,
-            model = self.model_name,
-            model_kwargs = {
+        # Prepare ChatBedrock initialization parameters
+        bedrock_kwargs = {
+            "client": client,
+            "model": self.model_name,
+            "model_kwargs": {
                 "temperature": self.temperature,
                 "max_tokens": self.max_tokens
             },
-        )
-        self.callback = TokenCounter(llm = self)
+        }
+
+        # Add Claude thinking mode if enabled
+        if AWS_CLAUDE_THINKING == "1":
+            bedrock_kwargs["model_kwargs"] = {
+                "thinking": {"type": "enabled", "budget_tokens": int(AWS_CLAUDE_THINKING_TOKENS)},
+                "max_tokens": self.max_tokens,
+            }
+
+        self.llm = ChatBedrock(**bedrock_kwargs)
 
     def setup_mistral(self):
         from langchain_mistralai import ChatMistralAI
@@ -342,8 +399,8 @@ class UniformLLM:
             mistral_api_key = api_key,
             temperature = self.temperature,
             max_tokens = self.max_tokens,
+            timeout=480
         )
-        self.callback = TokenCounter(llm = self)
 
     def setup_custom(self):
         from langchain_openai import ChatOpenAI
@@ -369,7 +426,6 @@ class UniformLLM:
             kwargs["openai_proxy"] = proxy
 
         self.llm = ChatOpenAI(**kwargs)
-        self.callback = TokenCounter(llm = self)
 
     @staticmethod
     def get_providers():

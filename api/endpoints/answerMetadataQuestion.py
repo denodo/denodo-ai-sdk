@@ -1,5 +1,5 @@
 """
- Copyright (c) 2024. DENODO Technologies.
+ Copyright (c) 2025. DENODO Technologies.
  http://www.denodo.com
  All rights reserved.
 
@@ -11,12 +11,12 @@
 
 import os
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Dict, Annotated, List
 
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPAuthorizationCredentials, HTTPBearer
 
 from api.utils.sdk_utils import timing_context, handle_endpoint_error, generate_session_id
@@ -27,7 +27,7 @@ from api.utils import state_manager
 router = APIRouter()
 security_basic = HTTPBasic(auto_error = False)
 security_bearer = HTTPBearer(auto_error = False)
-    
+
 def authenticate(
         basic_credentials: Annotated[HTTPBasicCredentials, Depends(security_basic)],
         bearer_credentials: Annotated[HTTPAuthorizationCredentials, Depends(security_bearer)]
@@ -46,14 +46,20 @@ class answerMetadataQuestionRequest(BaseModel):
     embeddings_provider: str = os.getenv('EMBEDDINGS_PROVIDER')
     embeddings_model: str = os.getenv('EMBEDDINGS_MODEL')
     vector_store_provider: str = os.getenv('VECTOR_STORE')
-    sql_gen_provider: str = os.getenv('SQL_GENERATION_PROVIDER')
-    sql_gen_model: str = os.getenv('SQL_GENERATION_MODEL')
-    chat_provider: str = os.getenv('CHAT_PROVIDER')
-    chat_model: str = os.getenv('CHAT_MODEL')
+    llm_provider: str = os.getenv('LLM_PROVIDER')
+    llm_model: str = os.getenv('LLM_MODEL')
+    llm_temperature: float = float(os.getenv('LLM_TEMPERATURE', '0.0'))
+    llm_max_tokens: int = int(os.getenv('LLM_MAX_TOKENS', '2048'))
     vdp_database_names: str = ''
     vdp_tag_names: str = ''
-    use_views: str = ''
-    expand_set_views: bool = True
+    use_views: str = Field(
+            default = False,
+            description="Please specify a view you want the LLM to take into consideration when answering the question. Expected format is views separated by commas: database.view_name, database.view_name2"
+        )
+    expand_set_views: bool = Field(
+            default = True,
+            description="If set to true, the LLM will search for relevant views in the vector store. If set to false, the LLM will not search in the vector store and will only access those specified in use_views"
+        )
     custom_instructions: str = os.getenv('CUSTOM_INSTRUCTIONS', '')
     markdown_response: bool = True
     vector_search_k: int = 5
@@ -83,7 +89,7 @@ class answerMetadataQuestionResponse(BaseModel):
 )
 @handle_endpoint_error("answerMetadataQuestion")
 async def answer_metadata_question_get(
-    request: answerMetadataQuestionRequest = Depends(),
+    request: answerMetadataQuestionRequest = Query(),
     auth: str = Depends(authenticate)
 ):
     '''This endpoint processes a natural language question and tries to answer it using the metadata in Denodo.
@@ -97,14 +103,13 @@ async def answer_metadata_question_get(
     - EMBEDDINGS_PROVIDER
     - EMBEDDINGS_MODEL
     - VECTOR_STORE
-    - SQL_GENERATION_PROVIDER
-    - SQL_GENERATION_MODEL
-    - CHAT_PROVIDER
-    - CHAT_MODEL
+    - LLM_PROVIDER
+    - LLM_MODEL
+    - LLM_TEMPERATURE
+    - LLM_MAX_TOKENS
     - CUSTOM_INSTRUCTIONS
 
-    As you can see, you can specify a different provider for SQL generation and chat generation. This is because generating a correct SQL query
-    is a complex task that should be handled with a powerful LLM.'''
+    You can also override the LLM temperature and max_tokens via API parameters for fine-tuning the model behavior.'''
     return await process_metadata_question(request, auth)
 
 @router.post(
@@ -128,14 +133,13 @@ async def answer_metadata_question_post(
     - EMBEDDINGS_PROVIDER
     - EMBEDDINGS_MODEL
     - VECTOR_STORE
-    - SQL_GENERATION_PROVIDER
-    - SQL_GENERATION_MODEL
-    - CHAT_PROVIDER
-    - CHAT_MODEL
+    - LLM_PROVIDER
+    - LLM_MODEL
+    - LLM_TEMPERATURE
+    - LLM_MAX_TOKENS
     - CUSTOM_INSTRUCTIONS
 
-    As you can see, you can specify a different provider for SQL generation and chat generation. This is because generating a correct SQL query
-    is a complex task that should be handled with a powerful LLM.'''
+    You can also override the LLM temperature and max_tokens via API parameters for fine-tuning the model behavior.'''
     return await process_metadata_question(endpoint_request, auth)
 
 async def process_metadata_question(request_data: answerMetadataQuestionRequest, auth: str):
@@ -145,9 +149,11 @@ async def process_metadata_question(request_data: answerMetadataQuestionRequest,
     session_id = generate_session_id(request_data.question)
 
     try:
-        chat_llm = state_manager.get_llm(
-            provider_name=request_data.chat_provider, 
-            model_name=request_data.chat_model
+        llm = state_manager.get_llm(
+            provider_name=request_data.llm_provider,
+            model_name=request_data.llm_model,
+            temperature=request_data.llm_temperature,
+            max_tokens=request_data.llm_max_tokens
         )
 
         vector_store = state_manager.get_vector_store(
@@ -160,7 +166,7 @@ async def process_metadata_question(request_data: answerMetadataQuestionRequest,
             embeddings_provider=request_data.embeddings_provider,
             embeddings_model=request_data.embeddings_model,
             index_name="ai_sdk_sample_data"
-        )  
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}")
 
@@ -182,17 +188,17 @@ async def process_metadata_question(request_data: answerMetadataQuestionRequest,
 
     with timing_context("llm_time", timings):
         _, category_response, category_related_questions, sql_category_tokens = await sdk_ai_tools.sql_category(
-            query=request_data.question, 
-            vector_search_tables=vector_search_tables, 
-            llm=chat_llm,
+            query=request_data.question,
+            vector_search_tables=vector_search_tables,
+            llm=llm,
             mode="metadata",
             custom_instructions=request_data.custom_instructions
         )
 
     response = sdk_answer_question.process_metadata_category(
-        category_response=category_response, 
-        category_related_questions=category_related_questions, 
-        vector_search_tables=vector_search_tables, 
+        category_response=category_response,
+        category_related_questions=category_related_questions,
+        vector_search_tables=vector_search_tables,
         timings=timings,
         tokens=sql_category_tokens,
         disclaimer=request_data.disclaimer,

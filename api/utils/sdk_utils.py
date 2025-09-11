@@ -1,10 +1,8 @@
 import os
 import re
 import sys
-import json
 import random
 import inspect
-import uvicorn
 import logging
 import requests
 import functools
@@ -16,15 +14,16 @@ from typing import Annotated
 from fastapi import HTTPException, Depends
 from fastapi.security import HTTPBasic, HTTPBearer, HTTPBasicCredentials, HTTPAuthorizationCredentials
 from contextlib import contextmanager
+from langchain_core.documents.base import Document
 
 from utils.data_catalog import get_views_metadata_documents
-from utils.utils import schema_summary, prepare_schema, flatten_list, prepare_sample_data_schema, calculate_tokens
+from utils.utils import schema_summary, prepare_schema, flatten_list, prepare_sample_data_schema, calculate_tokens, current_endpoint
 
 security_basic = HTTPBasic(auto_error=False)
 security_bearer = HTTPBearer(auto_error=False)
 
 def add_tokens(token_set1, token_set2):
-    return {key: token_set1[key] + token_set2[key] for key in token_set1}
+    return {key: token_set1[key] + token_set2[key] for key in ['input_tokens', 'output_tokens', 'total_tokens']}
 
 def generate_session_id(question):
     question_prefix = ''.join(c for c in question[:20] if c.isalpha() or c.isspace())
@@ -40,7 +39,7 @@ def timing_context(name, timings):
         timings[name] += elapsed_time
     else:
         timings[name] = elapsed_time
-    
+
     for key, value in timings.items():
         timings[key] = round(value, 2)
 
@@ -51,7 +50,7 @@ def readable_tables(relevant_tables):
         table_schema = table['view_json']['schema']
         table_columns = [column['columnName'] for column in table_schema]
         readable_output += f'<table>Table {table["view_name"]} with columns {", ".join(table_columns)}\n</table>\n'
-    
+
     return readable_output
 
 def match_nested_parentheses(text):
@@ -81,7 +80,7 @@ def match_nested_parentheses(text):
     return matches
 
 # Prepare VQL
-def prepare_vql(vql):    
+def prepare_vql(vql):
     error_log = ''
     error_categories = []
 
@@ -96,7 +95,7 @@ def prepare_vql(vql):
     if '\\_' in vql:
         logging.info("Markdown underscore detected in VQL, fixing...")
         vql = vql.replace('\\_', '_')
-    
+
     # Protected words for aliases
     protected_words = (
         'ADD|ALL|ALTER|AND|ANY|AS|ASC|BASE|BOTH|CASE|CONNECT|CONTEXT|CREATE|CROSS|'
@@ -107,11 +106,11 @@ def prepare_vql(vql):
         'OR|ORDER BY|ORDERED|PRIVILEGES|READ|REVERSEORDER|REVOKE|RIGHT|ROW|SELECT|SWAP|'
         'TABLE|TO|TRACE|TRAILING|TRUE|UNION|USER|USING|VIEW|WHEN|WHERE|WITH|WRITE|WS|ZERO'
     )
-    
+
     # Pattern to match protected words used as aliases
     pattern = fr'\s+AS\s+({protected_words})\s+'
     matches = re.finditer(pattern, vql_single_line, re.IGNORECASE)
-    
+
     # Track all replacements
     replacements = {}
     for match in matches:
@@ -119,17 +118,16 @@ def prepare_vql(vql):
         new_alias = f"{protected_word}_"
         replacements[protected_word] = new_alias
         logging.info(f"Protected word '{protected_word}' used as alias, appending underscore")
-        
+
     # Apply replacements
     modified_vql = vql
     for old_word, new_word in replacements.items():
         # Pattern to match the exact alias after AS
         replace_pattern = fr'(\s+AS\s+){old_word}(\s+)'
         modified_vql = re.sub(replace_pattern, fr'\1{new_word}\2', modified_vql, flags=re.IGNORECASE)
-    
+
     vql = modified_vql
-    
-    # Look for forbidden functions
+
     forbidden_functions = [
         'LENGTH',
         'CHAR_LENGTH',
@@ -149,6 +147,7 @@ def prepare_vql(vql):
         'LPAD',
         'STRING_AGG',
         'ARRAY_AGG',
+        'UNNEST'
     ]
 
     for forbidden_function in forbidden_functions:
@@ -160,13 +159,13 @@ def prepare_vql(vql):
 
     # Look for LIMIT in subquery
     matches = match_nested_parentheses(vql_single_line)
-    
+
     for match in matches:
         if ' LIMIT ' in match:
             error_log += "There is a LIMIT in subquery, which is not permitted in VQL. Use ROW_NUMBER () instead.\n"
             if "LIMIT_SUBQUERY" not in error_categories:
                 error_categories.append('LIMIT_SUBQUERY')
-        
+
         if ' FETCH ' in match:
             error_log += "There is a FETCH in subquery, which is not permitted in VQL. Use ROW_NUMBER () instead.\n"
             if "LIMIT_SUBQUERY" not in error_categories:
@@ -179,20 +178,47 @@ def prepare_vql(vql):
 
     if error_log == "":
         error_log = False
-        
+
     logging.info(f"prepare_vql vql: {vql} error log: {error_log} and categories: {error_categories}")
     return vql.strip(), error_log, error_categories
 
-def generate_vql_restrictions(prompt_parts, vql_rules_prompt, dates_vql_prompt, arithmetic_vql_prompt):
+def generate_vql_restrictions(
+    prompt_parts,
+    vql_rules_prompt,
+    dates_vql_prompt,
+    arithmetic_vql_prompt,
+    spatial_vql_prompt = '',
+    ai_vql_prompt = '',
+    json_vql_prompt = '',
+    xml_vql_prompt = '',
+    text_vql_prompt = '',
+    aggregate_vql_prompt = '',
+    cast_vql_prompt = '',
+    window_vql_prompt = ''
+):
     if prompt_parts is None:
         return vql_rules_prompt.replace("{EXTRA_RESTRICTIONS}", "")
 
-    vql_prompt_parts = {
-        "dates": dates_vql_prompt if prompt_parts.get("dates") else "",
-        "arithmetic": arithmetic_vql_prompt if prompt_parts.get("arithmetic") else ""
+    vql_prompt_catalog = {
+        "dates": dates_vql_prompt,
+        "arithmetic": arithmetic_vql_prompt,
+        "spatial": spatial_vql_prompt,
+        "ai": ai_vql_prompt,
+        "json": json_vql_prompt,
+        "xml": xml_vql_prompt,
+        "text": text_vql_prompt,
+        "aggregate": aggregate_vql_prompt,
+        "cast": cast_vql_prompt,
+        "window": window_vql_prompt,
     }
 
-    extra_restrictions = '\n'.join(vql_prompt_parts[key] for key in vql_prompt_parts if prompt_parts.get(key))
+    selected_prompts = [
+        vql_prompt_catalog[key]
+        for key, enabled in prompt_parts.items()
+        if enabled and vql_prompt_catalog.get(key)
+    ]
+
+    extra_restrictions = '\n'.join(selected_prompts)
     return vql_rules_prompt.replace("{EXTRA_RESTRICTIONS}", extra_restrictions)
 
 def get_response_format(markdown_response):
@@ -208,12 +234,20 @@ def get_response_format(markdown_response):
     return response_format, response_example
 
 def check_env_variables(required_vars):
-    missing_vars = [var for var in required_vars if not os.getenv(var)]
-    
-    if missing_vars:
+    missing_items = []
+    for item in required_vars:
+        if isinstance(item, str):
+            if not os.getenv(item):
+                missing_items.append(item)
+
+        elif isinstance(item, (tuple, list)):
+            if not any(os.getenv(var) for var in item):
+                missing_items.append(" or ".join(item))
+
+    if missing_items:
         print("ERROR. The following required environment variables are missing:")
-        for var in missing_vars:
-            print(f"- {var}")
+        for var_name in missing_items:
+            print(f"- {var_name}")
         print("Please set these variables before starting the application.")
         sys.exit(1)
 
@@ -224,25 +258,27 @@ def test_data_catalog_connection(data_catalog_url, verify_ssl):
         return True
     except Exception:
         return False
-    
+
 def filter_non_allowed_associations(view_json, valid_view_ids):
     # If valid_view_ids is None, return the original view_json unchanged
     if valid_view_ids is None:
         return view_json
-    
+
     # Create a new view_json with filtered associations
     filtered_view_json = view_json.copy()
     filtered_view_json['associations'] = [
         assoc for assoc in view_json['associations']
         if str(assoc['table_id']) in valid_view_ids
     ]
-    
+
     return filtered_view_json
 
 def handle_endpoint_error(endpoint_name):
     def decorator(func):
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs):
+            # Set the endpoint context
+            current_endpoint.set(endpoint_name)
             try:
                 return func(*args, **kwargs)
             except requests.exceptions.HTTPError as he:
@@ -269,6 +305,8 @@ def handle_endpoint_error(endpoint_name):
 
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):
+            # Set the endpoint context
+            current_endpoint.set(endpoint_name)
             try:
                 return await func(*args, **kwargs)
             except requests.exceptions.HTTPError as he:
@@ -346,7 +384,7 @@ async def stats_about_data(data, unique_values_limit = 20):
             "max": max_val,
             "num_missing": values.count(None),
         }
-        
+
         # Only add all unique_values if num_unique <= unique_values_limit
         if num_unique <= unique_values_limit:
             info["columns"][col]["unique_values"] = unique_values
@@ -359,13 +397,13 @@ def dataframe_stats(df, unique_values_limit=20):
         "num_columns": len(df.columns),
         "columns": {}
     }
-    
+
     for col in df.columns:
         values = df[col]
         non_null_values = values.dropna()
         unique_values = non_null_values.unique()
         num_unique = len(unique_values)
-        
+
         # Determine type and min/max values
         if pd.api.types.is_numeric_dtype(df[col]):
             dtype = str(df[col].dtype)
@@ -373,7 +411,7 @@ def dataframe_stats(df, unique_values_limit=20):
             max_val = float(non_null_values.max()) if len(non_null_values) > 0 else None
         else:
             dtype = str(df[col].dtype)
-        
+
         info["columns"][col] = {
             "dtype": dtype,
             "num_unique_values": num_unique,
@@ -383,7 +421,7 @@ def dataframe_stats(df, unique_values_limit=20):
         if pd.api.types.is_numeric_dtype(df[col]):
             info["columns"][col]["min"] = min_val
             info["columns"][col]["max"] = max_val
-        
+
         # Only add unique values if number is below the limit
         if num_unique <= unique_values_limit:
             # Convert values to Python native types for serialization
@@ -391,7 +429,7 @@ def dataframe_stats(df, unique_values_limit=20):
                 info["columns"][col]["unique_values"] = unique_values.tolist()
             else:
                 info["columns"][col]["unique_values"] = [str(v) for v in unique_values]
-    
+
     return str(info)
 
 def authenticate(
@@ -411,11 +449,14 @@ def process_metadata_source(
     request,
     auth,
     vector_store,
-    sample_data_vector_store
+    sample_data_vector_store,
+    tagged_views=None,
+    incremental=True,
+    tags_to_ignore=None
 ):
     """
     Process metadata from a source (tag or database).
-    
+
     Args:
         source_type: 'TAG' or 'DATABASE'
         source_name: Name of the tag or database
@@ -423,16 +464,16 @@ def process_metadata_source(
         auth: Authentication credentials
         vector_store: Vector store for metadata
         sample_data_vector_store: Vector store for sample data
-        
+
     Returns:
         Tuple of (db_schema, db_schema_text)
     """
-    
+
     if vector_store and request.incremental:
         last_update = vector_store.get_last_update(source_type=source_type, source_name=source_name)
     else:
         last_update = None
-    
+
     # Prepare arguments for get_views_metadata_documents
     kwargs = {
         "auth": auth,
@@ -442,37 +483,53 @@ def process_metadata_source(
         "table_column_descriptions": request.column_descriptions,
         "last_update_timestamp_ms": last_update,
         "view_prefix_filter": request.view_prefix_filter,
-        "view_suffix_filter": request.view_suffix_filter
+        "view_suffix_filter": request.view_suffix_filter,
+        "incremental": incremental
     }
-    
+
+    if tags_to_ignore:
+        kwargs["tags_to_ignore"] = tags_to_ignore
+
     # Add source-specific parameter
     if source_type == "TAG":
         kwargs["tag_name"] = source_name
+        if tagged_views is not None:
+            kwargs["tagged_views"] = tagged_views
     elif source_type == "DATABASE":
         kwargs["database_name"] = source_name
     else:
         raise ValueError(f"Invalid source type: {source_type}")
 
     # Get metadata documents
-    result, delete_view_ids = get_views_metadata_documents(**kwargs)
+    result, delete_view_ids, detagged_view_ids = get_views_metadata_documents(**kwargs)
 
     # Handle view deletions if needed
     if delete_view_ids and vector_store:
         vector_store.delete_by_view_id(view_ids = delete_view_ids)
         if sample_data_vector_store:
             sample_data_vector_store.delete_by_view_id(view_ids = delete_view_ids)
-    
+
+    # Handle detagged views if needed
+    if detagged_view_ids and source_type == 'TAG' and vector_store:
+        handle_detagged_views(
+            detagged_view_ids=detagged_view_ids,
+            tag_name=source_name,
+            vector_store=vector_store,
+            sample_data_vector_store=sample_data_vector_store,
+            incremental=incremental
+        )
+
     # Validate response
     if not result:
         logging.info(f"Empty response from the Denodo Data Catalog for {source_type.lower()} {source_name}")
         return {}, []
-    
+
     # Process schema
     if isinstance(result, dict):
         db_schema = result
         logging.info(f"{source_type} schema for {source_name} has {calculate_tokens(str(db_schema))} tokens.")
         db_schema_text = [schema_summary(table) for table in db_schema['views']]
-        
+
         # Add to vector store if provided
         if vector_store:
             views = flatten_list(prepare_schema(db_schema, request.embeddings_token_limit))
@@ -492,9 +549,9 @@ def process_metadata_source(
                 source_type=source_type,
                 sample_data=True
             )
-        
+
         return db_schema, db_schema_text
-    
+
     # If not a dict, return empty results
     return {}, []
 
@@ -546,7 +603,7 @@ def is_non_conflicting_doc(doc, databases_to_delete, tags_to_delete, last_update
 
         return db_match
 
-def delete_by_db_or_tag(vector_store, sample_data_vector_store, vdp_database_names, vdp_tag_names, delete_conflicting):
+def delete_by_db_or_tag(vector_store, sample_data_vector_store, vdp_database_names, vdp_tag_names, delete_conflicting, allowed_view_ids=None):
     """
     Deletes views based on database/tag names.
     """
@@ -560,7 +617,7 @@ def delete_by_db_or_tag(vector_store, sample_data_vector_store, vdp_database_nam
             k=K_BATCH_SIZE,
             database_names=vdp_database_names,
             tag_names=vdp_tag_names,
-            view_ids=None,
+            view_ids=allowed_view_ids,
             view_names=None
         )
 
@@ -590,7 +647,8 @@ def delete_by_db_or_tag(vector_store, sample_data_vector_store, vdp_database_nam
 
         if view_ids_to_delete:
             total_deleted_ids += len(view_ids_to_delete)
-            sample_data_vector_store.delete_by_view_id(view_ids=list(view_ids_to_delete))
+            if sample_data_vector_store:
+                sample_data_vector_store.delete_by_view_id(view_ids=list(view_ids_to_delete))
 
         more_results_left = len(results) == K_BATCH_SIZE
 
@@ -599,40 +657,169 @@ def delete_by_db_or_tag(vector_store, sample_data_vector_store, vdp_database_nam
             database_names=vdp_database_names,
             tag_names=vdp_tag_names
         )
-    
+
     return total_deleted_ids
+
+def get_by_db_or_tag(
+    vector_store,
+    vdp_database_names,
+    vdp_tag_names,
+    initial_k=1000,
+    increment_factor=2,
+    max_results_limit=1000000
+):
+    """
+    Retrieves all distinct view_ids associated with a list of databases or tags
+    using an exponentially increasing 'k' strategy.
+
+    Args:
+        vector_store: The vector store instance.
+        vdp_database_names: List of database names to search for.
+        vdp_tag_names: List of tag names to search for.
+        initial_k: The initial size for 'k'.
+        increment_factor: The factor by which to multiply 'k' in each
+                          iteration (e.g., 2 for doubling).
+        max_results_limit: A safety limit to stop the search.
+
+    Returns:
+        A list of unique view_ids that match the criteria.
+    """
+    current_k = initial_k
+    all_results = []
+
+    while True:
+        if current_k > max_results_limit:
+            logging.warning(f"K limit ({max_results_limit}) reached. Returning partial results.")
+            all_results = vector_store.search_by_vector(
+                vector=[0] * vector_store.dimensions,
+                k=max_results_limit,
+                database_names=vdp_database_names,
+                tag_names=vdp_tag_names
+            )
+            break
+
+        results = vector_store.search_by_vector(
+            vector=[0] * vector_store.dimensions,
+            k=current_k,
+            database_names=vdp_database_names,
+            tag_names=vdp_tag_names
+        )
+
+        if len(results) < current_k:
+            all_results = results
+            break
+
+        current_k = int(current_k * increment_factor)
+
+    unique_view_ids = set()
+    for doc in all_results:
+        view_id_str = doc.metadata.get('view_id')
+        if view_id_str:
+            try:
+                view_id_int = int(view_id_str)
+                unique_view_ids.add(view_id_int)
+            except (ValueError, TypeError):
+                continue
+
+    return list(unique_view_ids)
 
 def execution_result_to_dataframe(data):
     # Initialize an empty list to store row data
     rows = []
-    
+
     # Sort the keys to preserve order (e.g., "Row 1", "Row 2", etc.)
     sorted_keys = sorted(data.keys(), key=lambda k: int(re.search(r'\d+', k).group()) if re.search(r'\d+', k) else float('inf'))
-    
+
     # Process each row in the JSON data in order
     for row_key in sorted_keys:
         columns = data[row_key]
-        
+
         # Create a dictionary for the current row
         row_dict = {}
-        
+
         # Extract column name and value for each item in the row
         for item in columns:
             column_name = item["columnName"]
             value = item["value"]
-            
+
             # Try to convert numeric values
             try:
                 value = float(value)
             except (ValueError, TypeError):
                 pass
-                
+
             row_dict[column_name] = value
-            
+
         # Add the row dictionary to our list
         rows.append(row_dict)
-    
+
     # Create DataFrame from the list of dictionaries
     df = pd.DataFrame(rows)
-    
+
     return df
+
+def handle_detagged_views(
+    detagged_view_ids,
+    tag_name,
+    vector_store,
+    sample_data_vector_store,
+    incremental=True
+):
+    """
+    Processes a list of detagged view IDs for a specific tag.
+
+    - If a view is not conflicting, it gets deleted.
+    - If a view is conflicting, all of its associated documents have their
+      metadata updated to remove the current tag and are then re-indexed.
+    """
+    view_ids_to_delete = []
+    conflicting_docs_to_update = []
+    last_update_dict = vector_store.get_last_update_dict()
+
+    for view_id in detagged_view_ids:
+        # Fetch all documents/chunks associated with this view_id
+        docs = vector_store.search_by_vector(vector=[0] * vector_store.dimensions, k=100, view_ids=[view_id])
+        if not docs:
+            continue
+
+        if not incremental:
+            conflicting_docs_to_update.extend(docs)
+            continue
+
+        first_doc = docs[0]
+
+        is_safe_to_delete = is_non_conflicting_doc(
+            doc=first_doc,
+            databases_to_delete=[],
+            tags_to_delete=[tag_name],
+            last_update_dict=last_update_dict
+        )
+
+        if is_safe_to_delete:
+            view_ids_to_delete.append(view_id)
+        else:
+            conflicting_docs_to_update.extend(docs)
+
+    if view_ids_to_delete:
+        vector_store.delete_by_view_id(view_ids=view_ids_to_delete)
+        if sample_data_vector_store:
+            sample_data_vector_store.delete_by_view_id(view_ids=view_ids_to_delete)
+
+    if conflicting_docs_to_update:
+        documents_to_reindex = []
+        for doc in conflicting_docs_to_update:
+            updated_metadata = doc.metadata.copy()
+            tag_key = f"tag_{tag_name}"
+            if tag_key in updated_metadata:
+                del updated_metadata[tag_key]
+
+            updated_document = Document(
+                id=doc.id,
+                page_content=doc.page_content,
+                metadata=updated_metadata
+            )
+            documents_to_reindex.append(updated_document)
+
+        if documents_to_reindex:
+            ids_for_upsert = [doc.id for doc in documents_to_reindex]
+            vector_store.client.add_documents(documents=documents_to_reindex, ids=ids_for_upsert)
