@@ -10,6 +10,7 @@
 """
 import os
 import logging
+import traceback
 
 from pydantic import BaseModel, Field
 from typing import Dict, List
@@ -118,7 +119,9 @@ def getMetadata(
                     index_name="ai_sdk_sample_data"
                 )
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}")
+            logging.error(f"Resource initialization error: {str(e)}")
+            logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
+            raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
 
     views_by_tag = {}
 

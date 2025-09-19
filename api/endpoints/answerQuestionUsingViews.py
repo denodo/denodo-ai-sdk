@@ -10,6 +10,8 @@
 """
 
 import os
+import logging
+import traceback
 
 from pydantic import BaseModel, Field
 from typing import Dict, Annotated, List, Literal
@@ -112,7 +114,9 @@ async def answerQuestionUsingViews(endpoint_request: answerQuestionUsingViewsReq
             max_tokens=endpoint_request.llm_max_tokens
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}")
+        logging.error(f"Resource initialization error: {str(e)}")
+        logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
 
     timings = {}
     with timing_context("llm_time", timings):
@@ -142,8 +146,9 @@ async def answerQuestionUsingViews(endpoint_request: answerQuestionUsingViewsReq
             category_response=category_response,
             category_related_questions=category_related_questions,
             vector_search_tables=endpoint_request.vector_search_tables,
-            tokens=sql_category_tokens,
             timings=timings,
+            tokens=sql_category_tokens,
+            disclaimer=endpoint_request.disclaimer
         )
     else:
         response = sdk_answer_question.process_unknown_category(timings=timings)

@@ -181,7 +181,7 @@ const Header = ({ isAuthenticated, setIsAuthenticated, handleClearResults, showC
                   <NavDropdown
                     title="Tools"
                     id="tools-nav-dropdown"
-                    align="start"
+                    align={config.userEditLLM ? 'start' : 'end'} 
                     className="custom-nav-dropdown"
                     show={showToolsDropdown}
                     onMouseEnter={() => handleEnterWhich('tools')}
@@ -204,19 +204,21 @@ const Header = ({ isAuthenticated, setIsAuthenticated, handleClearResults, showC
                     )}
                   </NavDropdown>
 
-                  <NavDropdown
-                    title="Administration"
-                    id="admin-nav-dropdown"
-                    align="end"
-                    className="custom-nav-dropdown"
-                    show={showAdminDropdown}
-                    onMouseEnter={() => handleEnterWhich('admin')}
-                    onMouseLeave={() => handleLeaveWhich('admin')}
-                    onToggle={(isOpen) => handleToggleWhich('admin', isOpen)}
-                  >
-                    <NavDropdown.Item onClick={() => setShowChatbotSettings(true)} disabled={!config.userEditLLM}>Chatbot Settings</NavDropdown.Item>
-                    <NavDropdown.Item onClick={() => setShowAISDKSettings(true)} disabled={!config.userEditLLM}>AI SDK Settings</NavDropdown.Item>
-                  </NavDropdown>
+                  {config.userEditLLM && (
+                    <NavDropdown
+                      title="Administration"
+                      id="admin-nav-dropdown"
+                      align="end"
+                      className="custom-nav-dropdown"
+                      show={showAdminDropdown}
+                      onMouseEnter={() => handleEnterWhich('admin')}
+                      onMouseLeave={() => handleLeaveWhich('admin')}
+                      onToggle={(isOpen) => handleToggleWhich('admin', isOpen)}
+                    >
+                      <NavDropdown.Item onClick={() => setShowChatbotSettings(true)}>Chatbot Settings</NavDropdown.Item>
+                      <NavDropdown.Item onClick={() => setShowAISDKSettings(true)}>AI SDK Settings</NavDropdown.Item>
+                    </NavDropdown>
+                  )}
 
                   <NavDropdown
                     id="user-nav-dropdown"

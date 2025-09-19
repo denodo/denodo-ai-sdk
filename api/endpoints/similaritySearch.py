@@ -10,13 +10,15 @@
 """
 import os
 import json
+import logging
+import traceback
 
 from pydantic import BaseModel
 from typing import List, Annotated
 
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPAuthorizationCredentials, HTTPBearer
 
 from utils.data_catalog import get_allowed_view_ids, DataCatalogAuthError
@@ -45,7 +47,10 @@ class similaritySearchRequest(BaseModel):
     embeddings_provider: str = os.getenv('EMBEDDINGS_PROVIDER')
     embeddings_model: str = os.getenv('EMBEDDINGS_MODEL')
     vector_store_provider: str = os.getenv('VECTOR_STORE')
-    n_results: int = 5
+    n_results: int = Query(
+        default = 5,
+        ge=1,
+    )
     scores: bool = False
 
 class similaritySearchResponse(BaseModel):
@@ -73,7 +78,9 @@ async def similaritySearch(endpoint_request: similaritySearchRequest = Depends()
             embeddings_model=endpoint_request.embeddings_model
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get vector store from state manager: {e}")
+        logging.error(f"Resource initialization error: {str(e)}")
+        logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to get vector store from state manager: {e}") from e
 
     try:
         valid_view_ids = await get_allowed_view_ids(auth=auth, raise_on_auth_error=True)

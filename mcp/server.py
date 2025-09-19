@@ -34,7 +34,11 @@ def ask_database(question, mode = "data"):
     }
 
     headers = get_http_headers()
-    auth = headers.get("Authorization")
+
+    raw_headers = get_http_headers()
+    headers = {k.lower(): v for k, v in raw_headers.items()}
+
+    auth = headers.get("authorization")
 
     try:
         response = requests.post(

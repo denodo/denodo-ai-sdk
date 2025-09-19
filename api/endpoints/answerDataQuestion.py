@@ -10,6 +10,8 @@
 """
 
 import os
+import logging
+import traceback
 
 from pydantic import BaseModel, Field
 from typing import Dict, Annotated, List
@@ -18,7 +20,6 @@ from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.util import bool_or_str
 
 from api.utils.sdk_utils import timing_context, add_tokens, generate_session_id, handle_endpoint_error
 from api.utils import sdk_ai_tools
@@ -54,7 +55,7 @@ class answerDataQuestionRequest(BaseModel):
     vdp_database_names: str = ''
     vdp_tag_names: str = ''
     use_views: str = Field(
-            default = False,
+            default = '',
             description="Please specify a view you want the LLM to take into consideration when answering the question. Expected format is views separated by commas: database.view_name, database.view_name2"
         )
     expand_set_views: bool = Field(
@@ -176,7 +177,9 @@ async def process_data_question(request_data: answerDataQuestionRequest, auth: s
             index_name="ai_sdk_sample_data"
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}")
+        logging.error(f"Resource initialization error: {str(e)}")
+        logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
 
     vector_search_tables, sample_data, timings = await sdk_ai_tools.get_relevant_tables(
         query=request_data.question,

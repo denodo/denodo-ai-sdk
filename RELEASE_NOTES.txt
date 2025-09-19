@@ -1,3 +1,14 @@
+version 0.10.1 - 20250919
+------------------------
+
+- Fixed bug when using OpenSearch as vector store with any answerQuestion endpoint.
+- Fixed bug with query fixer that would yield 'Getting error unexpected { in field name'.
+- Fixed bug with streamAnswerQuestion endpoint when asking a metadata question.
+- Added better clarity when calling similaritySearch endpoint with n_results = 0.
+- Fixed bug in MCP remote server where the bearer token would be ignored and forced basic auth.
+- Enhanced accuracy and speed in plot generation.
+- Fixed bug where LLM edit button would show up in the chatbot UI even when CHATBOT_USER_EDIT_LLM = 0.
+
 version 0.10 - 20250911
 ------------------------
 

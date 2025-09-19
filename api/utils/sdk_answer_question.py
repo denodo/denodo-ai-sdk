@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from api.utils import sdk_ai_tools
 from utils.data_catalog import execute_vql
@@ -173,7 +174,18 @@ def process_unknown_category(timings):
         'total_execution_time': round(sum(timings.values()), 2) if timings else 0
     }
 
-async def attempt_query_execution(vql_query, request, auth, llm, timings, vector_search_tables, session_id, query_explanation, query_fixer_tokens=None, fixer_history=[], sample_data=None):
+async def attempt_query_execution(
+    vql_query,
+    request,
+    auth, llm,
+    timings,
+    vector_search_tables,
+    session_id,
+    query_explanation,
+    query_fixer_tokens=None,
+    fixer_history=[],
+    sample_data=None
+):
     if vql_query:
         execution_result, vql_status_code, timings = await execute_query(
             vql_query=vql_query,
@@ -190,8 +202,9 @@ async def attempt_query_execution(vql_query, request, auth, llm, timings, vector
 
     if fixer_history:
         with timing_context("llm_time", timings):
-            escape_execution_result = execution_result.replace("{", "{{").replace("}", "}}")
-            fixer_history.append(('human', f'Your response resulted in the following error {vql_status_code}: {escape_execution_result}'))
+            fixer_history.append(('human', f'Your response resulted in the following error {vql_status_code}: {execution_result}'))
+            fixer_history = [(role, msg.replace("{", "{{").replace("}", "}}")) for role, msg in fixer_history]
+
             prompt = ChatPromptTemplate.from_messages(fixer_history)
             chain = prompt | llm.llm | StrOutputParser()
 

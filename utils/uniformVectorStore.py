@@ -45,6 +45,9 @@ class UniformVectorStore:
 
             PGVECTOR_CONNECTION_STRING = os.getenv("PGVECTOR_CONNECTION_STRING", "postgresql+psycopg://langchain:langchain@localhost:6024/langchain")
 
+            if not PGVECTOR_CONNECTION_STRING:
+                raise ValueError("PGVECTOR_CONNECTION_STRING environment variable not set.")
+
             self.client = PGVector(
                 embeddings=self.embeddings,
                 collection_name=self.index_name,
@@ -57,6 +60,13 @@ class UniformVectorStore:
             OPENSEARCH_URL = os.getenv("OPENSEARCH_URL", "http://localhost:9200")
             OPENSEARCH_USERNAME = os.getenv("OPENSEARCH_USERNAME", "admin")
             OPENSEARCH_PASSWORD = os.getenv("OPENSEARCH_PASSWORD", "admin")
+
+            if not OPENSEARCH_URL:
+                raise ValueError("OPENSEARCH_URL environment variable not set.")
+            if not OPENSEARCH_USERNAME:
+                raise ValueError("OPENSEARCH_USERNAME environment variable not set.")
+            if not OPENSEARCH_PASSWORD:
+                raise ValueError("OPENSEARCH_PASSWORD environment variable not set.")
 
             self.client = OpenSearchVectorSearch(
                 opensearch_url = OPENSEARCH_URL,
@@ -214,7 +224,10 @@ class UniformVectorStore:
     @log_params
     def _build_get_view_ids_search_filter(self, view_names):
         if self.provider == "opensearch":
-            return {"metadata.view_name": {"$in": view_names}}
+            #return {"metadata.view_name": {"$in": view_names}}
+            return {"terms": {
+                "metadata.view_name.keyword": view_names
+            }}
         elif self.provider in ["chroma", "pgvector"]:
             return {"view_name": {"$in": view_names}}
         else:

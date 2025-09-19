@@ -10,6 +10,7 @@
 """
 import os
 import logging
+import traceback
 
 from pydantic import BaseModel
 
@@ -78,7 +79,9 @@ async def deleteMetadata(endpoint_request: deleteMetadataRequest = Depends(), au
             index_name="ai_sdk_sample_data"
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}")
+        logging.error(f"Resource initialization error: {str(e)}")
+        logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
 
     try:
         total_deleted_ids = delete_by_db_or_tag(

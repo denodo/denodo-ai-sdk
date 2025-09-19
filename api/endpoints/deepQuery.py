@@ -11,6 +11,8 @@
 
 import os
 import time
+import logging
+import traceback
 
 from pydantic import BaseModel
 from api.utils import state_manager
@@ -106,7 +108,9 @@ async def deep_query_post(
             index_name="ai_sdk_sample_data"
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from None
+        logging.error(f"Resource initialization error: {str(e)}")
+        logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
 
     # Get relevant tables using enhanced schema discovery
     vector_search_tables, sample_data, timings = await sdk_ai_tools.get_relevant_tables(

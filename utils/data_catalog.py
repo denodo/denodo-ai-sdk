@@ -254,6 +254,7 @@ async def is_empty_result(json_response):
 
     return False, ""
 
+@log_params
 @timed
 async def execute_vql(vql, auth, limit, execution_url=DATA_CATALOG_EXECUTION_URL,
                 server_id=DATA_CATALOG_SERVER_ID, verify_ssl=DATA_CATALOG_VERIFY_SSL):

@@ -10,6 +10,8 @@
 """
 
 import os
+import logging
+import traceback
 
 from pydantic import BaseModel, Field
 from typing import Dict, List, Literal
@@ -167,7 +169,9 @@ async def process_question(request_data: answerQuestionRequest, auth: str):
             index_name="ai_sdk_sample_data"
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from None
+        logging.error(f"Resource initialization error: {str(e)}")
+        logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
 
     vector_search_tables, sample_data, timings = await sdk_ai_tools.get_relevant_tables(
         query=request_data.question,
@@ -213,9 +217,9 @@ async def process_question(request_data: answerQuestionRequest, auth: str):
             category_response=category_response,
             category_related_questions=category_related_questions,
             vector_search_tables=vector_search_tables,
-            disclaimer=request_data.disclaimer,
-            tokens=sql_category_tokens,
             timings=timings,
+            tokens=sql_category_tokens,
+            disclaimer=request_data.disclaimer
         )
     else:
         response = sdk_answer_question.process_unknown_category(timings=timings)

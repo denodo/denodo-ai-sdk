@@ -13,6 +13,8 @@ import os
 import time
 import uuid
 import base64
+import logging
+import traceback
 
 from pathlib import Path
 from datetime import datetime
@@ -97,7 +99,9 @@ async def generate_deep_query_pdf_post(
         )
         executing_llm = executing_llm_instance.llm
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error initializing LLM resources: {str(e)}") from None
+        logging.error(f"Resource initialization error: {str(e)}")
+        logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error initializing LLM resources: {str(e)}") from e
 
     # Generate unique PDF filename using datetime + analysis_title + unique_id
     reports_dir = Path("api/reports")

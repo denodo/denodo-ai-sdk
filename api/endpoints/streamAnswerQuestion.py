@@ -9,6 +9,8 @@
  of the license agreement you entered into with DENODO.
 """
 import os
+import logging
+import traceback
 
 from pydantic import BaseModel, Field
 from typing import Annotated, Literal
@@ -166,7 +168,9 @@ async def process_stream_question(request_data: streamAnswerQuestionRequest, aut
             index_name="ai_sdk_sample_data"
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}")
+        logging.error(f"Resource initialization error: {str(e)}")
+        logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
 
     vector_search_tables, sample_data, timings = await sdk_ai_tools.get_relevant_tables(
         query=request_data.question,
@@ -185,7 +189,7 @@ async def process_stream_question(request_data: streamAnswerQuestionRequest, aut
         raise HTTPException(status_code=404, detail="The vector search result returned 0 views. This could be due to limited permissions or an empty vector store.")
 
     with timing_context("llm_time", timings):
-        category, category_response, category_related_questions, _ = await sdk_ai_tools.sql_category(
+        category, category_response, category_related_questions, sql_category_tokens = await sdk_ai_tools.sql_category(
             query=request_data.question,
             vector_search_tables=vector_search_tables,
             llm=llm,
@@ -212,6 +216,8 @@ async def process_stream_question(request_data: streamAnswerQuestionRequest, aut
             category_related_questions=category_related_questions,
             vector_search_tables=vector_search_tables,
             timings=timings,
+            tokens=sql_category_tokens,
+            disclaimer=request_data.disclaimer
         )
     else:
         response = sdk_answer_question.process_unknown_category(timings=timings)
