@@ -1,3 +1,10 @@
+version 0.10.2 - 20251023
+------------------------
+
+- Changed behavior of custom instructions. If CUSTOM_INSTRUCTIONS is set in sdk_config.env, 
+it will be used as base instructions for all questions. Any custom_instructions parameter sent
+in requests will be appended to the base instructions.
+
 version 0.10.1 - 20250919
 ------------------------
 

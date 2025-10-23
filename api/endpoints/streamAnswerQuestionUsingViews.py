@@ -52,7 +52,7 @@ class streamAnswerQuestionUsingViewsRequest(BaseModel):
     llm_model: str = os.getenv('LLM_MODEL')
     llm_temperature: float = float(os.getenv('LLM_TEMPERATURE', '0.0'))
     llm_max_tokens: int = int(os.getenv('LLM_MAX_TOKENS', '2048'))
-    custom_instructions: str = os.getenv('CUSTOM_INSTRUCTIONS', '')
+    custom_instructions: str = ''
     markdown_response: bool = True
     vector_search_k: int = 5
     vector_search_sample_data_k: int = 3
@@ -103,6 +103,13 @@ async def streamAnswerQuestionUsingViews(endpoint_request: streamAnswerQuestionU
         logging.error(f"Resource initialization error: {str(e)}")
         logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
+
+    # Combine custom instructions from environment and request
+    base_instructions = os.getenv('CUSTOM_INSTRUCTIONS', '')
+    if endpoint_request.custom_instructions:
+        endpoint_request.custom_instructions = f"{base_instructions}\n{endpoint_request.custom_instructions}".strip()
+    else:
+        endpoint_request.custom_instructions = base_instructions
 
     timings = {}
     with timing_context("llm_time", timings):

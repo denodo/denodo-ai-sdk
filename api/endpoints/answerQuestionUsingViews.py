@@ -54,7 +54,7 @@ class answerQuestionUsingViewsRequest(BaseModel):
     llm_temperature: float = float(os.getenv('LLM_TEMPERATURE', '0.0'))
     llm_max_tokens: int = int(os.getenv('LLM_MAX_TOKENS', '2048'))
     markdown_response: bool = True
-    custom_instructions: str = os.getenv('CUSTOM_INSTRUCTIONS', '')
+    custom_instructions: str = ''
     vector_search_k: int = 5
     mode: Literal["default", "data", "metadata"] = Field(default = "default")
     disclaimer: bool = True
@@ -117,6 +117,13 @@ async def answerQuestionUsingViews(endpoint_request: answerQuestionUsingViewsReq
         logging.error(f"Resource initialization error: {str(e)}")
         logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
+
+    # Combine custom instructions from environment and request
+    base_instructions = os.getenv('CUSTOM_INSTRUCTIONS', '')
+    if endpoint_request.custom_instructions:
+        endpoint_request.custom_instructions = f"{base_instructions}\n{endpoint_request.custom_instructions}".strip()
+    else:
+        endpoint_request.custom_instructions = base_instructions
 
     timings = {}
     with timing_context("llm_time", timings):

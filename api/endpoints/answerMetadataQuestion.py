@@ -62,7 +62,7 @@ class answerMetadataQuestionRequest(BaseModel):
             default = True,
             description="If set to true, the LLM will search for relevant views in the vector store. If set to false, the LLM will not search in the vector store and will only access those specified in use_views"
         )
-    custom_instructions: str = os.getenv('CUSTOM_INSTRUCTIONS', '')
+    custom_instructions: str = ''
     markdown_response: bool = True
     vector_search_k: int = 5
     vector_search_sample_data_k: int = 3
@@ -189,6 +189,13 @@ async def process_metadata_question(request_data: answerMetadataQuestionRequest,
 
     if not vector_search_tables:
         raise HTTPException(status_code=404, detail="The vector search result returned 0 views. This could be due to limited permissions or an empty vector store.")
+
+    # Combine custom instructions from environment and request
+    base_instructions = os.getenv('CUSTOM_INSTRUCTIONS', '')
+    if request_data.custom_instructions:
+        request_data.custom_instructions = f"{base_instructions}\n{request_data.custom_instructions}".strip()
+    else:
+        request_data.custom_instructions = base_instructions
 
     with timing_context("llm_time", timings):
         _, category_response, category_related_questions, sql_category_tokens = await sdk_ai_tools.sql_category(
