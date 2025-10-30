@@ -21,8 +21,8 @@ from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPAuthorizationCredentials, HTTPBearer
 
-from utils.data_catalog import get_allowed_view_ids, DataCatalogAuthError
 from api.utils import state_manager
+from utils.data_catalog import get_allowed_view_ids, DataCatalogAuthError
 from api.utils.sdk_utils import filter_non_allowed_associations, handle_endpoint_error
 
 router = APIRouter()
@@ -83,10 +83,12 @@ async def similaritySearch(endpoint_request: similaritySearchRequest = Depends()
         raise HTTPException(status_code=500, detail=f"Failed to get vector store from state manager: {e}") from e
 
     try:
-        valid_view_ids = await get_allowed_view_ids(auth=auth, raise_on_auth_error=True)
+        valid_view_ids = await get_allowed_view_ids(auth=auth)
         valid_view_ids = [str(view_id) for view_id in valid_view_ids]
     except DataCatalogAuthError as e:
-        raise HTTPException(status_code=401, detail=f"Authentication failed during similaritySearch: {str(e)}")
+        raise HTTPException(status_code=401, detail=f"Authentication failed during similaritySearch: {str(e)}") from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Retrieving allowed view IDs from Denodo Data Catalog failed: {str(e)}") from e
 
     search_params = {
         "query": endpoint_request.query,

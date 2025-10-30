@@ -303,7 +303,7 @@ class Agent:
             duration = time.time() - start_time
 
             # Log the LLM interaction
-            self.logger.info(f"LLM response received: duration={duration:.2f}s, input_length={len(input_text)}, response_length={len(response)}, response={response}")
+            self.logger.info(f"LLM response received: duration={duration:.2f}s, input_length={len(input_text)}, response_length={len(response)}, response={response[:500]}")
 
         except Exception as e:
             duration = time.time() - start_time

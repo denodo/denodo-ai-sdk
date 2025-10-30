@@ -1,0 +1,8 @@
+{
+  "Denodo_AI_SDK_Remote": {
+    "url": "http://0.0.0.0:8008/mcp",
+    "headers": {
+      "Authorization": "Basic YWRtaW46YWRtaW4="
+    }
+  }
+}

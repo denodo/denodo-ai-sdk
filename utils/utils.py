@@ -11,6 +11,7 @@
 
 import re
 import os
+import sys
 import pytz
 import json
 import asyncio
@@ -27,9 +28,17 @@ from functools import wraps, cache
 from botocore.session import get_session
 from langchain_core.documents.base import Document
 from botocore.credentials import RefreshableCredentials
+from utils.version import AI_SDK_VERSION
 
 # ContextVar to store the current endpoint name
 current_endpoint: contextvars.ContextVar[str] = contextvars.ContextVar('current_endpoint', default=None)
+
+def is_in_venv():
+    """
+    Check if the current Python interpreter is running inside a virtual environment.
+    Returns True if in a virtual environment, False otherwise.
+    """
+    return sys.prefix != sys.base_prefix
 
 def log_params(func):
     @functools.wraps(func)
@@ -114,7 +123,7 @@ def get_langfuse_callback(model_id, session_id = None):
         from langfuse.callback import CallbackHandler
         params = {
             "user_id": os.getenv('LANGFUSE_USER'),
-            "release": os.getenv('AI_SDK_VER', 'Not set'),
+            "release": AI_SDK_VERSION,
             "metadata": {
                 "model_id": model_id
             }
@@ -418,6 +427,20 @@ def normalize_root_path(root_path):
         root_path = "/" + root_path
 
     return root_path.rstrip('/')
+
+def get_custom_headers_from_env(provider_name):
+    """
+    Retrieves custom headers from environment variables for a given provider.
+    Headers are expected in the format: {PROVIDER_NAME}_HEADER_{HEADER_NAME}={HEADER_VALUE}
+    """
+    headers = {}
+    prefix = f"{provider_name.upper()}_HEADER_"
+    for key, value in os.environ.items():
+        if key.startswith(prefix):
+            header_name = key[len(prefix):]
+            headers[header_name] = value
+            logging.info(f"Loaded custom header for {provider_name}: {header_name}")
+    return headers
 
 class RefreshableBotoSession:
     def __init__(

@@ -51,7 +51,7 @@ def trim_conversation(conversation_history, token_limit = 7000):
 
     return trimmed_history
 
-def get_user_views(api_host, username, password, query, views = 200, set_user_tables=None, verify_ssl=False):
+def get_user_views(api_host, username, password, query, views = 200, verify_ssl=False):
     try:
         request_params = {
             'query': query,
@@ -63,7 +63,8 @@ def get_user_views(api_host, username, password, query, views = 200, set_user_ta
             f'{api_host}/similaritySearch',
             params=request_params,
             auth=(username, password),
-            verify=verify_ssl
+            verify=verify_ssl,
+            timeout=30
         )
         response.raise_for_status()
         data = response.json()
@@ -72,29 +73,29 @@ def get_user_views(api_host, username, password, query, views = 200, set_user_ta
             table_names = [view['view_name'] for view in data]
         else:
             table_names = []
-
-        if set_user_tables:
-            if table_names:
-                set_user_tables.denodo_tables = "Here are some of the views available in the user's Denodo instance:\n- " + "\n- ".join(table_names) + "\n\nThis is not an exhaustive list, you can use the Metadata tool to query more."
-            else:
-                set_user_tables.denodo_tables = "No views where found in the user's Denodo instance. Either the user has no views, the connection is failing or he does not have enough permissions."
-
         return 200, table_names
     except requests.exceptions.HTTPError as e:
         status_code = e.response.status_code
-        error_message = f"AI SDK returned HTTP {status_code}"
-        if set_user_tables:
-            set_user_tables.denodo_tables = "No views where found in the user's Denodo instance. Either the user has no views, the connection is failing or he does not have enough permissions."
         try:
-            error_message = e.response.json().get('detail', error_message)
-        except requests.exceptions.JSONDecodeError:
-            pass
+            response_json = e.response.json()
+            detail = response_json.get('detail')
+            if isinstance(detail, dict):
+                error_message = detail.get('error')
+            else:
+                error_message = str(detail)
+            if not error_message:
+                raise ValueError
+        except (requests.exceptions.JSONDecodeError, ValueError):
+            try:
+                error_message = str(e.response.text)
+            except Exception:
+                error_message = f"AI SDK failed with HTTP status code {status_code}"
 
         return status_code, error_message
 
 def ai_sdk_health_check(api_host, verify_ssl=False):
     try:
-        response = requests.get(f'{api_host}/health', verify=verify_ssl)
+        response = requests.get(f'{api_host}/health', verify=verify_ssl, timeout=10)
         return response.status_code == 200
     except Exception as e:
         return False
@@ -318,63 +319,83 @@ def prepare_unstructured_vector_store(csv_file_path, vector_store_provider, embe
 
     return unstructured_vector_store
 
+def truncate_tool_output(tool_output, char_limit):
+    tool_output_str = str(tool_output)
+    if len(tool_output_str) > char_limit:
+        return tool_output_str[:char_limit] + f"\n\n[Note: The output was truncated to {char_limit} characters. Please re-execute the tool to see more.]"
+    return tool_output_str
 
-def add_to_chat_history(chat_history, human_query, ai_response, tool_name, tool_output, original_xml_call, llm_response_rows_limit):
+def add_to_chat_history(chat_history, human_query, ai_response, tool_name, tool_output, original_xml_call, llm_response_rows_limit, tool_output_char_limit=1000):
     #Remove related questions from the ai_response
     related_question_index = ai_response.find("<related_question>")
     if related_question_index != -1:
         ai_response = ai_response[:related_question_index].strip()
 
-    if tool_name == "database_query":
-        execution_result = tool_output.get('execution_result', {})
-        if isinstance(execution_result, dict):
-            total_rows = len(execution_result.items())
-            if total_rows > llm_response_rows_limit:
-                llm_execution_result = dict(list(execution_result.items())[:llm_response_rows_limit])
-                llm_execution_result = str(llm_execution_result) + f"... Showing only the first {llm_response_rows_limit} rows of the execution result out of a total of {total_rows} rows."
+    if isinstance(tool_output, dict):
+        if tool_name == "database_query":
+            execution_result = tool_output.get('execution_result', {})
+            if isinstance(execution_result, dict):
+                total_rows = len(execution_result.items())
+                if total_rows > llm_response_rows_limit:
+                    llm_execution_result = dict(list(execution_result.items())[:llm_response_rows_limit])
+                    llm_execution_result = str(llm_execution_result) + f"... Showing only the first {llm_response_rows_limit} rows of the execution result out of a total of {total_rows} rows."
+                else:
+                    llm_execution_result = execution_result
             else:
                 llm_execution_result = execution_result
-        else:
-            llm_execution_result = execution_result
-        sql_query = tool_output.get('sql_query', '')
-        human_query = f"""{human_query}
+            sql_query = tool_output.get('sql_query', '')
+            human_query = f"""{human_query}
 
-        ## TOOL DETAILS
-        You used the {tool_name} tool:
+            ## TOOL DETAILS
+            You used the {tool_name} tool:
 
-        {original_xml_call}
+            {original_xml_call}
 
-        <output>
-        <sql_query>
-        {sql_query}
-        </sql_query>
-        <execution_result>
-        {llm_execution_result}
-        </execution_result>
-        </output>
-        """
-    elif tool_name == "deep_query":
-        analysis_output = "DeepQuery analysis completed successfully."
+            <output>
+            <sql_query>
+            {sql_query}
+            </sql_query>
+            <execution_result>
+            {llm_execution_result}
+            </execution_result>
+            </output>
+            """
+        elif tool_name == "deep_query":
+            analysis_output = "DeepQuery analysis completed successfully."
 
-        human_query = f"""{human_query}
+            human_query = f"""{human_query}
 
-        ## TOOL DETAILS
-        You used the {tool_name} tool:
+            ## TOOL DETAILS
+            You used the {tool_name} tool:
 
-        {original_xml_call}
+            {original_xml_call}
 
-        <output>
-        <analysis>
-        {tool_output.get('answer', 'Analysis failed')}
-        </analysis>
-        <status>
-        {analysis_output}
-        </status>
-        </output>
-        """
-    elif tool_name == "deep_query_schema_check":
-        human_query = f"{human_query}\n\nThe user requested a DeepQuery analysis."
-    elif tool_name in ["metadata_query", "kb_lookup"]:
+            <output>
+            <analysis>
+            {tool_output.get('answer', 'Analysis failed')}
+            </analysis>
+            <status>
+            {analysis_output}
+            </status>
+            </output>
+            """
+        elif tool_name == "deep_query_schema_check":
+            human_query = f"{human_query}\n\nThe user requested a DeepQuery analysis."
+        elif tool_name in ["metadata_query", "kb_lookup"]:
+            truncated_output = truncate_tool_output(tool_output, tool_output_char_limit)
+            human_query = f"""{human_query}
+
+            ## TOOL DETAILS
+            I used the {tool_name} tool:
+
+            {original_xml_call}
+
+            <output>
+            {truncated_output}
+            </output>
+            """
+    elif tool_name != "direct_response":
+        truncated_output = truncate_tool_output(tool_output, tool_output_char_limit)
         human_query = f"""{human_query}
 
         ## TOOL DETAILS
@@ -383,7 +404,7 @@ def add_to_chat_history(chat_history, human_query, ai_response, tool_name, tool_
         {original_xml_call}
 
         <output>
-        {str(tool_output)[:1000]}
+        {truncated_output}
         </output>
         """
     chat_history.extend([HumanMessage(content = human_query), AIMessage(content = ai_response)])
@@ -435,36 +456,15 @@ You used the {tool_name} tool, but it failed with the following error:
     {tool_params}
     </schema>
 
-    Based on the schema and the analysis the user requested, ask the user clarifying questions (formatted in markdown) on his expectations and scope for the DeepQuery analysis.
-    The questions must only be based on the analysis request and the schema presented.
-    You must acknowledge the usage of DeepQuery in your response.
-    You must suggest a mix of simple and advanced metrics.
+    Based solely on the schema you received and the analysis the user requested, ask the user any clarifying questions you may have (formatted in markdown) on his expectations and scope for the DeepQuery analysis.
+    The questions must be based on the analysis request and ONLY on the schema presented.
+    If something does not appear in the schema, it will not be available for the analysis and you should not ask about it.
 
-    For example, if the user requests 'I want to understand which products are performing best and get insights into customer purchasing behavior over time.'.
+    Carefully review the schema and:
 
-    You could answer:
-
-    I will use the DeepQuery tool to answer your question. Before doing so and to ensure and provide accurate and relevant analysis, could you please clarify the following:
-
-    ### **Metrics**
-    When you say “best performing,” what metrics should be looked at and prioritized:
-    - Simple metric: Highest sales volume (quantity sold)?
-    - Simple metric: Highest revenue generated?
-    - Simple metric: Average unit price per product?
-    - Advanced metric: Highest number of unique customers purchasing?
-    - Advanced metric: Customer repeat rate per product?
-    - Advanced metric: Profit margin per product?
-
-    ### **Trends**
-    Are you interested in trends by:
-    - Month, quarter, or year?
-    - Comparing new vs. returning customers?
-
-    ### **Segmentation**
-    Should the analysis be broken down by product category, customer region (if available), or any other segment?
-
-    ### **Time Range**
-    Should we consider all historical data, or focus on a specific period (e.g., last 6 months, 2024 only)?
+    - Making a succint and short clarification request.
+    - Keep the clarification request to within 3 key bulleted points
+    - When clarifying, focus on the dimensions of "Intent", "Interest" and "Scope"
 
     Limit the scope of the advanced analysis to the data available in the schema."""
         elif tool_name == "deep_query":
@@ -554,8 +554,8 @@ def setup_directories(upload_folder="uploads", report_folder="reports"):
     os.makedirs(upload_folder, exist_ok=True)
     os.makedirs(report_folder, exist_ok=True)
 
-def get_report_filename(report_max_size_mb, report_folder="reports", base_filename="user_report"):
-    """Get the current report filename or create a new one if needed."""
+def get_report_filename(report_max_size_mb, report_max_files, report_folder="reports", base_filename="user_report"):
+    """Get the current report filename, create a new one if needed, and enforce file limit."""
     base_path = os.path.join(report_folder, base_filename)
     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     report_max_size_bytes = report_max_size_mb * 1024 * 1024
@@ -570,15 +570,39 @@ def get_report_filename(report_max_size_mb, report_folder="reports", base_filena
         # No files exist, create first one
         return f"{base_path}_{timestamp}.csv"
 
+    full_file_paths = [os.path.join(report_folder, f) for f in existing_files]
+
     # Find the latest file by modification time
     latest_file = max(
-        [os.path.join(report_folder, f) for f in existing_files],
+        full_file_paths,
         key=lambda f: os.path.getmtime(f) if os.path.exists(f) else 0
     )
 
     # Check file size and create new file if needed
     try:
         if os.path.exists(latest_file) and os.path.getsize(latest_file) >= report_max_size_bytes:
+            if report_max_files > 0:
+                # Calculate how many files to delete to stay within the limit
+                # We want to leave (report_max_files - 1) files before creating the new one.
+                num_to_delete = len(existing_files) - (report_max_files - 1)
+
+                if num_to_delete > 0:
+                    # Sort files by modification date (oldest first)
+                    sorted_files = sorted(
+                        full_file_paths,
+                        key=lambda f: os.path.getmtime(f) if os.path.exists(f) else 0
+                    )
+
+                    files_to_delete = sorted_files[:num_to_delete]
+
+                    logging.info(f"Report limit ({report_max_files}) reached. Deleting {len(files_to_delete)} oldest report(s).")
+
+                    for f_path in files_to_delete:
+                        try:
+                            os.remove(f_path)
+                        except OSError as e:
+                            logging.error(f"Error deleting old report file {f_path}: {e}")
+
             return f"{base_path}_{timestamp}.csv"
     except FileNotFoundError:
          # If the latest file somehow disappeared between listing and checking size, create a new one
@@ -586,10 +610,10 @@ def get_report_filename(report_max_size_mb, report_folder="reports", base_filena
 
     return latest_file
 
-def write_to_report(report_lock, report_max_size_mb, question, answer, username, report_folder="reports", base_filename="user_report"):
+def write_to_report(report_lock, report_max_size_mb, report_max_files, question, answer, username, report_folder="reports", base_filename="user_report"):
     """Write an interaction to the report CSV file."""
     with report_lock:
-        filename = get_report_filename(report_max_size_mb, report_folder, base_filename)
+        filename = get_report_filename(report_max_size_mb, report_max_files, report_folder, base_filename)
         file_exists = os.path.exists(filename)
         try:
             with open(filename, 'a', newline='', encoding='utf-8') as file:

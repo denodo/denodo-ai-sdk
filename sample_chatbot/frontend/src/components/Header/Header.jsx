@@ -13,8 +13,7 @@ import CustomInstructionsModal from '../CustomInstructionsModal';
 import { usePDF } from '../../contexts/PDFContext';
 import './Header.css';
 
-const Header = ({ isAuthenticated, setIsAuthenticated, handleClearResults, showClearButton, onLoadCSV }) => {
-  const [customLogoFailed, setCustomLogoFailed] = useState(false);
+const Header = ({ isAuthenticated, setIsAuthenticated, handleClearResults, showClearButton, onLoadCSV, renderLogo }) => {
   const [showVectorDBSync, setShowVectorDBSync] = useState(false);
   const [showChatbotSettings, setShowChatbotSettings] = useState(false);
   const [showAISDKSettings, setShowAISDKSettings] = useState(false);
@@ -107,46 +106,14 @@ const Header = ({ isAuthenticated, setIsAuthenticated, handleClearResults, showC
     }
   }, [isAuthenticated]);
 
-  const handleLogoError = () => {
-    setCustomLogoFailed(true);
-  };
-
   const handleLogout = async () => {
     try {
       await axios.post("logout");
+      handleClearResults();
       setIsAuthenticated(false);
     } catch (error) {
       console.error("Logout error:", error);
       alert("An error occurred during logout. Please try again.");
-    }
-  };
-
-  const renderLogo = () => {
-    const denodoLogo = (
-      <img
-        alt="Denodo company logo"
-        src={`${process.env.PUBLIC_URL}/denodo.png`}
-        height="22.5"
-        className="d-inline-block align-top"
-      />
-    );
-
-    if (!customLogoFailed) {
-      return (
-        <React.Fragment>
-          {denodoLogo}
-          {" + "}
-          <img
-            alt="Custom company logo"
-            src={`${process.env.PUBLIC_URL}/logo.png`}
-            height="22.5"
-            className="d-inline-block align-top"
-            onError={handleLogoError}
-          />
-        </React.Fragment>
-      );
-    } else {
-      return denodoLogo;
     }
   };
 
@@ -158,7 +125,7 @@ const Header = ({ isAuthenticated, setIsAuthenticated, handleClearResults, showC
       />
       <Navbar className="navbar-transparent" data-bs-theme="dark" fixed="top">
         <Container fluid className="d-flex justify-content-between align-items-center">
-          <Navbar.Brand href="#home" className="flex-grow-1 text-nowrap d-flex align-items-center">
+          <Navbar.Brand href="#home" className="flex-grow-1 text-nowrap d-flex align-items-baseline brand-spacing">
             {renderLogo()}
             <span className="brand-ask ms-2">ASK A QUESTION</span>
           </Navbar.Brand>

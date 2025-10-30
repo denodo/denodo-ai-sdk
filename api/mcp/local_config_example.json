@@ -1,0 +1,18 @@
+{
+  "Denodo_AI_SDK_Local": {
+    "command": "uv",
+    "args": [
+      "run",
+      "--with",
+      "fastmcp",
+      "fastmcp",
+      "run",
+      "{ABSOLUTE_PATH}/api/mcp/local.py"
+    ],
+    "env": {
+      "MCP_AI_SDK_ENDPOINT": "http://localhost:8008",
+      "MCP_AI_SDK_AUTH": "Basic YWRtaW46YWRtaW4=",
+      "MCP_AI_SDK_VERIFY_SSL": "false"
+    }
+  }
+}

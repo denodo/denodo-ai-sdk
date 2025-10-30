@@ -94,7 +94,7 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose }) => {
     setResponse(null);
 
     try {
-        const response = await axios.delete('/delete_metadata', {
+        const response = await axios.delete('delete_metadata', {
             data: {
                 vdp_database_names: deleteVdbs,
                 vdp_tag_names: deleteTags,

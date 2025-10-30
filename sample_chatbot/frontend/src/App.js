@@ -1,21 +1,21 @@
 import React, { useState } from "react";
 import Header from "./components/Header/Header";
-import Results from "./components/Results";
+import Results from "./components/Results/Results";
 import QuestionForm from "./components/QuestionForm";
-import SignInModal from "./components/SignInModal";
 import PDFManagementModal from "./components/PDFManagementModal";
 import axios from 'axios';
 import CSVUploadModal from "./components/CSVUploadModal";
 import useSDK from './hooks/useSDK';
+import LoginPage from "./components/LoginPage/LoginPage";
 
 const App = () => {
   const [results, setResults] = useState([]);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [showSignInModal, setShowSignInModal] = useState(false);
   const [questionType, setQuestionType] = useState("general");
   const [showCSVModal, setShowCSVModal] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState("");
   const [completedRequestId, setCompletedRequestId] = useState(null);
+  const [customLogoFailed, setCustomLogoFailed] = useState(false);
 
   const handleRequestCompletion = (requestId) => {
     setCompletedRequestId(requestId);
@@ -23,18 +23,51 @@ const App = () => {
 
   const sdk = useSDK(setResults, handleRequestCompletion);
 
+  const handleLogoError = () => {
+    setCustomLogoFailed(true);
+  };
+
+  const renderLogo = () => {
+    const denodoLogo = (
+      <img
+        alt="Denodo company logo"
+        src={`${process.env.PUBLIC_URL}/denodo.png`}
+        height="30"
+        className="d-inline-block align-top"
+      />
+    );
+
+    if (!customLogoFailed) {
+      return (
+        <React.Fragment>
+          {denodoLogo}
+          {" + "}
+          <img
+            alt="Custom company logo"
+            src={`${process.env.PUBLIC_URL}/logo.png`}
+            height="30"
+            className="d-inline-block align-top"
+            onError={handleLogoError}
+          />
+        </React.Fragment>
+      );
+    } else {
+      return denodoLogo;
+    }
+  };
+
   const handleSignIn = async (userInformation) => {
     try {
       const response = await axios.post('login', userInformation);
       if (response.data.success) {
         setIsAuthenticated(true);
-        setShowSignInModal(false);
       } else {
-        alert('Invalid credentials. Please try again.');
+        const errorMessage = response.data.message || 'Invalid credentials. Please try again.';
+        alert(errorMessage);
       }
     } catch (error) {
-      console.error('Sign-in error:', error);
-      alert('An error occurred during sign-in. Please try again.');
+      const errorMessage = error.response?.data?.message || 'An error occurred during sign-in. Please try again.';
+      alert(errorMessage);
     }
   };
 
@@ -71,37 +104,31 @@ const App = () => {
     }
   };
 
+  if (!isAuthenticated) {
+    return <LoginPage onSignIn={handleSignIn} renderLogo={renderLogo} />;
+  }
+
   return (
     <div className="d-flex flex-column vh-100" style={{ backgroundColor: "#fff" }}>
-      <Header 
-        isAuthenticated={isAuthenticated} 
+      <Header
+        isAuthenticated={isAuthenticated}
         setIsAuthenticated={setIsAuthenticated}
         handleClearResults={handleClearResults}
         showClearButton={results.length > 0}
         onLoadCSV={() => setShowCSVModal(true)}
+        renderLogo={renderLogo}
       />
       <div className="flex-grow-1 overflow-auto" style={{ marginTop: "76px", marginBottom: "100px", padding: "0 20px" }}>
-        {!isAuthenticated && (
-          <div className="d-flex justify-content-center align-items-center h-100">
-            <button 
-              onClick={() => setShowSignInModal(true)} 
-              className="btn btn-primary btn-lg"
-              style={{ backgroundColor: '#112533', borderColor: '#112533', borderRadius: '1.25em' }}
-            >
-              Sign in
-            </button>
-          </div>
-        )}
-        <Results 
-          results={results} 
+        <Results
+          results={results}
           setResults={setResults}
           setCurrentQuestion={setCurrentQuestion}
           setQuestionType={setQuestionType}
         />
       </div>
-      <QuestionForm 
-        results={results} 
-        setResults={setResults} 
+      <QuestionForm
+        results={results}
+        setResults={setResults}
         isAuthenticated={isAuthenticated}
         questionType={questionType}
         setQuestionType={setQuestionType}
@@ -109,11 +136,6 @@ const App = () => {
         setCurrentQuestion={setCurrentQuestion}
         sdk={sdk}
         completedRequestId={completedRequestId}
-      />
-      <SignInModal
-        show={showSignInModal}
-        handleClose={() => setShowSignInModal(false)}
-        onSignIn={handleSignIn}
       />
       <CSVUploadModal
         show={showCSVModal}

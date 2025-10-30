@@ -11,7 +11,7 @@ ANALYSIS_INITIAL_PROMPT = """
 This is the analysis question: {user_input}
 
 First, think, in between <thinking></thinking> tags, exhaustively about the user's database schema provided in <database_schema> and how you are going to carry out the deep analysis.
-Apply your modus operandi and don't forget to figure think about:
+Apply your modus operandi and don't forget to think about:
 - First, focus on the user's database schema and write down all the tables and columns related to the analysis question.
 - What extra information do you need from the schema? For example, are there categorical columns that you need a list of all possible values for?
 - What type of analysis is needed to answer the analysis question.
@@ -66,7 +66,7 @@ You can perform several types of actions:
    - aggregate_metric: Request an aggregation (sum, average, count, error rate, etc.). When requesting a metric, always specify the columns and tables you are interested in to formulate that metric.
    - generate_metadata_summary: Understand basic dataset structure (columns, types) if needed. Be careful, the generate_metadata_summary tool only has access to the metadata of the database, not the data itself. To ask for the unique values of a column, first, use the database_tool with the question "How many unique values are there in the column <column_name>?" and then use the database_agent tool with aggregate_metric and ask for the unique values of the column if it's a manageable number.
    - If you know them, specify the tables and columns the database_agent should use to answer the question.
-   - Analize a trend: Analyze metric evolution over time (weekly, monthly) with aggregate_metric. When analizing a trend, be specific about the statistical metrics (average, median, min, max, stdev, etc.) and the time period you are interested in.
+   - Analyze a trend: Analyze metric evolution over time (weekly, monthly) with aggregate_metric. When analyzing a trend, be specific about the statistical metrics (average, median, min, max, stdev, etc.) and the time period you are interested in.
 
 3. Analyze all cohorts at once:
    - Use the special placeholder <cohorts> in the action or action_description
@@ -333,10 +333,10 @@ If you're certain that the default_rows value is not enough, you can override it
 1. Determine whether the analysis question involves:
     - Comparing groups → create cohorts and understand the cohorts created.
     - Understanding trends/patterns → analyze aggregates directly
-2. Define meaningful metrics to measure the analysis question. When appropiate, consider normalized metrics.
+2. Define meaningful metrics to measure the analysis question. When appropriate, consider normalized metrics.
 3. Plan minimal data needs to answer it.
 4. First create cohorts if needed using the create_cohort tool.
-5. Send broken down,structured requests to the Database Agent.
+5. Send broken down, structured requests to the Database Agent.
    - If you need to perform the same analysis on all cohorts, use the <cohorts> placeholder.
 6. Reason logically over the received aggregates.
 7. Iterate until you have all the information to answer the analysis question in-depth and you can consider yourself an expert.
@@ -415,7 +415,7 @@ You will be given:
 </input>
 
 <rules>
-- If you're making an assumption, state it. Tell the data analyst to verify said assumption before proceding with the analysis.
+- If you're making an assumption, state it. Tell the data analyst to verify said assumption before proceeding with the analysis.
 </rules>
 
 <output>

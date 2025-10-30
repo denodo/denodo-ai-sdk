@@ -48,7 +48,7 @@ export const PDFProvider = ({ children }) => {
       ));
       
       // Call the generateDeepQueryPDF endpoint
-      const response = await axios.post('/generate_pdf', {
+      const response = await axios.post('generate_pdf', {
         deepquery_metadata: deepqueryMetadata,
         color_palette: colorPalette
       });

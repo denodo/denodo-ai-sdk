@@ -51,8 +51,15 @@ class getMetadataRequest(BaseModel):
     view_prefix_filter: str = ''
     view_suffix_filter: str = ''
     insert: bool = True
+    views_per_request: int = Field(
+            default = 50,
+            description="Number of views to ask for per request to the Denodo Platform. This is implemented to avoid handling too many views in a single request that might overload the server."
+        )
     incremental: bool = True
-    parallel: bool = True
+    parallel: bool = Field(
+            default = True,
+            description="If set to true, vectorization through the embeddings provider and insertion into the vector store will be done in parallel. Denodo Platform requests will remain sequential."
+        )
 
 class getMetadataResponse(BaseModel):
     db_schema_json: Dict

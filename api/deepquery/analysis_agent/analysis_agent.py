@@ -1,4 +1,3 @@
-import time
 import logging
 
 from api.deepquery.agent.agent import Agent
@@ -66,34 +65,8 @@ class AnalysisAgent(Agent, AnalysisToolsMixin):
         self.cohorts = []
         logger.info("AnalysisAgent initialization completed")
 
-    async def start(self, user_input):
-        """
-        Start the analysis agent with a business question.
+    def set_initial_prompt(self, initial_prompt):
+        self.initial_prompt = initial_prompt
 
-        Args:
-            user_input: A dict with 'text' key containing the business question to analyze
-
-        Returns:
-            Dictionary with answer, conversation history, tool calls, and cohorts
-        """
-        start_time = time.time()
-        analysis_question = user_input["text"]
-        logger.info(f"Starting analysis for: {analysis_question[:100]}...")
-
-        try:
-            # Format the initial prompt with the user's business question
-            formatted_input = self.initial_prompt.format(user_input=analysis_question)
-            logger.info("Formatted initial prompt created")
-
-            # Start the agent execution loop with dict format
-            result = await self._execute_loop({"text": formatted_input}, loop_count=0)
-            result["cohorts"] = self.cohorts
-
-            duration = time.time() - start_time
-            logger.info(f"Analysis completed in {duration:.2f}s with {len(self.cohorts)} cohorts created")
-
-            return result
-        except Exception as e:
-            duration = time.time() - start_time
-            logger.error(f"Analysis failed after {duration:.2f}s: {e}", exc_info=True)
-            raise
+    def get_cohorts(self):
+        return self.cohorts

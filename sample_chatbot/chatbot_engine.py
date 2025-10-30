@@ -137,7 +137,7 @@ class ChatbotEngine:
                     })
             else:
                 ai_stream = first_input
-                tool_name, tool_output, original_xml_call = "Direct Response", "", ""
+                tool_name, tool_output, original_xml_call = "direct_response", "", ""
 
             ai_response = ""
             buffer = ""
@@ -203,9 +203,12 @@ class ChatbotEngine:
             elif tool_name == "kb_lookup":
                 return_data["data_sources"] = self.vector_store_provider
 
-            logging.info(f"Return data: {return_data}")
-
             yield return_data
+
+            # Log return data except key 'deepquery_metadata' because it is too large to inspect
+            # deepquery_metadata is received from the deepQuery endpoint and should be sent as-is to the PDF generation endpoint
+            return_data_to_log = {k: v for k, v in return_data.items() if k != "deepquery_metadata"}
+            logging.info(f"Return data: {return_data_to_log}")
 
             add_to_chat_history(
                 chat_history = self.chat_history,

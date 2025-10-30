@@ -1,5 +1,5 @@
 # Basic tool calling instructions
-TOOL_INSTRUCTIONS = """When calling a tool, you must use include all the tool calls in between <tools> and </tools> tags, whether calling one tool or multiple tools.
+TOOL_INSTRUCTIONS = """When calling a tool, you must include all the tool calls in between <tools> and </tools> tags, whether calling one tool or multiple tools.
 
 For example, to call a tool called "sum", with parameters x=2 and y=2, you would use the following format:
 <tools>

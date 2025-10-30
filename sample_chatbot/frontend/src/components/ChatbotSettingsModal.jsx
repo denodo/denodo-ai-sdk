@@ -127,7 +127,7 @@ const ChatbotSettingsModal = ({ show, handleClose, handleClearResults }) => {
                   type="number"
                   min="1024"
                   max="20000"
-                  placeholder="e.g., 2048"
+                  placeholder="e.g., 4096"
                   value={chatbotLLM.max_tokens}
                   onChange={(e) => setChatbotLLM((prev) => ({ ...prev, max_tokens: e.target.value }))}
                 />

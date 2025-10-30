@@ -52,7 +52,7 @@ class answerQuestionUsingViewsRequest(BaseModel):
     llm_provider: str = os.getenv('LLM_PROVIDER')
     llm_model: str = os.getenv('LLM_MODEL')
     llm_temperature: float = float(os.getenv('LLM_TEMPERATURE', '0.0'))
-    llm_max_tokens: int = int(os.getenv('LLM_MAX_TOKENS', '2048'))
+    llm_max_tokens: int = int(os.getenv('LLM_MAX_TOKENS', '4096'))
     markdown_response: bool = True
     custom_instructions: str = ''
     vector_search_k: int = 5
@@ -149,7 +149,7 @@ async def answerQuestionUsingViews(endpoint_request: answerQuestionUsingViewsReq
         )
         response['tokens'] = add_tokens(response['tokens'], sql_category_tokens)
     elif category == "METADATA":
-        response = await sdk_answer_question.process_metadata_category(
+        response = sdk_answer_question.process_metadata_category(
             category_response=category_response,
             category_related_questions=category_related_questions,
             vector_search_tables=endpoint_request.vector_search_tables,

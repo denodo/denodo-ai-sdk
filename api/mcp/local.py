@@ -1,21 +1,31 @@
 import os
 import sys
-import base64
 import requests
 import traceback
 
 from fastmcp import FastMCP
-from fastmcp.server.dependencies import get_http_headers
 
-mcp = FastMCP("denodo_aisdk")
+mcp = FastMCP("Denodo_AI_SDK_MCP")
 
 AI_SDK_ENDPOINT = os.getenv("MCP_AI_SDK_ENDPOINT", "http://localhost:8008").rstrip('/')
-AI_SDK_USER = os.getenv("MCP_AI_SDK_USER", "admin")
-AI_SDK_PASSWORD = os.getenv("MCP_AI_SDK_PASSWORD", "admin")
+AI_SDK_AUTH = os.getenv("MCP_AI_SDK_AUTH")
 AI_SDK_VERIFY_SSL = os.getenv("MCP_AI_SDK_VERIFY_SSL", "false").lower() == "true"
 
+if not AI_SDK_AUTH:
+    raise ValueError("MCP_AI_SDK_AUTH environment variable is required")
+
+try:
+    health_response = requests.get(
+        f"{AI_SDK_ENDPOINT}/health",
+        timeout=10.0,
+        verify=AI_SDK_VERIFY_SSL
+    )
+    health_response.raise_for_status()
+except Exception as e:
+    raise ConnectionError(f"Failed to connect to AI SDK endpoint at {AI_SDK_ENDPOINT}/health: {str(e)}") from e
+
 @mcp.tool()
-def ask_database(question, mode = "data"):
+def ask_database(question: str, mode: str = "data"):
     """Query the user's database in natural language.
 
     Accepts a mode parameter to specify the mode to use for the query:
@@ -29,22 +39,18 @@ def ask_database(question, mode = "data"):
     params = {
         "question": question,
         "mode": mode,
-        "verbose": False,
-        "markdown_response": True
+        "verbose": False
     }
 
-    headers = get_http_headers()
-
-    raw_headers = get_http_headers()
-    headers = {k.lower(): v for k, v in raw_headers.items()}
-
-    auth = headers.get("authorization")
+    headers = {}
+    if AI_SDK_AUTH:
+        headers["Authorization"] = AI_SDK_AUTH
 
     try:
         response = requests.post(
             f"{AI_SDK_ENDPOINT}/answerQuestion",
             json=params,
-            headers=headers if auth else {"Authorization": f"Basic {base64.b64encode(f'{AI_SDK_USER}:{AI_SDK_PASSWORD}'.encode()).decode()}"},
+            headers=headers,
             timeout=120.0,
             verify=AI_SDK_VERIFY_SSL
         )
@@ -57,6 +63,3 @@ def ask_database(question, mode = "data"):
     except Exception as e:
             traceback.print_exc(file=sys.stderr)
             return f"Error fetching response: {str(e)}"
-
-if __name__ == "__main__":
-    mcp.run()

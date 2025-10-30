@@ -109,7 +109,7 @@ Remember the guidelines:
 - Be specific about the data you want to visualize, include the columns and tables.
 - Always mention the cohort name in between <cohort></cohort> tags, like this: <cohort>cohort_name</cohort>.
 - Be specific about the visualization you want to generate, include the type of graph, the metrics (how to calculate them with the columns and tables), the timeframe, the cohorts.
-- Be specific about the colors and the arrangament of the graph to keep it consistent throughout all visualizations.
+- Be specific about the colors and the arrangement of the graph to keep it consistent throughout all visualizations.
 - Be specific and consistent about using spines and gridlines in all graphs.
 - Make sure to ask for the visualization to include a readable cohort name, for example, if the cohort is <cohort>approved_loans</cohort>, make sure to ask for the visualization to include the cohort name as 'Approved Loans'.
 </guidelines>
@@ -221,7 +221,7 @@ Each of these three elements is associated to a different type of block:
 You can reference stored tool call values using the following XML-like tags to include in the report:
 
 To include the result of a tool call as a table in your report, you
-can reference the tool call by it's tool_id and asking for its 'execution_result':
+can reference the tool call by its tool_id and asking for its 'execution_result':
 <table>
 <tool_id>tool_id</tool_id>
 <tool_value>execution_result</tool_value>
@@ -247,7 +247,7 @@ which will link to the section with all the details about that tool_id. Like thi
 
 [this is the text linking to the tool_id](#tool_id)
 
-For example, for a tool_id 38dce0a5 which generates a scatter plot, you could use:
+For example, for a tool_id #38dce0a5 which generates a scatter plot, you could use:
 
 <image>
 <tool_id>38dce0a5</tool_id>

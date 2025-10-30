@@ -493,7 +493,7 @@ async def graph_generator(
             }
         )
 
-    response = response.replace('```python', '<python>').replace('```', '</python').strip()
+    response = response.replace('```python', '<python>').replace('```', '</python>').strip()
     python_code = utils.custom_tag_parser(response, 'python', default = '')[0].strip()
 
     tokens = next(iter(cb.usage_metadata.values())) if cb.usage_metadata else {'input_tokens': 0, 'output_tokens': 0, 'total_tokens': 0}

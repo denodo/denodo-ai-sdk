@@ -7,7 +7,7 @@ from api.deepquery.utils import prepare_sequential_report_trace
 from api.deepquery.reporting_agent.tools import ReportingToolsMixin
 from api.deepquery.reporting_agent.report_processor import ReportProcessor
 from api.deepquery.analysis_agent.prompts import ANALYSIS_POST_TOOL_PROMPT
-from api.deepquery.reporting_agent.utils import convert_html_to_pdf_playwright, COLOR_PALETTES
+from api.deepquery.reporting_agent.utils import convert_html_to_pdf, COLOR_PALETTES
 from api.deepquery.reporting_agent.prompts import REPORTING_SYSTEM_PROMPT, REPORTING_INITIAL_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -183,7 +183,7 @@ class ReportingAgent(Agent, ReportingToolsMixin):
 
             # Convert to PDF with selected color palette
             logger.info(f"Converting HTML content to PDF using {color_palette} color palette with Playwright")
-            await convert_html_to_pdf_playwright(html, output_path, selected_palette, self.analysis_question)
+            await convert_html_to_pdf(html, output_path, selected_palette, self.analysis_question)
             return output_path
         except Exception as e:
             duration = time.time() - start_time

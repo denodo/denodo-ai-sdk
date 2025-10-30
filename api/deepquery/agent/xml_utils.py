@@ -14,7 +14,10 @@ def parse_xml(text):
         Dictionary mapping tag names to their content
     """
 
-    if not isinstance(text, str):
+    if isinstance(text, list):
+        # Means the LLM generated multiple <tools> tags, we need to join the elements of all of them
+        text = "\n\n".join(text)
+    elif not isinstance(text, str):
         logger.error(f"Invalid XML input: {text}")
         return {}
 

@@ -1,8 +1,0 @@
-{
-    "denodo_aisdk_remote": {
-        "url": "http://localhost:8009/mcp",
-        "headers": {
-          "Authorization": "Basic YWRtaW46YWRtaW4="
-        }
-      }
-}

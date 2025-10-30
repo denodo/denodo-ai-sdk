@@ -396,4 +396,25 @@ h3 {
 
 .related-question-text.slide-in-left {
   animation: slideInLeft 0.4s ease;
-}  
+}
+
+/* Custom Toast Styles */
+.custom-pdf-toast {
+  background-color: #e7e9ea !important;
+  border: none !important;
+  border-radius: .75rem !important;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1), 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.custom-pdf-toast .toast-header {
+  background-color: #e7e9ea !important;
+  color: #006699 !important;
+  border-bottom: none !important;
+}
+.custom-pdf-toast .toast-body {
+  color: black !important;
+}
+
+.custom-pdf-toast {
+  margin-bottom: 110px !important;
+}

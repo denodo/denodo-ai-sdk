@@ -1,0 +1,19 @@
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "denodo_oauth_token",
+      "description": "Denodo OAuth 2.0 Token",
+      "password": true
+    }
+  ],
+  "servers": {
+    "Denodo_AI_SDK_Remote": {
+      "url": "http://0.0.0.0:8008/mcp",
+      "type": "http",
+      "headers": {
+        "Authorization": "Bearer ${input:denodo_oauth_token}"
+      }
+    }
+  }
+}

@@ -140,7 +140,7 @@ const AISDKSettingsModal = ({ show, handleClose, handleClearResults }) => {
               type="number"
               min="1024"
               max="20000"
-              placeholder="e.g., 2048"
+              placeholder="e.g., 4096"
               value={llmState.max_tokens}
               onChange={(e) => setLLMState((prev) => ({ ...prev, max_tokens: e.target.value }))}
             />

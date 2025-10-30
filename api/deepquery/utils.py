@@ -7,6 +7,7 @@ from langfuse.callback import CallbackHandler
 
 from api.deepquery.prompts import ANALYSIS_TRACE_TEMPLATE
 from api.endpoints.answerQuestion import process_question, answerQuestionRequest
+from utils.version import AI_SDK_VERSION
 
 def create_langfuse_handler(
     session_id=None,
@@ -48,7 +49,8 @@ def create_langfuse_handler(
         host=langfuse_host_url,
         session_id=session_id,
         trace_name=trace_name,
-        user_id=langfuse_user_id
+        user_id=langfuse_user_id,
+        release=AI_SDK_VERSION
     )
 
 @contextmanager

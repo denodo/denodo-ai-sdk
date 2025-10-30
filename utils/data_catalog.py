@@ -52,7 +52,8 @@ def get_views_metadata_documents(
     view_suffix_filter='',
     tagged_views=None,
     incremental=True,
-    tags_to_ignore=None
+    tags_to_ignore=None,
+    views_per_request=50
 ):
     """
     Retrieve JSON documents from views metadata with support for OAuth token or Basic auth.
@@ -74,6 +75,7 @@ def get_views_metadata_documents(
     Returns:
         Parsed metadata JSON response
     """
+
     # Validate that only one of database_name or tag_name is provided
     if (database_name is None and tag_name is None) or (database_name is not None and tag_name is not None):
         raise ValueError("Exactly one of database_name or tag_name must be provided")
@@ -90,7 +92,7 @@ def get_views_metadata_documents(
     delete_view_ids = []
     detagged_view_ids = []
 
-    def prepare_request_data(offset=None, limit=None):
+    def prepare_request_data(limit, offset):
         data = {
             "dataMode": data_mode,
             "dataUsage": examples_per_table > 0,
@@ -154,7 +156,7 @@ def get_views_metadata_documents(
 
     try:
         # Initial request without pagination to detect DC API version
-        initial_response = make_request(prepare_request_data())
+        initial_response = make_request(prepare_request_data(limit=views_per_request, offset=0))
 
         # If it's a list, it's the old DC API (<9.1.0)
         if not isinstance(initial_response, list):
@@ -166,29 +168,30 @@ def get_views_metadata_documents(
             total_views = len(views)
             logging.info(f"Total views retrieved: {total_views}")
 
-            # If we got less than 1000 views we can exit
-            if total_views < 1000:
+            # If we got less than views_per_request views we can exit
+            if total_views < views_per_request:
                 logging.info(f"Retrieved {total_views} views in single request. No pagination needed")
                 all_views = views
             else:
                 # We're dealing with the new API version - need to paginate
                 logging.info("Dealing with the pagination API. Making requests with pagination.")
                 all_views = views
-                offset = 1000
+                offset = views_per_request
 
                 while True:
-                    data = prepare_request_data(offset=offset, limit=1000)
+                    data = prepare_request_data(offset=offset, limit=views_per_request)
                     page_response = make_request(data)
-                    logging.info(f"Made request with offset {offset} and limit 1000: {page_response}")
                     page_views = page_response.get('viewsDetails', page_response)
+                    logging.info(f"Received response for request with offset {offset} and limit {views_per_request}.")
                     if not page_views:
                         break
 
                     all_views.extend(page_views)
-                    offset += 1000
-                    logging.info(f"Retrieved {len(all_views)} views so far")
+                    offset += views_per_request
+                    logging.info(f"Retrieved {len(all_views)} views so far.")
 
-                    if len(page_views) < 1000:
+                    if len(page_views) < views_per_request:
+                        logging.info(f"Received less than {views_per_request} views. Stopping pagination.")
                         break
         else:
             all_views = initial_response
@@ -204,17 +207,17 @@ def get_views_metadata_documents(
         if tags_to_ignore:
             tags_to_ignore_set = set(tags_to_ignore)
             original_count = len(all_views)
-            
+
             views_to_keep = []
-            
+
             for view in all_views:
                 view_tags = {tag_info['name'] for tag_info in view.get('tagDetails', []) if 'name' in tag_info}
-                
+
                 if not tags_to_ignore_set.intersection(view_tags):
                     views_to_keep.append(view)
-                    
+
             all_views = views_to_keep
-            
+
             filtered_count = original_count - len(all_views)
             if filtered_count > 0:
                 logging.info(f"Filtered out {filtered_count} views based on tags_to_ignore.")
@@ -340,8 +343,7 @@ async def get_allowed_view_ids(
     auth,
     server_id=DATA_CATALOG_SERVER_ID,
     permissions_url=DATA_CATALOG_PERMISSIONS_URL,
-    verify_ssl=DATA_CATALOG_VERIFY_SSL,
-    raise_on_auth_error: bool = False
+    verify_ssl=DATA_CATALOG_VERIFY_SSL
 ):
     """
     Retrieve allowed view IDs for all views accessible to the user.
@@ -351,8 +353,6 @@ async def get_allowed_view_ids(
         server_id: The server ID (default is DATA_CATALOG_SERVER_ID)
         permissions_url: The Data Catalog permissions URL
         verify_ssl: Whether to verify SSL certificates
-        raise_on_auth_error: If True, raises DataCatalogAuthError on 401.
-                             If False (default), returns an empty list on any error.
 
     Returns:
        List of unique allowed view IDs across all accessible views
@@ -383,28 +383,24 @@ async def get_allowed_view_ids(
                 view_ids = await response.json()
 
                 if not isinstance(view_ids, list) or not all(isinstance(id, int) for id in view_ids):
-                    raise ValueError("Unexpected response format: not a list of integers")
+                    raise ValueError("Unexpected get_allowed_view_ids response format: not a list of integers")
 
                 # Ensure unique values
                 unique_view_ids = list(set(view_ids))
                 return unique_view_ids
 
     except aiohttp.ClientResponseError as e:
-        if e.status == 401 and raise_on_auth_error:
+        if e.status == 401:
             msg = "Authentication failed: Invalid credentials for Data Catalog."
             logging.error(msg)
             raise DataCatalogAuthError(msg) from e
-        try:
-            error_text = await e.response.text()
-            error_response = json.loads(error_text)
-            error_message = f"Failed to retrieve allowed view IDs: {error_response.get('message', 'Data Catalog did not return further details')}"
-        except (json.JSONDecodeError, AttributeError):
-            error_message = f"HTTP Error: {e.status} - {e.message}"
-        logging.error(error_message)
-        return []
+        else:
+            msg = f"Get allowed view IDs from Data Catalog failed: HTTP Error {e.status} - {e.message}"
+            logging.error(msg)
+            raise
     except (aiohttp.ClientError, ValueError) as e:
-        logging.error(f"Failed to retrieve allowed view IDs: {str(e)}")
-        return []
+        logging.error(f"Get allowed view IDs from Data Catalog failed: {str(e)}")
+        raise
 
 # This method calculates the authorization header for the Data Catalog REST API
 def calculate_basic_auth_authorization_header(user, password):

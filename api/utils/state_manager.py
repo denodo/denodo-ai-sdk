@@ -38,7 +38,7 @@ def get_embedding_model(provider_name, model_name):
         )
     return _embedding_model_cache[cache_key]
 
-def get_llm(provider_name, model_name, temperature = 0.0, max_tokens = 2048):
+def get_llm(provider_name, model_name, temperature = 0.0, max_tokens = 4096):
     """
     Looks up an LLM from the cache. If not found, creates and caches it.
     """
@@ -71,10 +71,20 @@ def get_vector_store(
     if not provider:
         raise ValueError("Vector Store provider must be specified.")
 
-    cache_key = (provider, index_name, rate_limit_rpm)
+    cache_key = (
+        provider,
+        embeddings_provider,
+        embeddings_model,
+        index_name,
+        rate_limit_rpm
+    )
 
     if cache_key not in _vector_store_cache:
-        logging.info(f"Initializing new vector store: {provider} with index '{index_name}' and rate limit {rate_limit_rpm} RPM")
+        logging.info(
+            f"Initializing new vector store: {provider} with index '{index_name}', "
+            f"embeddings: {embeddings_provider}/{embeddings_model}, "
+            f"and rate limit {rate_limit_rpm} RPM"
+        )
 
         embedding_model_instance = get_embedding_model(embeddings_provider, embeddings_model)
 
@@ -98,7 +108,7 @@ def initialize_default_resources():
     llm_provider = os.getenv("LLM_PROVIDER")
     llm_model = os.getenv("LLM_MODEL")
     llm_temperature = float(os.getenv("LLM_TEMPERATURE", "0.0"))
-    llm_max_tokens = int(os.getenv("LLM_MAX_TOKENS", "2048"))
+    llm_max_tokens = int(os.getenv("LLM_MAX_TOKENS", "4096"))
     if llm_provider and llm_model:
         get_llm(llm_provider, llm_model, llm_temperature, llm_max_tokens)
 

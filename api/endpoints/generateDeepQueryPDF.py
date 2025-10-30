@@ -41,7 +41,7 @@ class generateDeepQueryPDFRequest(BaseModel):
     llm_provider: str = os.getenv('LLM_PROVIDER')
     llm_model: str = os.getenv('LLM_MODEL')
     llm_temperature: float = float(os.getenv('LLM_TEMPERATURE', '0.0'))
-    llm_max_tokens: int = int(os.getenv('LLM_MAX_TOKENS', '2048'))
+    llm_max_tokens: int = int(os.getenv('LLM_MAX_TOKENS', '4096'))
 
 class generateDeepQueryPDFResponse(BaseModel):
     pdf_path: Optional[str] = None

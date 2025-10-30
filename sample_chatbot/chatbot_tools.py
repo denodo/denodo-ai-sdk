@@ -2,7 +2,7 @@ from utils.utils import timed
 from sample_chatbot.chatbot_utils import make_ai_sdk_request
 
 @timed
-def deep_query(analysis_request, api_host, username, password, execution_model="thinking", verify_ssl=False, **llm_params):
+def deep_query(analysis_request, api_host, username, password, verify_ssl=False, **llm_params):
     """
     Call the DeepQuery endpoint to perform advanced analysis.
 
@@ -11,15 +11,13 @@ def deep_query(analysis_request, api_host, username, password, execution_model="
         api_host: AI SDK host URL
         username: Authentication username
         password: Authentication password
-        execution_model: "thinking" or "base" - determines which LLM to use for execution
         **llm_params: Additional LLM parameters (thinking_llm_*, llm_*)
 
     Returns:
         Dict containing the analysis result and deepquery_metadata
     """
     request_body = {
-        'question': analysis_request,
-        'execution_model': execution_model,
+        'question': analysis_request
     }
 
     # Add LLM parameters if provided

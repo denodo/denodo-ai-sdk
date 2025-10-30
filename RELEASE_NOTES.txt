@@ -1,3 +1,44 @@
+version 0.11 - 20251030
+------------------------
+
+- Improved language consistency in the chatbot
+- Fixed bug in metadata questions when using streamAnswerQuestion endpoint
+- Fixed bug in MCP server for MCP clients that required annotated parameters
+
+version 0.11-beta - 20251023
+------------------------
+
+- Changed AWS Bedrock/Vertex thinking models to have reasoning enabled by appending "-enablethinking" to the model ID.
+- Added thinking model as an optional parameter in sdk_config.env
+- Fixed graph generation being too compressed
+- Increased default base LLM max output tokens to 4096
+- Reduced errors in DeepQuery PDF report generation
+- Added feature to specify user created AWS Bedrock inference profile for LLM_MODEL environment variable
+- Included Langfuse docs in the AI SDK config files
+- Added support for Dynamic Client Registration in the AI SDK's MCP server
+- Fixed bug where chatbot would login even when Data Catalog had no connection
+- Fixed async Windows PDF generation bug in DeepQuery
+- Improved runner debugging and added venv checker
+- Fixed bug where DEEPQUERY_EXECUTION_MODEL is always set to thinking in the chatbot
+- Fixed chatbot failure to launch in production mode on Windows
+- Fixed API not generating log files in production mode
+- Added VIEWS_PER_REQUEST parameter to getMetadata to handle big databases
+- Clarified spatial VQL functions
+- Added file size limit to chatbot report
+- Added Generate PDF Report button click feedback
+- Added LLM_TEMPERATURE parameter in chatbot_config.env to make changes in temperature as per the LLM model
+- Integrated remote MCP server with AI SDK API runner
+- Fixed typos in AI SDK/chatbot prompts
+- Fixed bug where logout is not cleaning the list of queries
+- Fixed divergent SQL_CATEGORY and DIRECT_SQL_CATEGORY prompts
+- Fixed SUBSTR/SUBSTRING confusion in VQL generation prompt
+- Fixed errors when using an HTTP to HTTPS redirect
+- Fixed bug where QuestionForm buttons don't work using a ROOT_PATH for the chatbot
+- Added support for custom HTTP headers
+- Reduced DeepQuery clarification length
+- Fixed AttributeError: 'str' object has no attribute 'get' in the chatbot UI
+- Fixed invalid XML input error when LLM generates two <tools> tags calls in DeepQuery
+
 version 0.10.2 - 20251023
 ------------------------
 

@@ -17,7 +17,7 @@ const useSDK = (setResults, onRequestComplete) => {
     // Generate unique request ID
     const requestId = `${type}_${Date.now()}_${++requestIdCounter.current}`;
     try {
-      const eventSource = new EventSource(`/question?query=${encodeURIComponent(question)}&type=${type}`);
+      const eventSource = new EventSource(`question?query=${encodeURIComponent(question)}&type=${type}`);
       
       // Store the connection for potential cancellation
       activeConnections.current.set(requestId, { eventSource, resultIndex });

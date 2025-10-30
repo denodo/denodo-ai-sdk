@@ -1,0 +1,31 @@
+.login-box {
+  background-color: #112533;
+  width: 100%;
+  max-width: 400px;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+  border-radius: 0.5rem;
+}
+
+.login-box .form-label {
+  color: #ffffff;
+  text-transform: uppercase;
+  font-weight: 400;
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+}
+
+.login-box .navbar-brand {
+  margin-bottom: 38.48px !important;
+}
+
+.login-box .brand-ask {
+  color: #ffffff;
+  text-transform: uppercase;
+  font-weight: 700;
+  font-size: 1.2rem;
+  letter-spacing: 0.02em;
+}
+
+.submit-button-wrapper {
+  margin-top: 38.48px !important;
+}

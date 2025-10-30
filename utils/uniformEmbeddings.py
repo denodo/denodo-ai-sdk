@@ -3,7 +3,7 @@ import httpx
 import logging
 
 from langchain.storage import LocalFileStore
-from utils.utils import RefreshableBotoSession
+from utils.utils import RefreshableBotoSession, get_custom_headers_from_env
 from langchain.embeddings import CacheBackedEmbeddings
 
 class UniformEmbeddings:
@@ -28,7 +28,7 @@ class UniformEmbeddings:
         if self.provider_name.lower() == "openai":
             self.setup_openai()
         elif self.provider_name.lower() == "azure":
-            self.setup_azure_openai()
+            self.setup_azure()
         elif self.provider_name.lower() == "bedrock":
             self.setup_bedrock()
         elif self.provider_name.lower() == "google":
@@ -125,9 +125,14 @@ class UniformEmbeddings:
         proxy = os.getenv('OPENAI_PROXY_URL')
         organization_id = os.getenv('OPENAI_ORG_ID')
         dimensions = os.getenv('OPENAI_EMBEDDINGS_DIMENSIONS')
+        custom_headers = get_custom_headers_from_env("OPENAI")
 
+        # If no API key is provided, assume auth is handled by custom headers.
+        # OpenAIEmbeddings requires a non-empty api_key, so provide a dummy one.
         if api_key is None:
-            raise ValueError("OPENAI_API_KEY environment variable not set.")
+            if not custom_headers:
+                raise ValueError("OPENAI_API_KEY environment variable not set and no custom auth headers found.")
+            api_key = "not_used"
 
         kwargs = {
             "model": self.model_name,
@@ -138,9 +143,17 @@ class UniformEmbeddings:
         if base_url is not None:
             kwargs["openai_api_base"] = base_url
 
-        if proxy is not None:
-            _http_client = httpx.Client(proxy = proxy, verify = False)
-            _http_async_client = httpx.AsyncClient(proxy = proxy, verify = False)
+        if proxy is not None or custom_headers:
+            client_kwargs = {}
+            if proxy:
+                client_kwargs["proxy"] = proxy
+                verify_ssl_env = os.getenv('OPENAI_PROXY_VERIFY_SSL', '0')
+                client_kwargs["verify"] = (verify_ssl_env == '1')
+            if custom_headers:
+                client_kwargs["headers"] = custom_headers
+
+            _http_client = httpx.Client(**client_kwargs)
+            _http_async_client = httpx.AsyncClient(**client_kwargs)
 
             kwargs["http_client"] = _http_client
             kwargs["http_async_client"] = _http_async_client
@@ -153,7 +166,7 @@ class UniformEmbeddings:
 
         self.base_embeddings = OpenAIEmbeddings(**kwargs)
 
-    def setup_azure_openai(self):
+    def setup_azure(self):
         from langchain_openai import AzureOpenAIEmbeddings
 
         api_version = os.getenv("AZURE_API_VERSION")
@@ -161,33 +174,40 @@ class UniformEmbeddings:
         api_key = os.getenv("AZURE_API_KEY")
         api_proxy = os.getenv("AZURE_PROXY")
         dimensions = os.getenv('AZURE_EMBEDDINGS_DIMENSIONS')
+        custom_headers = get_custom_headers_from_env("AZURE")
 
         if api_version is None or api_endpoint is None:
             raise ValueError("Azure environment variables not set.")
 
-        if api_key is None and api_proxy is None:
-            raise ValueError("Azure API key or proxy not set. One of them is required as authentication method.")
+        # If no API key is provided, assume auth is handled by custom headers.
+        # AzureOpenAIEmbeddings requires a non-empty api_key, so provide a dummy one.
+        if api_key is None:
+            if not custom_headers:
+                raise ValueError("AZURE_API_KEY environment variable not set and no custom auth headers found.")
+            api_key = "not_used"
 
         kwargs = {
             "azure_endpoint": api_endpoint,
             "openai_api_version": api_version,
             "deployment": self.model_name,
             "check_embedding_ctx_length": False,
+            "openai_api_key": api_key,
         }
 
-        if api_key is not None:
-            kwargs["openai_api_key"] = api_key
-        else:
-            logging.warning("Azure API key not set. Using proxy for authentication.")
+        if api_proxy is not None or custom_headers:
+            client_kwargs = {}
+            if api_proxy:
+                client_kwargs["proxy"] = api_proxy
+                verify_ssl_env = os.getenv('AZURE_PROXY_VERIFY_SSL', '0')
+                client_kwargs["verify"] = (verify_ssl_env == '1')
+            if custom_headers:
+                client_kwargs["headers"] = custom_headers
 
-        if api_proxy is not None:
-            _http_client = httpx.Client(proxy = api_proxy, verify = False)
-            _http_async_client = httpx.AsyncClient(proxy = api_proxy, verify = False)
+            _http_client = httpx.Client(**client_kwargs)
+            _http_async_client = httpx.AsyncClient(**client_kwargs)
 
             kwargs["http_client"] = _http_client
             kwargs["http_async_client"] = _http_async_client
-        else:
-            logging.warning("Azure proxy not set. Using API key for authentication.")
 
         if dimensions is not None:
             kwargs["dimensions"] = int(dimensions)
@@ -203,33 +223,40 @@ class UniformEmbeddings:
         api_key = os.getenv(f"{provider_upper}_API_KEY")
         api_proxy = os.getenv(f"{provider_upper}_PROXY")
         dimensions = os.getenv(f'{provider_upper}_EMBEDDINGS_DIMENSIONS')
+        custom_headers = get_custom_headers_from_env(self.provider_name)
 
         if api_version is None or api_endpoint is None:
             raise ValueError(f"Custom Azure provider '{self.provider_name}' environment variables not set.")
 
-        if api_key is None and api_proxy is None:
-            raise ValueError(f"Custom Azure provider '{self.provider_name}' API key or proxy not set. One of them is required as authentication method.")
+        # If no API key is provided, assume auth is handled by custom headers.
+        # AzureOpenAIEmbeddings requires a non-empty api_key, so provide a dummy one.
+        if api_key is None:
+            if not custom_headers:
+                raise ValueError(f"{provider_upper}_API_KEY environment variable not set and no custom auth headers found.")
+            api_key = "not_used"
 
         kwargs = {
             "azure_endpoint": api_endpoint,
             "openai_api_version": api_version,
             "deployment": self.model_name,
             "check_embedding_ctx_length": False,
+            "openai_api_key": api_key,
         }
 
-        if api_key is not None:
-            kwargs["openai_api_key"] = api_key
-        else:
-            logging.warning(f"Custom Azure provider '{self.provider_name}' API key not set. Using proxy for authentication.")
+        if api_proxy is not None or custom_headers:
+            client_kwargs = {}
+            if api_proxy:
+                client_kwargs["proxy"] = api_proxy
+                verify_ssl_env = os.getenv(f'{provider_upper}_PROXY_VERIFY_SSL', '0')
+                client_kwargs["verify"] = (verify_ssl_env == '1')
+            if custom_headers:
+                client_kwargs["headers"] = custom_headers
 
-        if api_proxy is not None:
-            _http_client = httpx.Client(proxy = api_proxy, verify = False)
-            _http_async_client = httpx.AsyncClient(proxy = api_proxy, verify = False)
+            _http_client = httpx.Client(**client_kwargs)
+            _http_async_client = httpx.AsyncClient(**client_kwargs)
 
             kwargs["http_client"] = _http_client
             kwargs["http_async_client"] = _http_async_client
-        else:
-            logging.warning(f"Custom Azure provider '{self.provider_name}' proxy not set. Using API key for authentication.")
 
         if dimensions is not None:
             kwargs["dimensions"] = int(dimensions)
@@ -278,9 +305,15 @@ class UniformEmbeddings:
         api_key = os.getenv(f'{provider_upper}_API_KEY')
         base_url = os.getenv(f'{provider_upper}_BASE_URL')
         proxy = os.getenv(f'{provider_upper}_PROXY')
+        custom_headers = get_custom_headers_from_env(self.provider_name)
 
+        # If no API key is provided, assume auth is handled by custom headers.
+        # OpenAIEmbeddings requires a non-empty api_key, so provide a dummy one.
         if api_key is None:
-            raise ValueError(f"{provider_upper}_API_KEY environment variable not set.")
+            if not custom_headers:
+                raise ValueError(f"{provider_upper}_API_KEY environment variable not set and no custom auth headers found.")
+            api_key = "not_used"
+
         if base_url is None:
             raise ValueError(f"{provider_upper}_BASE_URL environment variable not set.")
 
@@ -291,7 +324,19 @@ class UniformEmbeddings:
             "check_embedding_ctx_length": False,
         }
 
-        if proxy is not None:
-            kwargs["openai_proxy"] = proxy
+        if proxy is not None or custom_headers:
+            client_kwargs = {}
+            if proxy:
+                client_kwargs["proxy"] = proxy
+                verify_ssl_env = os.getenv(f'{provider_upper}_PROXY_VERIFY_SSL', '0')
+                client_kwargs["verify"] = (verify_ssl_env == '1')
+            if custom_headers:
+                client_kwargs["headers"] = custom_headers
+
+            _http_client = httpx.Client(**client_kwargs)
+            _http_async_client = httpx.AsyncClient(**client_kwargs)
+
+            kwargs["http_client"] = _http_client
+            kwargs["http_async_client"] = _http_async_client
 
         self.base_embeddings = OpenAIEmbeddings(**kwargs)

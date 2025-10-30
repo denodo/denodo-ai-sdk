@@ -55,6 +55,8 @@ setup_directories()
 # Environment variable lookup
 CHATBOT_LLM_PROVIDER = os.environ['CHATBOT_LLM_PROVIDER']
 CHATBOT_LLM_MODEL = os.environ['CHATBOT_LLM_MODEL']
+CHATBOT_LLM_TEMPERATURE = float(os.getenv('CHATBOT_LLM_TEMPERATURE', '0'))
+CHATBOT_LLM_MAX_TOKENS = int(os.getenv('CHATBOT_LLM_MAX_TOKENS', '4096'))
 CHATBOT_LLM_RESPONSE_ROWS_LIMIT = int(os.getenv('CHATBOT_LLM_RESPONSE_ROWS_LIMIT', '15'))
 CHATBOT_EMBEDDINGS_PROVIDER = os.environ['CHATBOT_EMBEDDINGS_PROVIDER']
 CHATBOT_EMBEDDINGS_MODEL = os.environ['CHATBOT_EMBEDDINGS_MODEL']
@@ -73,6 +75,7 @@ CHATBOT_SSL_CERT = os.getenv('CHATBOT_SSL_CERT')
 CHATBOT_SSL_KEY = os.getenv('CHATBOT_SSL_KEY')
 CHATBOT_REPORTING = bool(int(os.getenv('CHATBOT_REPORTING', '0')))
 CHATBOT_REPORT_MAX_SIZE = int(os.getenv('CHATBOT_REPORT_MAX_SIZE', '10'))
+CHATBOT_REPORT_MAX_FILES = int(os.getenv('CHATBOT_REPORT_MAX_FILES', '10'))
 CHATBOT_FEEDBACK = bool(int(os.getenv('CHATBOT_FEEDBACK', '0')))
 CHATBOT_UNSTRUCTURED_MODE = bool(int(os.getenv('CHATBOT_UNSTRUCTURED_MODE', '1')))
 CHATBOT_UNSTRUCTURED_INDEX = os.getenv('CHATBOT_UNSTRUCTURED_INDEX')
@@ -87,13 +90,14 @@ DATA_CATALOG_URL = os.getenv("CHATBOT_DATA_CATALOG_URL") or os.getenv("DATA_CATA
 AI_SDK_VERIFY_SSL = bool(int(os.getenv('AI_SDK_VERIFY_SSL', '0')))
 
 logging.info("Chatbot parameters:")
-logging.info(f"    - LLM Model: {CHATBOT_LLM_PROVIDER}/{CHATBOT_LLM_MODEL}")
+logging.info(f"    - LLM Model: {CHATBOT_LLM_PROVIDER}/{CHATBOT_LLM_MODEL} (temp={CHATBOT_LLM_TEMPERATURE}, max_tokens={CHATBOT_LLM_MAX_TOKENS})")
 logging.info(f"    - Embeddings Model: {CHATBOT_EMBEDDINGS_PROVIDER}/{CHATBOT_EMBEDDINGS_MODEL}")
 logging.info(f"    - Vector Store Provider: {CHATBOT_VECTOR_STORE_PROVIDER}")
 logging.info(f"    - AI SDK Host: {AI_SDK_HOST}")
 logging.info(f"    - Using SSL: {bool(CHATBOT_SSL_CERT and CHATBOT_SSL_KEY)}")
 logging.info(f"    - Reporting: {CHATBOT_REPORTING}")
 logging.info(f"    - Report Max Size: {CHATBOT_REPORT_MAX_SIZE}mb")
+logging.info(f"    - Report Max Files: {'unlimited' if CHATBOT_REPORT_MAX_FILES <= 0 else CHATBOT_REPORT_MAX_FILES}")
 logging.info(f"    - Feedback: {CHATBOT_FEEDBACK if CHATBOT_REPORTING else False}")
 logging.info(f"    - Auto Graph: {CHATBOT_AUTO_GRAPH}")
 logging.info("Connecting to AI SDK...")
@@ -127,14 +131,14 @@ def add_transaction_id_after_request(response):
 # Flask-Login setup
 login_manager = LoginManager()
 login_manager.init_app(app)
-login_manager.login_view = 'login'
+login_manager.login_view = 'chatbot.login'
 
 # LLM
 llm = UniformLLM(
         CHATBOT_LLM_PROVIDER,
         CHATBOT_LLM_MODEL,
-        temperature = 0,
-        max_tokens = 2048
+        CHATBOT_LLM_TEMPERATURE,
+        CHATBOT_LLM_MAX_TOKENS
     )
 
 # Dictionary to store User instances
@@ -158,7 +162,6 @@ class User(UserMixin):
         self.chatbot_llm_preferences = {}
         self.ai_sdk_base_llm_preferences = {}
         self.ai_sdk_thinking_llm_preferences = {}
-        self.use_base_llm_for_execution = False
 
         ## Initialize tools
         self.check_custom_kb()
@@ -223,9 +226,6 @@ class User(UserMixin):
             if self.ai_sdk_thinking_llm_preferences.get('max_tokens'):
                 thinking_llm_params['thinking_llm_max_tokens'] = self.ai_sdk_thinking_llm_preferences['max_tokens']
 
-        # Determine execution model based on user preference
-        execution_model = "base" if self.use_base_llm_for_execution else "thinking"
-
         tools = {
             "database_query": {
                 "function": denodo_query,
@@ -253,7 +253,6 @@ class User(UserMixin):
                     "api_host": AI_SDK_HOST,
                     "username": self.id,
                     "password": self.password,
-                    "execution_model": execution_model,
                     "verify_ssl": AI_SDK_VERIFY_SSL,
                     **ai_sdk_llm_params,
                     **thinking_llm_params
@@ -308,8 +307,8 @@ class User(UserMixin):
         if self.chatbot_llm_preferences:
             provider = self.chatbot_llm_preferences.get('provider', CHATBOT_LLM_PROVIDER)
             model = self.chatbot_llm_preferences.get('model', CHATBOT_LLM_MODEL)
-            temperature = self.chatbot_llm_preferences.get('temperature', 0)
-            max_tokens = self.chatbot_llm_preferences.get('max_tokens', 2048)
+            temperature = self.chatbot_llm_preferences.get('temperature', CHATBOT_LLM_TEMPERATURE)
+            max_tokens = self.chatbot_llm_preferences.get('max_tokens', CHATBOT_LLM_MAX_TOKENS)
 
             return UniformLLM(
                 provider,
@@ -339,14 +338,11 @@ def login():
     if not username or not password:
         return jsonify({"success": False, "message": "Username and password are required"}), 400
 
-    user = User(username, password)
-
     status, response_data = get_user_views(
         api_host=AI_SDK_HOST,
         username=username,
         password=password,
         query="tables",
-        set_user_tables=user,
         verify_ssl=AI_SDK_VERIFY_SSL
     )
 
@@ -357,6 +353,11 @@ def login():
             return jsonify({"success": False, "message": response_data}), status
 
     user = User(username, password)
+
+    if response_data:
+        user.denodo_tables = "Here are some of the views available in the user's Denodo instance:\n- " + "\n- ".join(response_data) + "\n\nThis is not an exhaustive list, you can use the Metadata tool to query more."
+    else:
+        user.denodo_tables = "No views where found in the user's Denodo instance. Either the user has no views, the connection is failing or he does not have enough permissions."
 
     if user_details or custom_instructions:
         user.user_details = user_details
@@ -430,7 +431,7 @@ def question():
                 yield f"data: {chunk_json}\n\n"
                 # Write to report only if reporting is enabled
                 if CHATBOT_REPORTING:
-                    write_to_report(report_lock, CHATBOT_REPORT_MAX_SIZE, query, chunk, user_id)
+                    write_to_report(report_lock, CHATBOT_REPORT_MAX_SIZE, CHATBOT_REPORT_MAX_FILES, query, chunk, user_id)
             elif isinstance(chunk, str):
                 chunk = chunk.replace('\n', '<NEWLINE>')
                 yield f"data: {chunk}\n\n"
@@ -475,15 +476,18 @@ def delete_metadata():
         )
 
         if response.status_code == 200:
-            status_code, _ = get_user_views(
+            status_code, table_names = get_user_views(
                 api_host=AI_SDK_HOST,
                 username=current_user.id,
                 password=current_user.password,
                 query="tables",
-                set_user_tables=current_user,
                 verify_ssl=AI_SDK_VERIFY_SSL
             )
             if status_code == 200:
+                if table_names:
+                    current_user.denodo_tables = "Here are some of the views available in the user's Denodo instance:\n- " + "\n- ".join(table_names) + "\n\nThis is not an exhaustive list, you can use the Metadata tool to query more."
+                else:
+                    current_user.denodo_tables = "No views where found in the user's Denodo instance. Either the user has no views, the connection is failing or he does not have enough permissions."
                 current_user.chatbot = None
             return jsonify({"success": True, "message": response.json().get('message', 'Deletion successful.')}), 200
         elif response.status_code == 204:
@@ -530,11 +534,14 @@ def sync_vdbs():
             username=current_user.id,
             password=current_user.password,
             query="tables",
-            set_user_tables=current_user,
             verify_ssl=AI_SDK_VERIFY_SSL
         )
 
-        if status_code == 200 and relevant_tables:
+        if status_code == 200:
+            if relevant_tables:
+                current_user.denodo_tables = "Here are some of the views available in the user's Denodo instance:\n- " + "\n- ".join(relevant_tables) + "\n\nThis is not an exhaustive list, you can use the Metadata tool to query more."
+            else:
+                current_user.denodo_tables = "No views where found in the user's Denodo instance. Either the user has no views, the connection is failing or he does not have enough permissions."
             current_user.chatbot = None
 
         return jsonify({"success": True, "message": f"VectorDB synchronization successful for VDBs: {result}"}), status
@@ -641,9 +648,6 @@ def update_llm_settings():
             }
             # Remove None values
             current_user.ai_sdk_thinking_llm_preferences = {k: v for k, v in current_user.ai_sdk_thinking_llm_preferences.items() if v is not None}
-
-        # Update execution model preference
-        current_user.use_base_llm_for_execution = data.get('use_base_llm_for_execution', False)
 
         # Regenerate tools with new preferences
         current_user.update_tools()

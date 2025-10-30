@@ -1,5 +1,4 @@
 import asyncio
-import logging
 
 from api.utils import sdk_ai_tools
 from utils.data_catalog import execute_vql

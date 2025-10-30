@@ -1,6 +1,8 @@
+import sys
 import base64
 import logging
 import os
+import asyncio
 
 from pathlib import Path
 from bs4 import BeautifulSoup
@@ -421,7 +423,7 @@ def prepare_html_for_pdf(html_content, logo_data_uri=None):
     return str(body)
 
 
-async def convert_html_to_pdf_playwright(html_content, output_file, color_palette, title):
+async def convert_html_to_pdf(html_content, output_file, color_palette, title):
     """Convert HTML file to PDF using Playwright with professional styling."""
     output_path = Path(output_file)
 
@@ -445,7 +447,7 @@ async def convert_html_to_pdf_playwright(html_content, output_file, color_palett
     </html>
     """
 
-    try:
+    async def _convert_with_playwright():
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
@@ -466,8 +468,22 @@ async def convert_html_to_pdf_playwright(html_content, output_file, color_palett
 
             await browser.close()
 
+    try:
+        await _convert_with_playwright()
         logger.info(f"Successfully generated PDF using Playwright: {output_path}")
-
+    except NotImplementedError as e:
+        if sys.platform == 'win32':
+            logger.info("NotImplementedError detected on Windows, trying with WindowsSelectorEventLoopPolicy...")
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+            try:
+                await _convert_with_playwright()
+                logger.info(f"Successfully generated PDF using Playwright after changing Windows event loop policy: {output_path}")
+            except Exception as retry_e:
+                logger.error(f"Error converting HTML to PDF with Playwright after changing Windows event loop policy: {retry_e}")
+                raise
+        else:
+            logger.error(f"NotImplementedError on non-Windows platform: {e}")
+            raise
     except Exception as e:
         logger.error(f"Error converting HTML to PDF with Playwright: {e}")
         raise

@@ -2,7 +2,7 @@ import os
 import httpx
 import logging
 
-from utils.utils import RefreshableBotoSession
+from utils.utils import RefreshableBotoSession, get_custom_headers_from_env
 
 class UniformLLM:
     VALID_PROVIDERS = [
@@ -20,7 +20,7 @@ class UniformLLM:
         "OpenRouter"
         ]
 
-    def __init__(self, provider_name, model_name, temperature = 0.0, max_tokens = 2048):
+    def __init__(self, provider_name, model_name, temperature = 0.0, max_tokens = 4096):
         self.provider_name = provider_name
         self.model_name = model_name
         self.llm = None
@@ -35,7 +35,7 @@ class UniformLLM:
         if self.provider_name.lower() == "openai":
             self.setup_openai()
         elif self.provider_name.lower() == "azure":
-            self.setup_azure_openai()
+            self.setup_azure()
         elif self.provider_name.lower() == "bedrock":
             self.setup_bedrock()
         elif self.provider_name.lower() == "google":
@@ -199,8 +199,15 @@ class UniformLLM:
         if google_credentials_file is None:
             raise ValueError("GOOGLE_APPLICATION_CREDENTIALS environment variable not set.")
 
-        GOOGLE_THINKING = os.getenv("GOOGLE_THINKING", "0")
         GOOGLE_THINKING_TOKENS = os.getenv("GOOGLE_THINKING_TOKENS", "2000")
+
+        model = self.model_name
+        enable_thinking = False
+
+        if model.endswith("-enablethinking"):
+            model = model.replace("-enablethinking", "")
+            enable_thinking = True
+            logging.info(f"Attempting to activate thinking mode on model ID: {model} on provider: {self.provider_name}")
 
         safety_settings={
             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
@@ -209,23 +216,18 @@ class UniformLLM:
             HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_ONLY_HIGH
         }
 
-        # Configure thinking mode based on environment variables
-        if GOOGLE_THINKING == "1":
-            thinking_budget = int(GOOGLE_THINKING_TOKENS)
-            include_thoughts = True
+        params = {
+            "model_name": model,
+            "temperature": self.temperature,
+            "max_output_tokens": self.max_tokens,
+            "safety_settings": safety_settings,
+            "include_thoughts": enable_thinking,
+        }
+        if enable_thinking:
+            params["thinking_budget"] = int(GOOGLE_THINKING_TOKENS)
         else:
-            thinking_budget = 0
-            include_thoughts = False
-
-        self.llm = ChatVertexAI(
-            model_name=self.model_name,
-            temperature=self.temperature,
-            max_output_tokens=self.max_tokens,
-            safety_settings=safety_settings,
-            thinking_budget=thinking_budget,
-            include_thoughts=include_thoughts
-        )
-        self.llm = self.llm.bind(safety_settings=safety_settings)
+            params["thinking_budget"] = 0
+        self.llm = ChatVertexAI(**params)
 
     def setup_openai(self):
         from langchain_openai import ChatOpenAI
@@ -234,9 +236,14 @@ class UniformLLM:
         base_url = os.getenv('OPENAI_BASE_URL')
         proxy = os.getenv('OPENAI_PROXY_URL')
         organization_id = os.getenv('OPENAI_ORG_ID')
+        custom_headers = get_custom_headers_from_env("OPENAI")
 
+        # If no API key is provided, assume auth is handled by custom headers.
+        # ChatOpenAI requires a non-empty api_key, so provide a dummy one.
         if api_key is None:
-            raise ValueError("OPENAI_API_KEY environment variable not set.")
+            if not custom_headers:
+                raise ValueError("OPENAI_API_KEY environment variable not set and no custom auth headers found.")
+            api_key = "not_used"
 
         kwargs = {
             "model": self.model_name,
@@ -259,10 +266,17 @@ class UniformLLM:
         if base_url is not None:
             kwargs["base_url"] = base_url
 
-        if proxy is not None:
-            _http_client = httpx.Client(proxy = proxy, verify = False)
-            _http_async_client = httpx.AsyncClient(proxy = proxy, verify = False)
+        if proxy is not None or custom_headers:
+            client_kwargs = {}
+            if proxy:
+                client_kwargs["proxy"] = proxy
+                verify_ssl_env = os.getenv('OPENAI_PROXY_VERIFY_SSL', '0')
+                client_kwargs["verify"] = (verify_ssl_env == '1')
+            if custom_headers:
+                client_kwargs["headers"] = custom_headers
 
+            _http_client = httpx.Client(**client_kwargs)
+            _http_async_client = httpx.AsyncClient(**client_kwargs)
             kwargs["http_client"] = _http_client
             kwargs["http_async_client"] = _http_async_client
 
@@ -271,40 +285,47 @@ class UniformLLM:
 
         self.llm = ChatOpenAI(**kwargs)
 
-    def setup_azure_openai(self):
+    def setup_azure(self):
         from langchain_openai import AzureChatOpenAI
 
         api_version = os.getenv("AZURE_API_VERSION")
         api_endpoint = os.getenv("AZURE_ENDPOINT")
         api_key = os.getenv("AZURE_API_KEY")
         api_proxy = os.getenv("AZURE_PROXY")
+        custom_headers = get_custom_headers_from_env("AZURE")
 
         if api_version is None or api_endpoint is None:
             raise ValueError("Azure environment variables not set.")
 
-        if api_key is None and api_proxy is None:
-            raise ValueError("Azure API key or proxy not set. One of them is required as authentication method.")
+        # If no API key is provided, assume auth is handled by custom headers.
+        # AzureChatOpenAI requires a non-empty api_key, so provide a dummy one.
+        if api_key is None:
+            if not custom_headers:
+                raise ValueError("AZURE_API_KEY environment variable not set and no custom auth headers found.")
+            api_key = "not_used"
 
         kwargs = {
             "azure_endpoint": api_endpoint,
             "openai_api_version": api_version,
             "azure_deployment": self.model_name,
             "temperature": self.temperature,
+            "openai_api_key": api_key,
         }
 
-        if api_key is not None:
-            kwargs["openai_api_key"] = api_key
-        else:
-            logging.warning("Azure API key not set. Using default authentication.")
+        if api_proxy is not None or custom_headers:
+            client_kwargs = {}
+            if api_proxy:
+                client_kwargs["proxy"] = api_proxy
+                verify_ssl_env = os.getenv('AZURE_PROXY_VERIFY_SSL', '0')
+                client_kwargs["verify"] = (verify_ssl_env == '1')
+            if custom_headers:
+                client_kwargs["headers"] = custom_headers
 
-        if api_proxy is not None:
-            _http_client = httpx.Client(proxy = api_proxy, verify = False)
-            _http_async_client = httpx.AsyncClient(proxy = api_proxy, verify = False)
+            _http_client = httpx.Client(**client_kwargs)
+            _http_async_client = httpx.AsyncClient(**client_kwargs)
 
             kwargs["http_client"] = _http_client
             kwargs["http_async_client"] = _http_async_client
-        else:
-            logging.warning("Azure proxy not set. Using direct connection.")
 
         self.llm = AzureChatOpenAI(**kwargs)
 
@@ -316,33 +337,40 @@ class UniformLLM:
         api_endpoint = os.getenv(f"{provider_upper}_ENDPOINT")
         api_key = os.getenv(f"{provider_upper}_API_KEY")
         api_proxy = os.getenv(f"{provider_upper}_PROXY")
+        custom_headers = get_custom_headers_from_env(self.provider_name)
 
         if api_version is None or api_endpoint is None:
             raise ValueError(f"Custom Azure provider '{self.provider_name}' environment variables not set.")
 
-        if api_key is None and api_proxy is None:
-            raise ValueError(f"Custom Azure provider '{self.provider_name}' key or proxy not set. One of them is required as authentication method.")
+        # If no API key is provided, assume auth is handled by custom headers.
+        # AzureChatOpenAI requires a non-empty api_key, so provide a dummy one.
+        if api_key is None:
+            if not custom_headers:
+                raise ValueError(f"{provider_upper}_API_KEY environment variable not set and no custom auth headers found.")
+            api_key = "not_used"
 
         kwargs = {
             "azure_endpoint": api_endpoint,
             "openai_api_version": api_version,
             "azure_deployment": self.model_name,
             "temperature": self.temperature,
+            "openai_api_key": api_key,
         }
 
-        if api_key is not None:
-            kwargs["openai_api_key"] = api_key
-        else:
-            logging.warning(f"Custom Azure provider '{self.provider_name}' API key not set. Using default authentication if available.")
+        if api_proxy is not None or custom_headers:
+            client_kwargs = {}
+            if api_proxy:
+                client_kwargs["proxy"] = api_proxy
+                verify_ssl_env = os.getenv(f'{provider_upper}_PROXY_VERIFY_SSL', '0')
+                client_kwargs["verify"] = (verify_ssl_env == '1')
+            if custom_headers:
+                client_kwargs["headers"] = custom_headers
 
-        if api_proxy is not None:
-            _http_client = httpx.Client(proxy = api_proxy, verify = False)
-            _http_async_client = httpx.AsyncClient(proxy = api_proxy, verify = False)
+            _http_client = httpx.Client(**client_kwargs)
+            _http_async_client = httpx.AsyncClient(**client_kwargs)
 
             kwargs["http_client"] = _http_client
             kwargs["http_async_client"] = _http_async_client
-        else:
-            logging.warning(f"Custom Azure provider '{self.provider_name}' proxy not set. Using direct connection.")
 
         self.llm = AzureChatOpenAI(**kwargs)
 
@@ -352,10 +380,33 @@ class UniformLLM:
         AWS_REGION = os.getenv("AWS_REGION")
         AWS_PROFILE_NAME = os.getenv("AWS_PROFILE_NAME")
         AWS_ROLE_ARN = os.getenv("AWS_ROLE_ARN")
-        AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
-        AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
-        AWS_CLAUDE_THINKING = os.getenv("AWS_CLAUDE_THINKING", "0")
+        AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+        AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
         AWS_CLAUDE_THINKING_TOKENS = os.getenv("AWS_CLAUDE_THINKING_TOKENS", "2000")
+
+        model = self.model_name
+        provider = None
+        enable_thinking = False
+
+        if model.endswith("-enablethinking"):
+            model = model.replace("-enablethinking", "")
+            enable_thinking = True
+            logging.info(f"Attempting to activate thinking mode on model ID: {model} on provider: {self.provider_name}")
+
+        if "arn:" in model:
+            # Check for "provider:arn:..." format
+            parts = model.split(":", 1)
+
+            if len(parts) == 2 and parts[1].startswith("arn:"):
+                provider = parts[0]
+                model = parts[1]
+
+            if not provider:
+                raise ValueError(
+                    f"Model ID '{self.model_name}' is an ARN, but no provider was specified.\n"
+                    "When using an ARN, the provider is mandatory.\n\n"
+                    "Please specify the provider in the model ID string: 'anthropic:arn:aws:bedrock:...'"
+                )
 
         refreshable_session_instance = RefreshableBotoSession(
             region_name = AWS_REGION,
@@ -371,15 +422,17 @@ class UniformLLM:
         # Prepare ChatBedrock initialization parameters
         bedrock_kwargs = {
             "client": client,
-            "model": self.model_name,
+            "model": model,
             "model_kwargs": {
                 "temperature": self.temperature,
                 "max_tokens": self.max_tokens
             },
         }
 
-        # Add Claude thinking mode if enabled
-        if AWS_CLAUDE_THINKING == "1":
+        if provider:
+            bedrock_kwargs["provider"] = provider
+
+        if enable_thinking:
             bedrock_kwargs["model_kwargs"] = {
                 "thinking": {"type": "enabled", "budget_tokens": int(AWS_CLAUDE_THINKING_TOKENS)},
                 "max_tokens": self.max_tokens,
@@ -405,14 +458,21 @@ class UniformLLM:
     def setup_custom(self):
         from langchain_openai import ChatOpenAI
 
-        api_key = os.getenv(f'{self.provider_name.upper()}_API_KEY')
-        base_url = os.getenv(f'{self.provider_name.upper()}_BASE_URL')
-        proxy = os.getenv(f'{self.provider_name.upper()}_PROXY')
+        provider_upper = self.provider_name.upper()
+        api_key = os.getenv(f'{provider_upper}_API_KEY')
+        base_url = os.getenv(f'{provider_upper}_BASE_URL')
+        proxy = os.getenv(f'{provider_upper}_PROXY')
+        custom_headers = get_custom_headers_from_env(self.provider_name)
 
+        # If no API key is provided, assume auth is handled by custom headers.
+        # ChatOpenAI requires a non-empty api_key, so provide a dummy one.
         if api_key is None:
-            raise ValueError(f"{self.provider_name.upper()}_API_KEY environment variable not set.")
+            if not custom_headers:
+                raise ValueError(f"{provider_upper}_API_KEY environment variable not set and no custom auth headers found.")
+            api_key = "not_used"
+
         if base_url is None:
-            raise ValueError(f"{self.provider_name.upper()}_BASE_URL environment variable not set.")
+            raise ValueError(f"{provider_upper}_BASE_URL environment variable not set.")
 
         kwargs = {
             "model": self.model_name,
@@ -422,8 +482,20 @@ class UniformLLM:
             "max_tokens": self.max_tokens,
         }
 
-        if proxy is not None:
-            kwargs["openai_proxy"] = proxy
+        if proxy is not None or custom_headers:
+            client_kwargs = {}
+            if proxy:
+                client_kwargs["proxy"] = proxy
+                verify_ssl_env = os.getenv(f'{provider_upper}_PROXY_VERIFY_SSL', '0')
+                client_kwargs["verify"] = (verify_ssl_env == '1')
+            if custom_headers:
+                client_kwargs["headers"] = custom_headers
+
+            _http_client = httpx.Client(**client_kwargs)
+            _http_async_client = httpx.AsyncClient(**client_kwargs)
+
+            kwargs["http_client"] = _http_client
+            kwargs["http_async_client"] = _http_async_client
 
         self.llm = ChatOpenAI(**kwargs)
 

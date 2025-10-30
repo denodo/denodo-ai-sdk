@@ -29,7 +29,7 @@ async def process_analysis(
     thinking_llm_temperature=0.0,
     thinking_llm_max_tokens=10240,
     llm_temperature=0.0,
-    llm_max_tokens=2048,
+    llm_max_tokens=4096,
     execution_model="thinking"
 ):
     """
@@ -57,6 +57,9 @@ async def process_analysis(
     # Log the start of analysis
     logger.info(f"Starting analysis for question: {question[:100]}{'...' if len(question) > 100 else ''}")
     logger.info(f"Parameters: default_rows={default_rows}")
+    logger.info(f"Parameters: execution_model={execution_model}")
+    logger.info(f"Parameters: execution_model_provider={planning_provider if execution_model == 'thinking' else executing_provider}")
+    logger.info(f"Parameters: execution_model_model={planning_model if execution_model == 'thinking' else executing_model}")
 
     # Storage for the first plan
     first_plan = {"content": None, "captured": False}
@@ -99,7 +102,6 @@ async def process_analysis(
         )
 
         # Initialize the analysis agent
-        logger.info("Initializing main analysis agent")
         analysis_agent = AnalysisAgent(
             llm=executing_llm,
             system_prompt=analysis_agent_system_prompt,
@@ -113,12 +115,16 @@ async def process_analysis(
         # Run the analysis
         logger.info("Starting analysis agent execution")
         analysis_start_time = time.time()
-        analysis_result = await analysis_agent.start({"text": question})
+        analysis_agent.set_initial_prompt(analysis_agent.initial_prompt.format(user_input=question)) #Set the initial prompt with the user's question
+        analysis_result = await analysis_agent.start({"text": "Follow the instructions given above to begin your analysis."}) #No need for input, we already set the initial prompt
         analysis_duration = time.time() - analysis_start_time
         answer = analysis_result.get("answer").get("answer")
         logger.info(f"Analysis result: {answer}")
+
         analysis_title = custom_tag_parser(answer, tag="report_title", default="Failed to parse analysis title. LLM did not output the correct format. Check logs for more details.")[0].strip()
         analysis_body = custom_tag_parser(answer, tag="report_body", default="Failed to parse analysis body. LLM did not output the correct format. Check logs for more details.")[0].strip()
+
+        analysis_result["cohorts"] = analysis_agent.get_cohorts() #Add generated cohorts to the analysis result
 
         logger.info(f"Analysis completed in {analysis_duration:.2f}s")
         logger.info(f"Analysis result contains {len(analysis_result.get('tool_calls', []))} tool calls")
