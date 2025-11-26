@@ -57,7 +57,7 @@ google-crc32c==1.7.1
 google-resumable-media==2.7.2
 googleapis-common-protos==1.70.0
 greenlet==3.1.1
-groq==0.11.0
+groq==0.36.0
 grpc-google-iam-v1==0.14.2
 grpcio==1.67.1
 gunicorn==23.0.0
@@ -96,7 +96,7 @@ langchain-postgres==0.0.15
 langchain-sambanova==0.1.2
 langchain-text-splitters==0.3.8
 langchain==0.3.26
-langfuse==2.60.4
+langfuse==3.9.3
 langsmith==0.4.4
 lxml==6.0.0
 markdown-it-py==3.0.0
@@ -131,7 +131,6 @@ packaging==24.2
 pandas==2.2.2
 pgvector==0.2.5
 pillow==10.4.0
-playwright==1.53.0
 posthog==3.7.0
 propcache==0.2.0
 proto-plus==1.26.1

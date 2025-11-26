@@ -6,25 +6,25 @@ import Badge from 'react-bootstrap/Badge';
 import Spinner from 'react-bootstrap/Spinner';
 import OverlayTrigger from 'react-bootstrap/OverlayTrigger';
 import Tooltip from 'react-bootstrap/Tooltip';
-import { usePDF, PDF_STATUS } from '../contexts/PDFContext';
+import { useReport, REPORT_STATUS } from '../contexts/ReportContext';
 
-const PDFManagementModal = () => {
-  const { pdfs, isModalOpen, setIsModalOpen, removePDF, clearAllPDFs } = usePDF();
+const ReportManagementModal = () => {
+  const { reports, isModalOpen, setIsModalOpen, removeReport, clearAllReports } = useReport();
 
   const getStatusBadge = (status) => {
     switch (status) {
-      case PDF_STATUS.PENDING:
+      case REPORT_STATUS.PENDING:
         return <Badge bg="secondary">Pending</Badge>;
-      case PDF_STATUS.PROCESSING:
+      case REPORT_STATUS.PROCESSING:
         return (
           <Badge bg="warning" text="dark" className="d-flex align-items-center">
             <Spinner size="sm" animation="border" className="me-1" />
             Processing
           </Badge>
         );
-      case PDF_STATUS.COMPLETED:
+      case REPORT_STATUS.COMPLETED:
         return <Badge bg="success">Completed</Badge>;
-      case PDF_STATUS.FAILED:
+      case REPORT_STATUS.FAILED:
         return <Badge bg="danger">Failed</Badge>;
       default:
         return <Badge bg="secondary">Unknown</Badge>;
@@ -32,18 +32,23 @@ const PDFManagementModal = () => {
   };
 
   const formatDate = (date) => {
-    return new Date(date).toLocaleString();
+    return new Date(date).toLocaleString(undefined, {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
   };
 
-  const handleDownload = (pdf) => {
-    if (pdf.downloadUrl) {
+  const handleDownload = (report) => {
+    if (report.downloadUrl) {
       const link = document.createElement('a');
-      link.href = pdf.downloadUrl;
-      // Use the filename from the server if available, otherwise create one from report title
-      const defaultFilename = pdf.reportTitle 
-        ? `${pdf.reportTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_report.pdf`
-        : `${pdf.id}_report.pdf`;
-      link.download = pdf.filename || defaultFilename;
+      link.href = report.downloadUrl;
+      const defaultFilename = report.reportTitle 
+        ? `${report.reportTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_report.html`
+        : `${report.id}_report.html`;
+      link.download = report.filename || defaultFilename;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -64,35 +69,33 @@ const PDFManagementModal = () => {
       onHide={handleClose} 
       size="xl" 
       centered
-      style={{ '--bs-modal-bg': '#112533' }}
-      contentClassName="text-white border border-white"
     >
-      <Modal.Header closeButton className="border-bottom border-white">
+      <Modal.Header closeButton data-bs-theme="light">
         <Modal.Title>DeepQuery Reports</Modal.Title>
       </Modal.Header>
       <Modal.Body>
-        {pdfs.length === 0 ? (
+        {reports.length === 0 ? (
           <div className="text-center py-4">
-            <p>No PDF reports generated yet. Use the DeepQuery button to generate a report.</p>
+            <p>No reports generated yet. Use the DeepQuery button to generate a report.</p>
           </div>
         ) : (
           <>
             <div className="d-flex justify-content-between align-items-center mb-3">
               <h6 className="mb-0">
-                Total: {pdfs.length} report{pdfs.length !== 1 ? 's' : ''}
+                Total: {reports.length} report{reports.length !== 1 ? 's' : ''}
               </h6>
-              {pdfs.length > 0 && (
+              {reports.length > 0 && (
                 <Button 
                   variant="outline-danger" 
                   size="sm"
-                  onClick={clearAllPDFs}
+                  onClick={clearAllReports}
                 >
                   Clear All
                 </Button>
               )}
             </div>
             
-            <Table striped bordered hover variant="dark" className="table-responsive">
+            <Table striped bordered hover variant="light" className="table-responsive">
               <thead>
                 <tr>
                   <th style={{ width: '40%' }}>Report Title</th>
@@ -103,50 +106,50 @@ const PDFManagementModal = () => {
                 </tr>
               </thead>
               <tbody>
-                {pdfs.map((pdf) => (
-                  <tr key={pdf.id}>
+                {reports.map((report) => (
+                  <tr key={report.id}>
                     <td>
                       <div style={{ maxWidth: '500px' }}>
                         <OverlayTrigger
                           placement="top"
-                          overlay={renderTooltip(pdf.reportTitle || pdf.question)}
+                          overlay={renderTooltip(report.reportTitle || report.question)}
                         >
                           <span className="text-truncate d-block">
-                            {pdf.reportTitle || pdf.question}
+                            {report.reportTitle || report.question}
                           </span>
                         </OverlayTrigger>
                       </div>
                     </td>
                     <td>
-                      {getStatusBadge(pdf.status)}
-                      {pdf.error && (
+                      {getStatusBadge(report.status)}
+                      {report.error && (
                         <OverlayTrigger
                           placement="top"
-                          overlay={renderTooltip(pdf.error)}
+                          overlay={renderTooltip(report.error)}
                         >
                           <i className="bi bi-exclamation-triangle-fill text-warning ms-2"></i>
                         </OverlayTrigger>
                       )}
                     </td>
                     <td>
-                      <small>{formatDate(pdf.createdAt)}</small>
+                      <small>{formatDate(report.createdAt)}</small>
                     </td>
                     <td>
                       <small>
-                        {pdf.completedAt ? formatDate(pdf.completedAt) : '-'}
+                        {report.completedAt ? formatDate(report.completedAt) : '-'}
                       </small>
                     </td>
                     <td>
                       <div className="d-flex gap-1">
-                        {pdf.status === PDF_STATUS.COMPLETED && (
+                        {report.status === REPORT_STATUS.COMPLETED && (
                           <OverlayTrigger
                             placement="top"
-                            overlay={renderTooltip("Download PDF")}
+                            overlay={renderTooltip("Download report")}
                           >
                             <Button
                               variant="success"
                               size="sm"
-                              onClick={() => handleDownload(pdf)}
+                              onClick={() => handleDownload(report)}
                             >
                               <i className="bi bi-download"></i>
                             </Button>
@@ -159,7 +162,7 @@ const PDFManagementModal = () => {
                           <Button
                             variant="outline-danger"
                             size="sm"
-                            onClick={() => removePDF(pdf.id)}
+                            onClick={() => removeReport(report.id)}
                           >
                             <i className="bi bi-trash"></i>
                           </Button>
@@ -173,15 +176,15 @@ const PDFManagementModal = () => {
             
             <div className="mt-3">
               <small className="text-muted">
-                <strong>Note:</strong> PDFs are generated asynchronously and will be available for download once completed.
-                Failed PDFs can be removed from the list.
+                <strong>Note:</strong> Reports are generated asynchronously and will be available for download once completed.
+                Failed reports can be removed from the list.
               </small>
             </div>
           </>
         )}
       </Modal.Body>
-      <Modal.Footer className="border-top border-white">
-        <Button variant="secondary" onClick={handleClose} style={{ backgroundColor: '#2D3E4B', borderColor: '#2D3E4B' }}>
+      <Modal.Footer>
+        <Button variant="light" onClick={handleClose}>
           Close
         </Button>
       </Modal.Footer>
@@ -189,4 +192,4 @@ const PDFManagementModal = () => {
   );
 };
 
-export default PDFManagementModal; 
+export default ReportManagementModal;

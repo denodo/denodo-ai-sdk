@@ -11,13 +11,29 @@ const useSDK = (setResults, onRequestComplete) => {
     return match ? match[2].replace(/\.$/, '').replace(/\n/g, '') : null;
   };
 
-  const processQuestion = async (question, type, resultIndex) => {
+  const processQuestion = async (question, type, resultIndex, options = {}) => {
     setLoading(true);
     
     // Generate unique request ID
     const requestId = `${type}_${Date.now()}_${++requestIdCounter.current}`;
     try {
-      const eventSource = new EventSource(`question?query=${encodeURIComponent(question)}&type=${type}`);
+
+      const params = new URLSearchParams();
+      params.append('query', question);
+      params.append('type', type);
+
+      if (options.databases) {
+        params.append('databases', options.databases);
+      }
+      if (options.tags) {
+        params.append('tags', options.tags);
+      }
+
+      if (options.allow_external_associations !== undefined) {
+        params.append('allow_external_associations', options.allow_external_associations);
+      }
+
+      const eventSource = new EventSource(`question?${params.toString()}`);
       
       // Store the connection for potential cancellation
       activeConnections.current.set(requestId, { eventSource, resultIndex });
@@ -79,6 +95,8 @@ const useSDK = (setResults, onRequestComplete) => {
                       tokens: jsonData.tokens,
                       ai_sdk_time: jsonData.ai_sdk_time,
                       uuid: jsonData.uuid,
+                      llm_provider: jsonData.llm_provider,
+                      llm_model: jsonData.llm_model,
                       ...(jsonData.graph && { graph: jsonData.graph }),
                       ...(jsonData.pdf_url && { pdf_url: jsonData.pdf_url }),
                       ...(jsonData.pdf_path && { pdf_path: jsonData.pdf_path }),

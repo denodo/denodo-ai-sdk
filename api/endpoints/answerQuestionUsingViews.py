@@ -52,7 +52,10 @@ class answerQuestionUsingViewsRequest(BaseModel):
     llm_provider: str = os.getenv('LLM_PROVIDER')
     llm_model: str = os.getenv('LLM_MODEL')
     llm_temperature: float = float(os.getenv('LLM_TEMPERATURE', '0.0'))
-    llm_max_tokens: int = int(os.getenv('LLM_MAX_TOKENS', '4096'))
+    llm_max_tokens: int = Field(
+        default = int(os.getenv('LLM_MAX_TOKENS', '4096')),
+        description="The maximum OUTPUT tokens for the general LLM. Not recommended to decrease this value."
+    )
     markdown_response: bool = True
     custom_instructions: str = ''
     vector_search_k: int = 5
@@ -75,6 +78,8 @@ class answerQuestionUsingViewsResponse(BaseModel):
     vector_store_search_time: float
     llm_time: float
     total_execution_time: float
+    llm_provider: str
+    llm_model: str
 
 @router.post(
         '/answerQuestionUsingViews',
@@ -159,5 +164,8 @@ async def answerQuestionUsingViews(endpoint_request: answerQuestionUsingViewsReq
         )
     else:
         response = sdk_answer_question.process_unknown_category(timings=timings)
+
+    response['llm_provider'] = endpoint_request.llm_provider
+    response['llm_model'] = endpoint_request.llm_model
 
     return JSONResponse(content=jsonable_encoder(response), media_type='application/json')

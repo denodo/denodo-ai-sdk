@@ -14,7 +14,7 @@ import time
 import logging
 import traceback
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from api.utils import state_manager
 from api.utils import sdk_ai_tools
 from typing import Optional, Dict, Any
@@ -35,16 +35,23 @@ class deepQueryRequest(BaseModel):
     thinking_llm_provider: str = os.getenv('THINKING_LLM_PROVIDER')
     thinking_llm_model: str = os.getenv('THINKING_LLM_MODEL')
     thinking_llm_temperature: float = float(os.getenv('THINKING_LLM_TEMPERATURE', '0.0'))
-    thinking_llm_max_tokens: int = int(os.getenv('THINKING_LLM_MAX_TOKENS', '10240'))
+    thinking_llm_max_tokens: int = Field(
+        default = int(os.getenv('THINKING_LLM_MAX_TOKENS', '10240')),
+        description="The maximum OUTPUT tokens for the thinking LLM. Not recommended to decrease this value."
+    )
     llm_provider: str = os.getenv('LLM_PROVIDER')
     llm_model: str = os.getenv('LLM_MODEL')
     llm_temperature: float = float(os.getenv('LLM_TEMPERATURE', '0.0'))
-    llm_max_tokens: int = int(os.getenv('LLM_MAX_TOKENS', '4096'))
+    llm_max_tokens: int = Field(
+        default = int(os.getenv('LLM_MAX_TOKENS', '4096')),
+        description="The maximum OUTPUT tokens for the general LLM. Not recommended to decrease this value."
+    )
     embeddings_provider: str = os.getenv('EMBEDDINGS_PROVIDER')
     embeddings_model: str = os.getenv('EMBEDDINGS_MODEL')
     vector_store_provider: str = os.getenv('VECTOR_STORE')
     vdp_database_names: str = ''
     vdp_tag_names: str = ''
+    allow_external_associations: bool = True
     use_views: str = ''
     expand_set_views: bool = True
     vector_search_k: int = 5
@@ -66,8 +73,8 @@ async def deep_query_post(
     endpoint_request: deepQueryRequest,
     auth: str = Depends(authenticate)
 ):
-    """Process a a complex analysis question using deepQuery. This endpoint returns the analysis answer along with metadata that can be used for PDF generation
-    in a separate endpoint call to generateDeepQueryPDF.
+    """Process a a complex analysis question using deepQuery. This endpoint returns the analysis answer along with metadata that can be used for report generation
+    in a separate endpoint call to generateDeepQueryReport.
     """
 
     start_time = time.time()
@@ -123,7 +130,8 @@ async def deep_query_post(
         k=endpoint_request.vector_search_k,
         use_views=endpoint_request.use_views,
         expand_set_views=endpoint_request.expand_set_views,
-        vector_search_sample_data_k=endpoint_request.vector_search_sample_data_k
+        vector_search_sample_data_k=endpoint_request.vector_search_sample_data_k,
+        allow_external_associations=endpoint_request.allow_external_associations
     )
 
     # Format schema text using the same function as answerQuestion.py
@@ -159,7 +167,10 @@ async def deep_query_post(
         thinking_llm_max_tokens=endpoint_request.thinking_llm_max_tokens,
         llm_temperature=endpoint_request.llm_temperature,
         llm_max_tokens=endpoint_request.llm_max_tokens,
-        execution_model=endpoint_request.execution_model
+        execution_model=endpoint_request.execution_model,
+        vdp_database_names=endpoint_request.vdp_database_names,
+        vdp_tag_names=endpoint_request.vdp_tag_names,
+        allow_external_associations=endpoint_request.allow_external_associations
     )
 
     total_time = time.time() - start_time

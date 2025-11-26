@@ -1,0 +1,16 @@
+/* Text selection */
+.question-textarea::selection {
+  background-color: #2d3f4b;
+  color: white;
+}
+
+.question-textarea::-moz-selection {
+  background-color: #2d3f4b;
+  color: white;
+}
+
+/* Scrollbar */
+.question-textarea {
+  scrollbar-width: auto;
+  scrollbar-color: #adb5bd transparent;
+}

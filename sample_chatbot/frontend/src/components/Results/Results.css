@@ -66,17 +66,6 @@
   width: 70% !important;
   max-width: 70% !important;
 }
-.modal-content {
-  border: 1px solid white !important;
-}
-.modal-header .btn-close {
-  color: white;
-  filter: invert(1) grayscale(100%) brightness(200%);
-}
-.custom-header-modal .btn-close{
-  color: white;
-  filter: invert(1) grayscale(100%) brightness(200%);
-}
 .csv-link {
   display: block;
 }
@@ -341,20 +330,6 @@ h3 {
   transform: translateX(0);
 }
 
-/* VectorDB Management Modal Tab Styling */
-#vdb-management-tabs .nav-link {
-  color: white !important;
-}
-
-#vdb-management-tabs .nav-link:hover {
-  color: white !important;
-}
-
-#vdb-management-tabs .nav-link.active {
-  color: #000000 !important;
-  background-color: white !important;
-}
-
 /* Form check input styling */
 .form-check-input:checked {
   background-color: #2D3E4B !important;
@@ -398,23 +373,27 @@ h3 {
   animation: slideInLeft 0.4s ease;
 }
 
-/* Custom Toast Styles */
-.custom-pdf-toast {
-  background-color: #e7e9ea !important;
-  border: none !important;
-  border-radius: .75rem !important;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1), 0 4px 12px rgba(0, 0, 0, 0.1);
+.report-palette-popup {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 8px;
+  background-color: #e7e9ea;
+  color: #112533;
+  padding: 8px 10px;
+  border-radius: 0.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 20;
+  min-width: 190px;
 }
 
-.custom-pdf-toast .toast-header {
-  background-color: #e7e9ea !important;
-  color: #006699 !important;
-  border-bottom: none !important;
-}
-.custom-pdf-toast .toast-body {
-  color: black !important;
+.report-palette-label {
+  display: block;
+  font-size: 0.8rem;
+  margin-bottom: 4px;
+  font-weight: 600;
 }
 
-.custom-pdf-toast {
-  margin-bottom: 110px !important;
+.report-palette-select {
+  font-size: 0.8rem;
 }

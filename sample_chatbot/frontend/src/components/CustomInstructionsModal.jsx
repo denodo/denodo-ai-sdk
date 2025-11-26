@@ -48,12 +48,12 @@ const CustomInstructionsModal = ({ show, handleClose }) => {
   };
 
   return (
-    <Modal show={show} onHide={handleClose} style={{ '--bs-modal-bg': '#112533' }} contentClassName="text-white border border-white">
-      <Modal.Header closeButton className="custom-header-modal">
+    <Modal show={show} onHide={handleClose} centered>
+      <Modal.Header closeButton data-bs-theme="light">
         <Modal.Title>User Profile</Modal.Title>
       </Modal.Header>
       <Modal.Body>
-        <Form onSubmit={handleSubmit}>
+        <Form id="profile-form" onSubmit={handleSubmit}>
           <Form.Group controlId="formUsername" className="mb-3">
             <Form.Label>Username</Form.Label>
             <Form.Control
@@ -76,7 +76,7 @@ const CustomInstructionsModal = ({ show, handleClose }) => {
           </Form.Group>
           
           <Form.Group controlId="formCustomInstructions" className="mb-3">
-            <Form.Label>Custom Instructions</Form.Label>
+          <Form.Label>Custom Instructions</Form.Label>
             <Form.Control
               as="textarea"
               rows={5}
@@ -85,8 +85,19 @@ const CustomInstructionsModal = ({ show, handleClose }) => {
               onChange={(e) => setCustomInstructions(e.target.value)}
             />
           </Form.Group>
-          
-          <Button variant="primary" type="submit" disabled={isLoading} style={{ backgroundColor: '#2D3E4B', borderColor: '#2D3E4B' }}>
+         </Form>
+      </Modal.Body>
+
+      <Modal.Footer>
+        <Button variant="light" onClick={handleClose} disabled={isLoading}>
+          Cancel
+        </Button>
+        <Button 
+          variant="dark" 
+          type="submit" 
+          form="profile-form"
+          disabled={isLoading}
+        >
             {isLoading ? (
               <>
                 <Spinner
@@ -101,11 +112,10 @@ const CustomInstructionsModal = ({ show, handleClose }) => {
             ) : (
               'Save Profile'
             )}
-          </Button>
-        </Form>
-      </Modal.Body>
+        </Button>
+      </Modal.Footer>
     </Modal>
   );
 };
 
-export default CustomInstructionsModal; 
+export default CustomInstructionsModal;

@@ -1,3 +1,24 @@
+version 0.12 - 20251126
+------------------------
+
+- Added OpenAI reasoning effort none for GPT-5.1 compatibility
+- Fixed error in chatbot login when associations are set to false on getMetadata
+- Fixed 'proxies' error when starting with Groq as LLM provider
+- Fixed chatbot UI incorrectly showing success when incremental sync has no updates (204 No Content)
+
+version 0.12-beta - 20251120
+-------------------------
+
+- Included LLM provider/model in chatbot additional information
+- Implemented fallback to original VQL query if query reviewer's fix fails
+- Upgraded Langfuse SDK to v3
+- Clarified LLM_MAX_TOKENS variable
+- Changed DeepQuery report generation from PDF to HTML
+- Fixed bug where AI SDK with multiple workers would crash
+- Added parameter to disable DeepQuery in the chatbot
+- Added support for database and tag-based data filtering in the chatbot
+- Fixed bug where AI SDK Root Path appeared empty when unconfigured
+
 version 0.11 - 20251030
 ------------------------
 

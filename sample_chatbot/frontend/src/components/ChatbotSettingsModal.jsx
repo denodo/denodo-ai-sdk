@@ -67,8 +67,8 @@ const ChatbotSettingsModal = ({ show, handleClose, handleClearResults }) => {
   };
 
   return (
-    <Modal show={show} onHide={handleClose} size="lg" style={{ '--bs-modal-bg': '#112533' }} contentClassName="text-white border border-white">
-      <Modal.Header closeButton className="custom-header-modal">
+    <Modal show={show} onHide={handleClose} size="lg" centered>
+      <Modal.Header closeButton data-bs-theme="light">
         <Modal.Title>Chatbot Settings</Modal.Title>
       </Modal.Header>
       <Modal.Body style={{ maxHeight: '70vh', overflowY: 'auto' }}>
@@ -78,7 +78,7 @@ const ChatbotSettingsModal = ({ show, handleClose, handleClearResults }) => {
             history. API keys and provider configuration must be set in chatbot_config.env before running the chatbot.
           </small>
         </Alert>
-        <Form onSubmit={handleSubmit}>
+        <Form id="chatbot-settings-form" onSubmit={handleSubmit}>
           <div className="row g-2">
             <div className="col-md-6">
               <Form.Group controlId="chatbotLLM-provider" className="mb-2">
@@ -134,24 +134,31 @@ const ChatbotSettingsModal = ({ show, handleClose, handleClearResults }) => {
               </Form.Group>
             </div>
           </div>
-          <div className="d-flex justify-content-end pt-2">
-            <Button variant="primary" size="sm" type="submit" disabled={isLoading} style={{ backgroundColor: '#2D3E4B', borderColor: '#2D3E4B' }}>
+        </Form>
+      </Modal.Body>
+
+      <Modal.Footer>
+        <Button variant="light" onClick={handleClose} disabled={isLoading}>
+          Cancel
+        </Button>
+        <Button
+          variant="dark"
+          type="submit"
+          form="chatbot-settings-form"
+          disabled={isLoading}
+        >
               {isLoading ? (
                 <>
                   <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" />
                   <span className="ms-2">Updating...</span>
                 </>
               ) : (
-                'Save Settings'
+                'Save'
               )}
-            </Button>
-          </div>
-        </Form>
-      </Modal.Body>
+        </Button>
+      </Modal.Footer>
     </Modal>
   );
 };
 
 export default ChatbotSettingsModal;
-
-

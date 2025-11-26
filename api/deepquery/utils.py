@@ -1,85 +1,8 @@
 import re
 import json
-import os
-import inspect
-from contextlib import contextmanager
-from langfuse.callback import CallbackHandler
 
 from api.deepquery.prompts import ANALYSIS_TRACE_TEMPLATE
 from api.endpoints.answerQuestion import process_question, answerQuestionRequest
-from utils.version import AI_SDK_VERSION
-
-def create_langfuse_handler(
-    session_id=None,
-    trace_name=None,
-    langfuse_secret_key=None,
-    langfuse_public_key=None,
-    langfuse_host=None,
-    langfuse_user=None
-):
-    """
-    Create a langfuse callback handler with the same configuration as agents use.
-
-    Args:
-        session_id: Session ID for tracking
-        trace_name: Name for the trace (defaults to calling function name)
-        langfuse_secret_key: Secret key (defaults to env var)
-        langfuse_public_key: Public key (defaults to env var)
-        langfuse_host: Host URL (defaults to env var or cloud default)
-
-    Returns:
-        CallbackHandler instance or None if credentials not available
-    """
-    langfuse_secret = langfuse_secret_key or os.getenv("LANGFUSE_SECRET_KEY")
-    langfuse_public = langfuse_public_key or os.getenv("LANGFUSE_PUBLIC_KEY")
-    langfuse_host_url = langfuse_host or os.getenv("LANGFUSE_HOST", "https://us.cloud.langfuse.com")
-    langfuse_user_id = langfuse_user or os.getenv("LANGFUSE_USER", "Unknown")
-
-    if not (langfuse_secret and langfuse_public):
-        return None
-
-    # Use calling function name as trace_name if not provided
-    if trace_name is None:
-        frame = inspect.currentframe().f_back
-        trace_name = frame.f_code.co_name if frame else "unknown"
-
-    return CallbackHandler(
-        secret_key=langfuse_secret,
-        public_key=langfuse_public,
-        host=langfuse_host_url,
-        session_id=session_id,
-        trace_name=trace_name,
-        user_id=langfuse_user_id,
-        release=AI_SDK_VERSION
-    )
-
-@contextmanager
-def trace_context(langfuse_handler, trace_name=None):
-    """Context manager to temporarily change trace name and restore it after execution.
-
-    If trace_name is None, it will use the calling function's name.
-    """
-    if langfuse_handler is None:
-        config = {}
-        yield config
-        return
-
-    # Get the calling function's name if trace_name is not provided
-    if trace_name is None:
-        # Get the caller of the caller (skip the context manager's __enter__)
-        frame = inspect.currentframe().f_back
-        if frame.f_code.co_name == '__enter__':
-            frame = frame.f_back
-        trace_name = frame.f_code.co_name
-
-    original_trace_name = getattr(langfuse_handler, 'trace_name', None)
-    langfuse_handler.trace_name = trace_name
-    config = {"callbacks": [langfuse_handler]}
-
-    try:
-        yield config
-    finally:
-        langfuse_handler.trace_name = original_trace_name
 
 def filter_tool_calls_report_agent(tool_calls, default_rows=10):
     """
@@ -475,7 +398,8 @@ async def execute_base_database_query(
     verbose: bool = False,
     plot: bool = False,
     plot_details: str = "",
-    disclaimer: bool = False
+    disclaimer: bool = False,
+    **kwargs
 ):
     """
     Base function for executing database queries through the database agent.
@@ -523,6 +447,10 @@ async def execute_base_database_query(
     # Construct the question for the database agent
     question = f"{action}: {action_description}"
 
+    vdp_database_names = kwargs.get('vdp_database_names', '')
+    vdp_tag_names = kwargs.get('vdp_tag_names', '')
+    allow_external_associations = kwargs.get('allow_external_associations', True)
+
     # Create request object for answerQuestion
     request = answerQuestionRequest(
         question=question,
@@ -531,6 +459,9 @@ async def execute_base_database_query(
         plot_details=plot_details,
         mode=mode,
         disclaimer=disclaimer,
+        vdp_database_names=vdp_database_names,
+        vdp_tag_names=vdp_tag_names,
+        allow_external_associations=allow_external_associations
     )
 
     # Call the endpoint function directly

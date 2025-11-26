@@ -2,7 +2,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from api.deepquery.agent.xml_utils import remove_think_tags
 from api.deepquery.analysis_agent.prompts import SCHEMA_DIGEST_PROMPT
-from api.deepquery.utils import trace_context, create_langfuse_handler, execute_base_database_query
+from api.deepquery.utils import execute_base_database_query
+from utils import langfuse
 
 class AnalysisToolsMixin:
     """
@@ -140,6 +141,9 @@ class AnalysisToolsMixin:
             mode=mode,
             verbose=False,
             disclaimer=False,
+            vdp_database_names=self.vdp_database_names,
+            vdp_tag_names=self.vdp_tag_names,
+            allow_external_associations=self.allow_external_associations
         )
 
         # Return early if there was an error (cohort not found, etc.)
@@ -178,10 +182,7 @@ async def schema_digest(schema, analysis_question, llm):
 
     chain = prompt | llm | StrOutputParser()
 
-    # Create langfuse handler for this operation
-    langfuse_handler = create_langfuse_handler(trace_name="schema_digest")
-
-    with trace_context(langfuse_handler) as config:
+    with langfuse.trace_context(run_name="schema_digest") as config:
         result = await chain.ainvoke(
             {"schema": schema, "analysis_question": analysis_question},
             config=config

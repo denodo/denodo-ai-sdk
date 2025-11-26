@@ -2,7 +2,8 @@ import asyncio
 
 from api.utils import sdk_ai_tools
 from utils.data_catalog import execute_vql
-from utils.utils import custom_tag_parser, add_langfuse_callback
+from utils.utils import custom_tag_parser
+from utils import langfuse
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.callbacks import get_usage_metadata_callback
@@ -67,6 +68,10 @@ async def process_sql_category(request, vector_search_tables, sql_gen_llm, chat_
             llm=sql_gen_llm
         )
 
+        if attempt == 0:
+            original_execution_result = execution_result
+            original_vql_status_code = vql_status_code
+
         if vql_query == 'OK':
             vql_query = original_vql_query
             break
@@ -83,6 +88,11 @@ async def process_sql_category(request, vector_search_tables, sql_gen_llm, chat_
                 limit=request.vql_execute_rows_limit,
                 timings=timings
             )
+            if vql_status_code == 500 or (vql_status_code == 499 and original_vql_status_code == 499):
+                vql_query = original_vql_query
+                execution_result = original_execution_result
+                vql_status_code = original_vql_status_code
+
         else:
             vql_status_code = 500
             execution_result = "No VQL query was generated."
@@ -208,11 +218,14 @@ async def attempt_query_execution(
             chain = prompt | llm.llm | StrOutputParser()
 
             with get_usage_metadata_callback() as cb:
-                response = await chain.ainvoke({}, config = {
-                "callbacks": add_langfuse_callback(f"{llm.provider_name}.{llm.model_name}", session_id),
-                "run_name": "fixer_dialogue",
-            }
-)
+                response = await chain.ainvoke(
+                    {},
+                    config=langfuse.build_config(
+                        model_id=f"{llm.provider_name}.{llm.model_name}",
+                        session_id=session_id,
+                        run_name="fixer_dialogue"
+                    )
+                )
 
             vql_query = custom_tag_parser(response, 'vql', default='')[0].strip()
             fixer_history.append(('ai', response))

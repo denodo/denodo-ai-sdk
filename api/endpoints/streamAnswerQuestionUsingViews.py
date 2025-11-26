@@ -51,7 +51,10 @@ class streamAnswerQuestionUsingViewsRequest(BaseModel):
     llm_provider: str = os.getenv('LLM_PROVIDER')
     llm_model: str = os.getenv('LLM_MODEL')
     llm_temperature: float = float(os.getenv('LLM_TEMPERATURE', '0.0'))
-    llm_max_tokens: int = int(os.getenv('LLM_MAX_TOKENS', '4096'))
+    llm_max_tokens: int = Field(
+        default = int(os.getenv('LLM_MAX_TOKENS', '4096')),
+        description="The maximum OUTPUT tokens for the general LLM. Not recommended to decrease this value."
+    )
     custom_instructions: str = ''
     markdown_response: bool = True
     vector_search_k: int = 5

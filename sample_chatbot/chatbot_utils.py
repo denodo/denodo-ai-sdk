@@ -164,7 +164,7 @@ def parse_xml_tags(query):
 
     return parse_recursive(query)
 
-def process_tool_query(query, tools=None, tool_execution_history=None):
+def process_tool_query(query, tools=None, tool_execution_history=None, vdp_database_names=None, vdp_tag_names=None, allow_external_associations=True):
     if not tools or not isinstance(tools, dict):
         return False
 
@@ -198,7 +198,14 @@ def process_tool_query(query, tools=None, tool_execution_history=None):
 
                             # Call metadata_query with the analysis_request as search_query
                             execution_start = datetime.datetime.now()
-                            result = tool_function(search_query=analysis_request, n_results=10, **tool_params)
+                            result = tool_function(
+                                search_query=analysis_request,
+                                n_results=10,
+                                vdp_database_names=vdp_database_names,
+                                vdp_tag_names=vdp_tag_names,
+                                allow_external_associations=allow_external_associations,
+                                **tool_params
+                            )
                             execution_end = datetime.datetime.now()
 
                             # Store execution details in history
@@ -229,7 +236,13 @@ def process_tool_query(query, tools=None, tool_execution_history=None):
                     continue
 
                 execution_start = datetime.datetime.now()
-                result = tool_function(**query_params, **tool_params)
+                result = tool_function(
+                    **query_params,
+                    **tool_params,
+                    vdp_database_names=vdp_database_names,
+                    vdp_tag_names=vdp_tag_names,
+                    allow_external_associations=allow_external_associations,
+                )
                 execution_end = datetime.datetime.now()
 
                 # Store execution details in history
@@ -422,25 +435,42 @@ You used the {tool_name} tool, but it failed with the following error:
 """
     else:
         if tool_name == "database_query":
-            execution_result = tool_params.get('execution_result', {})
-            if isinstance(execution_result, dict) and len(execution_result.items()) > llm_response_rows_limit:
-                llm_execution_result = dict(list(execution_result.items())[:llm_response_rows_limit])
-                llm_execution_result = str(llm_execution_result) + f"... Showing only the first {llm_response_rows_limit} rows of the execution result."
-            else:
-                llm_execution_result = execution_result
+            sql_query = tool_params.get('sql_query', '')
+            query_explanation = tool_params.get('query_explanation', '')
 
-            graph_data = tool_params.get('raw_graph', '')
-            if len(graph_data) > 300:
-                graph_text = "Graph generated succesfully and shown to the user through the chatbot UI, you will not include it in the response."
-            else:
-                graph_text = "Graph generation failed or not requested."
+            if not sql_query and query_explanation:
+                return_string = f"""## TOOL EXECUTION DETAILS FOR ASSISTANT
 
-            return_string = f"""## TOOL EXECUTION DETAILS FOR ASSISTANT
+    You attempted to use the {tool_name} tool, but it could not generate a valid VQL query.
+    The tool provided the following explanation as to why:
+
+    <output>
+    <query_explanation>{query_explanation}</query_explanation>
+    </output>
+
+    This explanation is the final answer. You will now present this information directly to the user as your response.
+    Do not try to answer the original question in any other way. Just clearly state the explanation provided, formatting it nicely in markdown if needed."""
+
+            else:
+                execution_result = tool_params.get('execution_result', {})
+                if isinstance(execution_result, dict) and len(execution_result.items()) > llm_response_rows_limit:
+                    llm_execution_result = dict(list(execution_result.items())[:llm_response_rows_limit])
+                    llm_execution_result = str(llm_execution_result) + f"... Showing only the first {llm_response_rows_limit} rows of the execution result."
+                else:
+                    llm_execution_result = execution_result
+
+                graph_data = tool_params.get('raw_graph', '')
+                if len(graph_data) > 300:
+                    graph_text = "Graph generated succesfully and shown to the user through the chatbot UI, you will not include it in the response."
+                else:
+                    graph_text = "Graph generation failed or not requested."
+
+                return_string = f"""## TOOL EXECUTION DETAILS FOR ASSISTANT
 
     You used the {tool_name} tool.
 
     <output>
-    <sql_query>{tool_params.get('sql_query')}</sql_query>
+    <sql_query>{sql_query}</sql_query>
     <execution_result>{llm_execution_result}</execution_result>
     <graph>{graph_text}</graph>
     </output>
@@ -696,3 +726,26 @@ def update_feedback_in_report(report_lock, report_max_size_mb, uuid, feedback_va
 
 
         return updated # Return True if updated, False otherwise
+
+def get_synced_resources(api_host, username, password, verify_ssl=False):
+    """
+    Fetches the synced VDB/Tag info for a user from the AI SDK.
+    """
+    synced_resources = {}
+    try:
+        auth_tuple = (username, password)
+        info_response = requests.get(
+            f"{api_host}/getVectorDBInfo",
+            auth=auth_tuple,
+            verify=verify_ssl,
+            timeout=30
+        )
+
+        if info_response.status_code == 200:
+            synced_resources = info_response.json().get('syncedResources', {})
+        else:
+            logging.warning(f"Could not retrieve Vector DB info for user {username}: {info_response.text}")
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to connect to /getVectorDBInfo: {str(e)}")
+    
+    return synced_resources

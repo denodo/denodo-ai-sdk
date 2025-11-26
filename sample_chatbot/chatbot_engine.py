@@ -3,20 +3,21 @@ import inspect
 import traceback
 import logging
 
+from utils import langfuse
+from utils.utils import custom_tag_parser
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from utils.utils import add_langfuse_callback, generate_langfuse_session_id, custom_tag_parser
 from sample_chatbot.chatbot_utils import process_tool_query, add_to_chat_history, readable_tool_result, parse_xml_tags, trim_conversation, setup_user_details
 
 class ChatbotEngine:
-    def __init__(self, llm, llm_response_rows_limit, system_prompt, tool_selection_prompt, related_questions_prompt, tools, api_host, username, password, vector_store_provider, denodo_tables, message_history = 10, user_details = ""):
+    def __init__(self, llm, llm_response_rows_limit, system_prompt, tool_selection_prompt, related_questions_prompt, tools, api_host, username, password, vector_store_provider, denodo_tables, message_history = 10, user_details = "", enable_deepquery=True):
         self.llm = llm.llm
         self.llm_response_rows_limit = llm_response_rows_limit
         self.llm_model = f"{llm.provider_name}.{llm.model_name}"
         self.vector_store_provider = vector_store_provider
         self.chat_history = []
         self.tools = tools
-        self.session_id = generate_langfuse_session_id()
+        self.session_id = langfuse.generate_langfuse_session_id()
         self.system_prompt = system_prompt
         self.tool_selection_prompt = tool_selection_prompt
         self.related_questions_prompt = related_questions_prompt
@@ -27,7 +28,31 @@ class ChatbotEngine:
         self.wait_phrases = ["Give me a second", "Please wait", "Hold on", "Just a moment", "I'm working on it", "I'm looking into it", "I'm checking it out", "I'm on it"]
         self.denodo_tables = denodo_tables
         self.user_details = setup_user_details(user_details)
+        self.enable_deepquery = enable_deepquery
         self.tool_execution_history = []
+
+        if self.enable_deepquery:
+            self.tool_count_string = "three"
+            self.tool_count_num = "3"
+            self.deepquery_system_prompt_chunk = (
+                "- DeepQuery Tool. The DeepQuery tool is a powerful analyst agent, that is capable of in-depth reasoning\n"
+                "and generating and executing multiple SQL queries to generate a complete report regarding an analysis question.\n"
+                "You can only execute the DeepQuery tool if explicitly requested by the user."
+            )
+            self.deepquery_related_question_chunk = (
+                "Finally, also include a fourth related question, more analytical, in one sentence, that would require the DeepQuery tool to answer.\n"
+                "The analytical fourth question must be returned in between <related_question_analysis></related_question_analysis> tags."
+            )
+            self.deepquery_related_question_example = "<related_question_analysis>Are there statistically significant differences in approval rates across demographics?</related_question_analysis>"
+            self.related_question_count_string = "3 related questions + 1 related analysis question"
+        else:
+            self.tool_count_string = "two"
+            self.tool_count_num = "2"
+            self.deepquery_system_prompt_chunk = ""
+            self.deepquery_related_question_chunk = ""
+            self.deepquery_related_question_example = ""
+            self.related_question_count_string = "3 related questions"
+
         self.tools_prompt = ChatPromptTemplate.from_messages([
             ("system", self.system_prompt),
             MessagesPlaceholder("chat_history", n_messages=self.message_history),
@@ -65,7 +90,7 @@ class ChatbotEngine:
             | StrOutputParser()
         )
 
-    def process_query(self, query, tool = None):
+    def process_query(self, query, tool = None, vdp_database_names=None, vdp_tag_names=None, allow_external_associations=True):
         if tool == "data":
             tool = "database_query"
         elif tool == "metadata":
@@ -83,11 +108,17 @@ class ChatbotEngine:
                  "chat_history": self.chat_history,
                  "force_tool": force_tool,
                  "denodo_tables": self.denodo_tables,
-                 "user_details": self.user_details},
-                config={
-                    "callbacks": add_langfuse_callback(self.llm_model, self.session_id),
-                    "run_name": inspect.currentframe().f_code.co_name,
-                }
+                 "user_details": self.user_details,
+                 "tool_count_string": self.tool_count_string,
+                 "tool_count_num": self.tool_count_num,
+                 "deepquery_system_prompt_chunk": self.deepquery_system_prompt_chunk
+                 },
+
+                config=langfuse.build_config(
+                    model_id=self.llm_model,
+                    session_id=self.session_id,
+                    run_name=inspect.currentframe().f_code.co_name
+                )
             )
 
             if force_tool:
@@ -101,7 +132,15 @@ class ChatbotEngine:
                     yield from self._yield_tool_status_message(parsed_query, tool_name)
                     break  # Only process the first matching tool
 
-            tool_result = process_tool_query(first_input, self.tools, self.tool_execution_history)
+            tool_result = process_tool_query(
+                first_input,
+                self.tools,
+                self.tool_execution_history,
+                vdp_database_names=vdp_database_names,
+                vdp_tag_names=vdp_tag_names,
+                allow_external_associations=allow_external_associations
+            )
+
             if tool_result:
                 tool_name, tool_output, original_xml_call = tool_result
                 readable_tool_output = readable_tool_result(tool_name, tool_output, self.llm_response_rows_limit)
@@ -110,31 +149,33 @@ class ChatbotEngine:
                 if tool_name == "deep_query_schema_check":
                     use_related_questions = False
 
+                invoke_params = {
+                    "input": query,
+                    "chat_history": self.chat_history,
+                    "tool_query": readable_tool_output,
+                    "denodo_tables": self.denodo_tables,
+                    "user_details": self.user_details,
+                    "tool_count_string": self.tool_count_string,
+                    "tool_count_num": self.tool_count_num,
+                    "deepquery_system_prompt_chunk": self.deepquery_system_prompt_chunk
+                }
+
+                invoke_config = langfuse.build_config(
+                        model_id=self.llm_model,
+                        session_id=self.session_id,
+                        run_name=inspect.currentframe().f_code.co_name
+                )
+
                 # Choose the appropriate chain based on whether to include related questions
                 if use_related_questions:
-                    ai_stream = self.answer_with_tool_chain.stream({
-                        "input": query,
-                        "chat_history": self.chat_history,
-                        "tool_query": readable_tool_output,
-                        "denodo_tables": self.denodo_tables,
-                        "user_details": self.user_details
-                    },
-                    config = {
-                        "callbacks": add_langfuse_callback(self.llm_model, self.session_id),
-                        "run_name": inspect.currentframe().f_code.co_name,
+                    invoke_params.update({
+                        "deepquery_related_question_chunk": self.deepquery_related_question_chunk,
+                        "deepquery_related_question_example": self.deepquery_related_question_example,
+                        "related_question_count_string": self.related_question_count_string
                     })
+                    ai_stream = self.answer_with_tool_chain.stream(invoke_params, config=invoke_config)
                 else:
-                    ai_stream = self.answer_with_tool_chain_no_related.stream({
-                        "input": query,
-                        "chat_history": self.chat_history,
-                        "tool_query": readable_tool_output,
-                        "denodo_tables": self.denodo_tables,
-                        "user_details": self.user_details
-                    },
-                    config = {
-                        "callbacks": add_langfuse_callback(self.llm_model, self.session_id),
-                        "run_name": inspect.currentframe().f_code.co_name,
-                    })
+                    ai_stream = self.answer_with_tool_chain_no_related.stream(invoke_params, config=invoke_config)
             else:
                 ai_stream = first_input
                 tool_name, tool_output, original_xml_call = "direct_response", "", ""
@@ -168,9 +209,11 @@ class ChatbotEngine:
                     related_questions = custom_tag_parser(buffer, 'related_question')
                     # Sometimes the LLM escapes the underscore character
                     related_questions = [question.replace('\\_', '_') for question in related_questions]
+                else:
+                    related_questions = []
 
                 # Parse DeepQuery questions from the final buffer if it contains any
-                if '<related_question_analysis>' in buffer:
+                if self.enable_deepquery and '<related_question_analysis>' in buffer:
                     related_questions_deepquery = custom_tag_parser(buffer, 'related_question_analysis')
                     # Sometimes the LLM escapes the underscore character
                     related_questions_deepquery = [question.replace('\\_', '_') for question in related_questions_deepquery]
@@ -196,6 +239,8 @@ class ChatbotEngine:
                 return_data["query_explanation"] = tool_output.get("query_explanation", "")
                 return_data["tokens"] = tool_output.get("tokens", {}).get("total_tokens", 0)
                 return_data["ai_sdk_time"] = tool_output.get("total_execution_time", 0)
+                return_data["llm_provider"] = tool_output.get("llm_provider", "")
+                return_data["llm_model"] = tool_output.get("llm_model", "")
             elif tool_name == "deep_query" and isinstance(tool_output, dict):
                 return_data["answer"] = tool_output.get("answer", ai_response)
                 return_data["deepquery_metadata"] = tool_output.get("deepquery_metadata", {})
@@ -206,7 +251,7 @@ class ChatbotEngine:
             yield return_data
 
             # Log return data except key 'deepquery_metadata' because it is too large to inspect
-            # deepquery_metadata is received from the deepQuery endpoint and should be sent as-is to the PDF generation endpoint
+            # deepquery_metadata is received from the deepQuery endpoint and should be sent as-is to the report generation endpoint
             return_data_to_log = {k: v for k, v in return_data.items() if k != "deepquery_metadata"}
             logging.info(f"Return data: {return_data_to_log}")
 

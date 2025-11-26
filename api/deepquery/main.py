@@ -1,6 +1,5 @@
 import time
 import logging
-import aiofiles
 
 from utils.utils import custom_tag_parser
 from api.deepquery.utils import prepare_visualization_analysis_trace
@@ -9,6 +8,7 @@ from api.deepquery.reporting_agent import ReportingAgent
 from api.deepquery.analysis_agent.tools import schema_digest
 from api.deepquery.analysis_agent.prompts import ANALYSIS_SYSTEM_PROMPT
 from api.deepquery.reporting_agent.prompts import REPORTING_SYSTEM_PROMPT
+from api.deepquery.reporting_agent.utils import COLOR_PALETTES, build_styled_html
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -30,10 +30,13 @@ async def process_analysis(
     thinking_llm_max_tokens=10240,
     llm_temperature=0.0,
     llm_max_tokens=4096,
-    execution_model="thinking"
+    execution_model="thinking",
+    vdp_database_names: str = '',
+    vdp_tag_names: str = '',
+    allow_external_associations: bool = True
 ):
     """
-    Perform analysis on the database and return answer with metadata for future PDF generation.
+    Perform analysis on the database and return answer with metadata for future report generation.
 
     Args:
         question: The business question to analyze
@@ -109,7 +112,10 @@ async def process_analysis(
             start_llm=planning_llm,
             max_loops=max_analysis_loops,
             max_concurrent_tool_calls=max_concurrent_tool_calls,
-            xml_callbacks=xml_callbacks
+            xml_callbacks=xml_callbacks,
+            vdp_database_names=vdp_database_names,
+            vdp_tag_names=vdp_tag_names,
+            allow_external_associations=allow_external_associations
         )
 
         # Run the analysis
@@ -142,7 +148,7 @@ async def process_analysis(
             actual_executing_temperature = llm_temperature
             actual_executing_max_tokens = llm_max_tokens
 
-        # Prepare metadata for PDF generation
+        # Prepare metadata for report generation
         deepquery_metadata = {
             "question": question,
             "analysis_title": analysis_title,
@@ -181,54 +187,56 @@ async def process_analysis(
         logger.error(f"Error in process_analysis after {total_duration:.2f}s: {e}", exc_info=True)
         raise
 
-async def generate_pdf_from_deepquery_metadata(
+async def generate_report_from_deepquery_metadata(
     deepquery_metadata,
     executing_llm,
-    output_pdf=None,
     color_palette="red",
     max_reporting_loops=None,
     include_failed_tool_calls_appendix=False,
     auth=None
 ):
     """
-    Generate PDF from deepquery metadata.
+    Generate an HTML report from deepquery metadata.
 
     Args:
         deepquery_metadata: Metadata from analysis phase
-        plan: The original analysis plan
         executing_llm: LLM for executing tasks
-        output_pdf: Optional path to save PDF file (default: None)
-        color_palette: Color theme for PDF ("red", "blue", "green", "black", default: "red")
+        color_palette: Color theme for the report ("red", "blue", "green", "black")
+        max_reporting_loops: Maximum number of reporting loops
+        include_failed_tool_calls_appendix: Whether to include failed tool calls appendix
         auth: Authentication token for database access
 
     Returns:
-        Dict with 'pdf_blob' and 'pdf_path' keys
+        Dict with 'html_report' key
     """
     start_time = time.time()
 
     if not deepquery_metadata:
         logger.error("No deepquery_metadata provided")
         return {
-            "pdf_blob": None,
-            "pdf_path": None
+            "html_report": None
         }
 
-    logger.info("Starting PDF generation from deepquery metadata")
-    logger.info(f"Parameters: color_palette={color_palette}")
+    logger.info("Starting report generation from deepquery metadata")
 
     try:
-        # Extract data from metadata
         question = deepquery_metadata.get("question", "")
         tool_calls = deepquery_metadata.get("tool_calls", [])
         cohorts = deepquery_metadata.get("cohorts", [])
         analysis_body = deepquery_metadata.get("analysis_body", "")
         plan = deepquery_metadata.get("plan", "<PLAN_NOT_FOUND>")
+        analysis_title = deepquery_metadata.get("analysis_title", "UnknownReport")
 
-        # Not mention cohorts if none were created
         cohorts_message = f"These were the cohorts created:\n<cohorts>{cohorts}</cohorts>" if cohorts else ""
 
         reporting_agent_system_prompt = REPORTING_SYSTEM_PROMPT.format(
-            analysis_trace = prepare_visualization_analysis_trace(plan, cohorts_message, tool_calls, analysis_body, deepquery_metadata.get("default_rows", 10))
+            analysis_trace=prepare_visualization_analysis_trace(
+                plan,
+                cohorts_message,
+                tool_calls,
+                analysis_body,
+                deepquery_metadata.get("default_rows", 10)
+            )
         )
         reporting_agent = ReportingAgent(
             llm=executing_llm,
@@ -238,20 +246,17 @@ async def generate_pdf_from_deepquery_metadata(
             max_loops=max_reporting_loops
         )
 
-        # Create analysis result structure for visualization generation
         analysis_result = {
             "tool_calls": tool_calls,
             "cohorts": cohorts
         }
 
-        # Generate visualizations
         logger.info("Generating visualizations")
         viz_start_time = time.time()
         visualization_tool_calls = await reporting_agent.generate_visualizations(analysis_result, question)
         viz_duration = time.time() - viz_start_time
         logger.info(f"Visualization generation completed in {viz_duration:.2f}s, created {len(visualization_tool_calls)} visualizations")
 
-        # Generate the report
         logger.info("Generating report content")
         report_start_time = time.time()
         report = await reporting_agent.generate_report(
@@ -262,33 +267,27 @@ async def generate_pdf_from_deepquery_metadata(
         report_duration = time.time() - report_start_time
         logger.info(f"Report generation completed in {report_duration:.2f}s, report length: {len(report) if report else 0} characters")
 
-        # Generate PDF
-        pdf_output_path = output_pdf if output_pdf else "report.pdf"
-        logger.info(f"Generating PDF: {pdf_output_path}")
-        pdf_start_time = time.time()
-        pdf_path = await reporting_agent.generate_pdf(report, pdf_output_path, color_palette=color_palette)
-        pdf_duration = time.time() - pdf_start_time
-        logger.info(f"PDF generation completed in {pdf_duration:.2f}s")
+        logger.info("Converting report markdown to HTML")
+        html_body = reporting_agent.generate_html(report)
 
-        # Read PDF as blob
-        pdf_blob = None
-        try:
-            logger.info("Reading PDF as blob")
-            async with aiofiles.open(pdf_path, 'rb') as f:
-                pdf_blob = await f.read()
-            logger.info(f"PDF blob created, size: {len(pdf_blob)} bytes")
-        except Exception as e:
-            logger.error(f"Could not read PDF file: {e}")
-            pdf_blob = None
+        logger.info("Applying styling, branding and color palette to HTML report")
+        selected_palette_name = color_palette or "red"
+        if selected_palette_name not in COLOR_PALETTES:
+            logger.warning(
+                f"Invalid color palette '{selected_palette_name}', defaulting to 'red'"
+            )
+            selected_palette_name = "red"
+
+        selected_palette = COLOR_PALETTES[selected_palette_name]
+        html_report = build_styled_html(html_body, selected_palette, analysis_title)
 
         total_duration = time.time() - start_time
-        logger.info(f"PDF generation completed in {total_duration:.2f}s")
+        logger.info(f"Report HTML generation completed in {total_duration:.2f}s")
 
         return {
-            "pdf_blob": pdf_blob,
-            "pdf_path": pdf_path
+            "html_report": html_report
         }
     except Exception as e:
         total_duration = time.time() - start_time
-        logger.error(f"Error in generate_pdf_from_deepquery_metadata after {total_duration:.2f}s: {e}", exc_info=True)
+        logger.error(f"Error in generate_report_from_deepquery_metadata after {total_duration:.2f}s: {e}", exc_info=True)
         raise

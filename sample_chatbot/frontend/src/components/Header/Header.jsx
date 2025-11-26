@@ -10,10 +10,19 @@ import VectorDBSyncModal from '../VectorDBSyncModal';
 import ChatbotSettingsModal from '../ChatbotSettingsModal';
 import AISDKSettingsModal from '../AISDKSettingsModal';
 import CustomInstructionsModal from '../CustomInstructionsModal';
-import { usePDF } from '../../contexts/PDFContext';
+import { useReport } from '../../contexts/ReportContext';
 import './Header.css';
 
-const Header = ({ isAuthenticated, setIsAuthenticated, handleClearResults, showClearButton, onLoadCSV, renderLogo }) => {
+const Header = ({ 
+  isAuthenticated, 
+  setIsAuthenticated, 
+  handleClearResults, 
+  showClearButton, 
+  onLoadCSV, 
+  renderLogo,
+  syncedResources,
+  onSyncUpdate
+}) => {
   const [showVectorDBSync, setShowVectorDBSync] = useState(false);
   const [showChatbotSettings, setShowChatbotSettings] = useState(false);
   const [showAISDKSettings, setShowAISDKSettings] = useState(false);
@@ -22,7 +31,7 @@ const Header = ({ isAuthenticated, setIsAuthenticated, handleClearResults, showC
   const [showAdminDropdown, setShowAdminDropdown] = useState(false);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [config, setConfig] = useState({ hasAISDKCredentials: false, unstructuredMode: false, userEditLLM: false, syncTimeout: undefined });
-  const { pdfs, setIsModalOpen } = usePDF();
+  const { reports, setIsModalOpen } = useReport();
 
   // Hover-delay timers for dropdowns
   const toolsTimerRef = useRef(null);
@@ -157,9 +166,9 @@ const Header = ({ isAuthenticated, setIsAuthenticated, handleClearResults, showC
                   >
                     <NavDropdown.Item onClick={() => setIsModalOpen(true)}>
                       DeepQuery Reports
-                      {pdfs.length > 0 && (
+                      {reports.length > 0 && (
                         <Badge bg="warning" text="dark" className="ms-2">
-                          {pdfs.length}
+                          {reports.length}
                         </Badge>
                       )}
                     </NavDropdown.Item>
@@ -167,7 +176,7 @@ const Header = ({ isAuthenticated, setIsAuthenticated, handleClearResults, showC
                       <NavDropdown.Item onClick={onLoadCSV}>Load Unstructured CSV</NavDropdown.Item>
                     )}
                     {config.hasAISDKCredentials && (
-                      <NavDropdown.Item onClick={() => setShowVectorDBSync(true)}>VectorDB Management</NavDropdown.Item>
+                      <NavDropdown.Item onClick={() => setShowVectorDBSync(true)}>Vector DB Management</NavDropdown.Item>
                     )}
                   </NavDropdown>
 
@@ -210,6 +219,8 @@ const Header = ({ isAuthenticated, setIsAuthenticated, handleClearResults, showC
         show={showVectorDBSync}
         syncTimeout={config.syncTimeout}
         handleClose={() => setShowVectorDBSync(false)}
+        syncedResources={syncedResources} 
+        onSyncUpdate={onSyncUpdate}
       />
       <ChatbotSettingsModal
         show={showChatbotSettings}

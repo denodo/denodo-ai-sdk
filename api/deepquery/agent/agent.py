@@ -4,7 +4,7 @@ import logging
 from api.deepquery.agent.prompts import GENERAL_AGENT_PROMPT, DEFAULT_POST_TOOL_PROMPT
 
 from langchain_core.output_parsers import StrOutputParser
-from api.deepquery.utils import create_langfuse_handler
+from utils import langfuse
 from api.deepquery.agent.tool_executor import ToolExecutor
 from api.deepquery.agent.prompt_builder import PromptBuilder
 from api.deepquery.agent.xml_utils import parse_xml, remove_think_tags
@@ -85,12 +85,7 @@ class Agent:
         self.prompt_builder = PromptBuilder(all_tools, system_prompt, self.date, self.max_concurrent_tool_calls)
 
         # Langfuse integration for monitoring (optional)
-        self.langfuse_handler = create_langfuse_handler(
-            session_id=self.session_id,
-            trace_name=self.agent_name,
-        )
-
-        if self.langfuse_handler:
+        if langfuse.is_enabled():
             self.logger.info("Langfuse monitoring enabled")
         else:
             self.logger.info("Langfuse monitoring disabled - no credentials provided")
@@ -283,9 +278,10 @@ class Agent:
 
         self.logger.info(f"Sending request to LLM with temperature={temperature}")
         try:
-            config = {}
-            if self.langfuse_handler:
-                config["callbacks"] = [self.langfuse_handler]
+            config = langfuse.build_config(
+                run_name=self.agent_name,
+                session_id=self.session_id
+            )
 
             response = await chain_to_use.ainvoke(
                 {"input": input_text, "chat_history": self.conversation_manager.memory},

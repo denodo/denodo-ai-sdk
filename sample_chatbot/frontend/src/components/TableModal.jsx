@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import Modal from 'react-bootstrap/Modal';
+import Button from 'react-bootstrap/Button';
 import Table from 'react-bootstrap/Table';
 import Pagination from 'react-bootstrap/Pagination';
 
@@ -106,7 +107,7 @@ const TableModal = ({ show, llm_response_rows_limit, handleClose, executionResul
     );
 
     return (
-      <div className="d-flex justify-content-center mt-3">
+      <div className="d-flex justify-content-center mt-3" data-bs-theme="light">
         <Pagination>{items}</Pagination>
       </div>
     );
@@ -118,10 +119,8 @@ const TableModal = ({ show, llm_response_rows_limit, handleClose, executionResul
       onHide={handleClose} 
       size="lg" 
       centered
-      style={{ '--bs-modal-bg': '#112533' }}
-      contentClassName="text-white border border-white"
     >
-      <Modal.Header closeButton className="border-bottom border-white">
+      <Modal.Header closeButton data-bs-theme="light">
         <Modal.Title>Execution Result</Modal.Title>
       </Modal.Header>
       <Modal.Body>
@@ -133,7 +132,7 @@ const TableModal = ({ show, llm_response_rows_limit, handleClose, executionResul
               complete execution result from Denodo here.
             </div>
             <div className="table-responsive">
-              <Table className="custom-table" striped bordered hover variant="dark">
+              <Table className="custom-table" striped bordered hover variant="light">
                 <thead>
                   <tr>
                     {tableData.headers.map((header, index) => (
@@ -153,7 +152,7 @@ const TableModal = ({ show, llm_response_rows_limit, handleClose, executionResul
               </Table>
             </div>
             {renderPagination()}
-            <div className="mt-3 text-center text-white">
+            <div className="mt-3 text-center">
               Showing rows {(currentPage - 1) * rowsPerPage + 1}-{Math.min(currentPage * rowsPerPage, totalRows)} of {totalRows}
             </div>
           </>
@@ -161,8 +160,13 @@ const TableModal = ({ show, llm_response_rows_limit, handleClose, executionResul
           <div className="text-center py-4">No data available</div>
         )}
       </Modal.Body>
+      <Modal.Footer>
+        <Button variant="light" onClick={handleClose}>
+          Close
+        </Button>
+      </Modal.Footer>
     </Modal>
   );
 };
 
-export default TableModal; 
+export default TableModal;

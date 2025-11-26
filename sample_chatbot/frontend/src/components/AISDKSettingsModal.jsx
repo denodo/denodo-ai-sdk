@@ -151,8 +151,8 @@ const AISDKSettingsModal = ({ show, handleClose, handleClearResults }) => {
   );
 
   return (
-    <Modal show={show} onHide={handleClose} size="lg" style={{ '--bs-modal-bg': '#112533' }} contentClassName="text-white border border-white">
-      <Modal.Header closeButton className="custom-header-modal">
+    <Modal show={show} onHide={handleClose} size="lg" centered>
+      <Modal.Header closeButton data-bs-theme="light">
         <Modal.Title>AI SDK Settings</Modal.Title>
       </Modal.Header>
       <Modal.Body style={{ maxHeight: '70vh', overflowY: 'auto' }}>
@@ -162,7 +162,7 @@ const AISDKSettingsModal = ({ show, handleClose, handleClearResults }) => {
             history. API keys and provider configuration must be set in sdk_config.env before running the chatbot.
           </small>
         </Alert>
-        <Form onSubmit={handleSubmit}>
+        <Form id="sdk-settings-form" onSubmit={handleSubmit}>
           {renderLLMSection('Base LLM', aiSDKBaseLLM, setAISDKBaseLLM)}
           {renderLLMSection('Thinking LLM', aiSDKThinkingLLM, setAISDKThinkingLLM)}
           <Form.Group className="mb-3">
@@ -174,24 +174,31 @@ const AISDKSettingsModal = ({ show, handleClose, handleClearResults }) => {
               onChange={(e) => setUseBaseLLMForExecution(e.target.checked)}
             />
           </Form.Group>
-          <div className="d-flex justify-content-end pt-2">
-            <Button variant="primary" size="sm" type="submit" disabled={isLoading} style={{ backgroundColor: '#2D3E4B', borderColor: '#2D3E4B' }}>
+        </Form>
+      </Modal.Body>
+
+      <Modal.Footer>
+        <Button variant="light" onClick={handleClose} disabled={isLoading}>
+          Cancel
+        </Button>
+        <Button 
+          variant="dark"
+          type="submit" 
+          form="sdk-settings-form"
+          disabled={isLoading}
+        >
               {isLoading ? (
                 <>
                   <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" />
                   <span className="ms-2">Updating...</span>
                 </>
               ) : (
-                'Save Settings'
+                'Save'
               )}
-            </Button>
-          </div>
-        </Form>
-      </Modal.Body>
+        </Button>
+      </Modal.Footer>
     </Modal>
   );
 };
 
 export default AISDKSettingsModal;
-
-

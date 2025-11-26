@@ -1,8 +1,9 @@
 import React, { useState } from "react";
+import './Modal.css';
 import Header from "./components/Header/Header";
 import Results from "./components/Results/Results";
-import QuestionForm from "./components/QuestionForm";
-import PDFManagementModal from "./components/PDFManagementModal";
+import QuestionForm from "./components/QuestionForm/QuestionForm";
+import ReportManagementModal from "./components/ReportManagementModal";
 import axios from 'axios';
 import CSVUploadModal from "./components/CSVUploadModal";
 import useSDK from './hooks/useSDK';
@@ -16,7 +17,7 @@ const App = () => {
   const [currentQuestion, setCurrentQuestion] = useState("");
   const [completedRequestId, setCompletedRequestId] = useState(null);
   const [customLogoFailed, setCustomLogoFailed] = useState(false);
-
+  const [syncedResources, setSyncedResources] = useState({});
   const handleRequestCompletion = (requestId) => {
     setCompletedRequestId(requestId);
   };
@@ -61,6 +62,7 @@ const App = () => {
       const response = await axios.post('login', userInformation);
       if (response.data.success) {
         setIsAuthenticated(true);
+        setSyncedResources(response.data.syncedResources || {});
       } else {
         const errorMessage = response.data.message || 'Invalid credentials. Please try again.';
         alert(errorMessage);
@@ -117,6 +119,8 @@ const App = () => {
         showClearButton={results.length > 0}
         onLoadCSV={() => setShowCSVModal(true)}
         renderLogo={renderLogo}
+        syncedResources={syncedResources}
+        onSyncUpdate={setSyncedResources}
       />
       <div className="flex-grow-1 overflow-auto" style={{ marginTop: "76px", marginBottom: "100px", padding: "0 20px" }}>
         <Results
@@ -136,13 +140,14 @@ const App = () => {
         setCurrentQuestion={setCurrentQuestion}
         sdk={sdk}
         completedRequestId={completedRequestId}
+        syncedResources={syncedResources}
       />
       <CSVUploadModal
         show={showCSVModal}
         handleClose={() => setShowCSVModal(false)}
         onUpload={handleCSVUpload}
       />
-      <PDFManagementModal />
+      <ReportManagementModal />
     </div>
   );
 };

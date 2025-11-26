@@ -26,7 +26,8 @@ class AnalysisAgent(Agent, AnalysisToolsMixin):
         auth=None,
         start_llm=None,  # Optional LLM for first interaction only
         xml_callbacks=None,  # Dictionary of tag -> callback function
-        max_concurrent_tool_calls=5
+        max_concurrent_tool_calls=5,
+        **kwargs
     ):
         """
         Initialize the AnalysisAgent with database connectivity.
@@ -45,6 +46,11 @@ class AnalysisAgent(Agent, AnalysisToolsMixin):
         """
         # Store auth for tool calls
         self.auth = auth
+
+        # Save filters
+        self.vdp_database_names = kwargs.get('vdp_database_names', '')
+        self.vdp_tag_names = kwargs.get('vdp_tag_names', '')
+        self.allow_external_associations = kwargs.get('allow_external_associations', True)
 
         # Initialize with tools
         super().__init__(

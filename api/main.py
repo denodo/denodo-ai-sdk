@@ -15,17 +15,18 @@ sdk_config_loader.load_config()
 
 from api.utils.sdk_utils import check_env_variables, test_data_catalog_connection
 from api.endpoints import (
+    deepQuery,
     getMetadata,
     deleteMetadata,
     similaritySearch,
+    getVectorDBInfo,
     streamAnswerQuestion,
     streamAnswerQuestionUsingViews,
     answerQuestion,
-    answerQuestionUsingViews,
     answerDataQuestion,
     answerMetadataQuestion,
-    deepQuery,
-    generateDeepQueryPDF
+    answerQuestionUsingViews,
+    generateDeepQueryReport,
 )
 from utils.logging_utils import get_logging_config, transaction_id_var
 from utils.utils import normalize_root_path, generate_transaction_id
@@ -122,7 +123,7 @@ def log_ai_sdk_parameters():
         "OS": platform.platform(),
         "AI SDK Host": AI_SDK_HOST,
         "AI SDK Port": AI_SDK_PORT,
-        "AI SDK Root Path": AI_SDK_ROOT_PATH,
+        "AI SDK Root Path": AI_SDK_ROOT_PATH or "/",
         "AI SDK Version": AI_SDK_VERSION,
         "AI SDK Workers": AI_SDK_WORKERS,
         "Using SSL": bool(AI_SDK_SSL_KEY and AI_SDK_SSL_CERT),
@@ -230,6 +231,7 @@ async def health_check():
 base_app.include_router(getMetadata.router)
 base_app.include_router(deleteMetadata.router)
 base_app.include_router(similaritySearch.router)
+base_app.include_router(getVectorDBInfo.router)
 base_app.include_router(streamAnswerQuestion.router)
 base_app.include_router(streamAnswerQuestionUsingViews.router)
 base_app.include_router(answerQuestion.router)
@@ -239,7 +241,7 @@ base_app.include_router(answerQuestionUsingViews.router)
 
 if THINKING_MODEL_AVAILABLE:
     base_app.include_router(deepQuery.router)
-    base_app.include_router(generateDeepQueryPDF.router)
+    base_app.include_router(generateDeepQueryReport.router)
     logging.info("DeepQuery endpoints enabled (thinking model configured).")
 else:
     logging.warning("Thinking LLM model not configured — DeepQuery endpoints disabled.")
@@ -288,7 +290,7 @@ else:
 
 if __name__ == "__main__":
     uvicorn.run(
-        app,
+        "api.main:app",
         host = AI_SDK_HOST,
         port = AI_SDK_PORT,
         ssl_keyfile = AI_SDK_SSL_KEY,

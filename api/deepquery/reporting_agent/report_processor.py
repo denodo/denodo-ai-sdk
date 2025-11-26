@@ -2,10 +2,10 @@ import re
 import json
 import logging
 from api.deepquery.utils import (
-    trace_context,
     filter_tool_calls_appendix,
     prepare_tool_calls_only_trace
 )
+from utils import langfuse
 from api.deepquery.agent.xml_utils import parse_xml
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -15,11 +15,10 @@ from api.deepquery.reporting_agent.prompts import SEQUENTIAL_REPORT_PROMPT
 logger = logging.getLogger(__name__)
 
 class ReportProcessor:
-    def __init__(self, visualization_tool_calls, analysis_tool_calls, llm, langfuse_handler, deepquery_metadata=None, include_failed_tool_calls_appendix=False):
+    def __init__(self, visualization_tool_calls, analysis_tool_calls, llm, deepquery_metadata=None, include_failed_tool_calls_appendix=False):
         self.visualization_tool_calls = visualization_tool_calls
         self.analysis_tool_calls = analysis_tool_calls
         self.llm = llm
-        self.langfuse_handler = langfuse_handler
         self.deepquery_metadata = deepquery_metadata
         self.include_failed_tool_calls_appendix = include_failed_tool_calls_appendix
         self.tool_id_map = {call['tool_id']: call for call in self.analysis_tool_calls + self.visualization_tool_calls}
@@ -35,7 +34,7 @@ class ReportProcessor:
             The generated report in markdown format as a string
         """
 
-        report_template = await self._generate_sequential_report(trace, self.llm, self.langfuse_handler)
+        report_template = await self._generate_sequential_report(trace, self.llm)
 
         processed_report = self.process_template(report_template)
 
@@ -44,7 +43,7 @@ class ReportProcessor:
 
         return processed_report + "<div class='page-break'></div>" + processed_appendix
 
-    async def _generate_sequential_report(self, trace, llm, langfuse_handler=None):
+    async def _generate_sequential_report(self, trace, llm):
         """Generate a report by sequentially building it one section at a time."""
         sections = [
             ("introduction", "Introduction"),
@@ -93,7 +92,7 @@ class ReportProcessor:
                     )
                     trace_data = f"<trace>{tool_calls_only}</trace>"
 
-            with trace_context(langfuse_handler, f"generate_{section_tag}") as config:
+            with langfuse.trace_context(run_name=f"generate_{section_tag}") as config:
                 section_result = await chain.ainvoke(
                     {
                         "trace": trace_data,
@@ -112,7 +111,7 @@ class ReportProcessor:
                 logger.info(f"Section {section_name} generated failed, retrying...")
                 section_content = await self._retry_section_generation(
                     section_result, section_tag, section_name, trace_data,
-                    current_report, llm, langfuse_handler
+                    current_report, llm
                 )
 
             current_report += f"\n\n{section_content}"
@@ -121,7 +120,7 @@ class ReportProcessor:
         report_parts = [f"\n\n{section_contents[tag]}" for tag in final_order if tag in section_contents]
         return "\n\n".join(report_parts)
 
-    async def _retry_section_generation(self, failed_result, section_tag, section_name, trace_data, current_report, llm, langfuse_handler):
+    async def _retry_section_generation(self, failed_result, section_tag, section_name, trace_data, current_report, llm):
         """
         Retry section generation when XML parsing fails.
         Gives the LLM one more chance to properly format the response with required tags.
@@ -135,7 +134,7 @@ class ReportProcessor:
         retry_chain = retry_prompt | llm | StrOutputParser()
 
         try:
-            with trace_context(langfuse_handler, f"retry_generate_{section_tag}") as config:
+            with langfuse.trace_context(run_name=f"retry_generate_{section_tag}") as config:
                 retry_result = await retry_chain.ainvoke(
                     {
                         "trace": trace_data,

@@ -7,7 +7,6 @@ from api.deepquery.utils import prepare_sequential_report_trace
 from api.deepquery.reporting_agent.tools import ReportingToolsMixin
 from api.deepquery.reporting_agent.report_processor import ReportProcessor
 from api.deepquery.analysis_agent.prompts import ANALYSIS_POST_TOOL_PROMPT
-from api.deepquery.reporting_agent.utils import convert_html_to_pdf, COLOR_PALETTES
 from api.deepquery.reporting_agent.prompts import REPORTING_SYSTEM_PROMPT, REPORTING_INITIAL_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -112,7 +111,6 @@ class ReportingAgent(Agent, ReportingToolsMixin):
                 visualization_tool_calls=visualization_tool_calls,
                 analysis_tool_calls=analysis_tool_calls,
                 llm=self.llm,
-                langfuse_handler=self.langfuse_handler,
                 deepquery_metadata=deepquery_metadata,
                 include_failed_tool_calls_appendix=include_failed_tool_calls_appendix)
             report = await processor.generate_report(formatted_trace)
@@ -153,39 +151,4 @@ class ReportingAgent(Agent, ReportingToolsMixin):
         except Exception as e:
             duration = time.time() - start_time
             logger.error(f"HTML generation failed after {duration:.2f}s: {e}", exc_info=True)
-            raise
-
-    async def generate_pdf(self, report_content: str, output_path: str = "report.pdf", css_path: str = None, color_palette: str = "red"):
-        """
-        Generate a PDF file from the report content.
-
-        Args:
-            report_content: The markdown report content
-            output_path: The path where to save the PDF file
-            css_path: Optional path to custom CSS file for styling (for future extensibility)
-            color_palette: Color theme for the PDF ("red", "blue", "green", "black")
-        """
-        start_time = time.time()
-        logger.info(f"Starting PDF generation: {output_path}")
-
-        try:
-            # Validate color palette
-            if color_palette not in COLOR_PALETTES:
-                logger.warning(f"Invalid color palette '{color_palette}', defaulting to 'red'")
-                color_palette = "red"
-
-            selected_palette = COLOR_PALETTES[color_palette]
-            logger.info(f"Using {color_palette} color palette for PDF generation")
-
-            # Convert to HTML using the standalone method
-            logger.info("Converting markdown to HTML using generate_html method")
-            html = self.generate_html(report_content)
-
-            # Convert to PDF with selected color palette
-            logger.info(f"Converting HTML content to PDF using {color_palette} color palette with Playwright")
-            await convert_html_to_pdf(html, output_path, selected_palette, self.analysis_question)
-            return output_path
-        except Exception as e:
-            duration = time.time() - start_time
-            logger.error(f"PDF generation failed after {duration:.2f}s: {e}", exc_info=True)
             raise

@@ -49,9 +49,22 @@ class streamAnswerQuestionRequest(BaseModel):
     llm_provider: str = os.getenv('LLM_PROVIDER')
     llm_model: str = os.getenv('LLM_MODEL')
     llm_temperature: float = float(os.getenv('LLM_TEMPERATURE', '0.0'))
-    llm_max_tokens: int = int(os.getenv('LLM_MAX_TOKENS', '4096'))
-    vdp_database_names: str = ''
-    vdp_tag_names: str = ''
+    llm_max_tokens: int = Field(
+        default = int(os.getenv('LLM_MAX_TOKENS', '4096')),
+        description="The maximum OUTPUT tokens for the general LLM. Not recommended to decrease this value."
+    )
+    vdp_database_names: str = Field(
+        default = '',
+        description="A comma-separated list of databases to reduce the scope of the question to. If empty, all databases in the vector DB the user has permissions to will be considered."
+    )
+    vdp_tag_names: str = Field(
+        default = '',
+        description="A comma-separated list of tags to reduce the scope of the question to. If empty, all tags in the vector DB the user has permissions to will be considered."
+    )
+    allow_external_associations: bool = Field(
+        default = True,
+        description="If False, views from associations will NOT be considered if they don't belong to the VDBs/Tags specified in vdp_database_names and vdp_tag_names. If no VDBs/Tags specified, all views from associations will be considered."
+    )
     use_views: str = Field(
             default = False,
             description="Please specify a view you want the LLM to take into consideration when answering the question. Expected format is views separated by commas: database.view_name, database.view_name2"
@@ -182,7 +195,8 @@ async def process_stream_question(request_data: streamAnswerQuestionRequest, aut
         k=request_data.vector_search_k,
         use_views=request_data.use_views,
         expand_set_views=request_data.expand_set_views,
-        vector_search_sample_data_k=request_data.vector_search_sample_data_k
+        vector_search_sample_data_k=request_data.vector_search_sample_data_k,
+        allow_external_associations=request_data.allow_external_associations
     )
 
     if not vector_search_tables:

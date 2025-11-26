@@ -264,6 +264,9 @@ def filter_non_allowed_associations(view_json, valid_view_ids):
     if valid_view_ids is None:
         return view_json
 
+    if 'associations' not in view_json or view_json['associations'] is None:
+        return view_json
+
     # Create a new view_json with filtered associations
     filtered_view_json = view_json.copy()
     filtered_view_json['associations'] = [
@@ -824,3 +827,46 @@ def handle_detagged_views(
         if documents_to_reindex:
             ids_for_upsert = [doc.id for doc in documents_to_reindex]
             vector_store.client.add_documents(documents=documents_to_reindex, ids=ids_for_upsert)
+
+def get_user_synced_resources(vector_store, allowed_view_ids_str):
+    """
+    Gets the last_update dict and filters it based on user's allowed_view_ids.
+    """
+    # Get the complete 'last_update' dictionary
+    full_last_update = vector_store.get_last_update_dict()
+    if not full_last_update:
+        logging.info("getVectorDBInfo: No 'last_update' info found in vector store.")
+        return {}
+
+    filtered_last_update = {}
+    dummy_vector = [0] * vector_store.dimensions
+
+    # Filter Databases
+    if "DATABASE" in full_last_update:
+        filtered_last_update["DATABASE"] = {}
+        for db_name, timestamp in full_last_update["DATABASE"].items():
+            # Check if at least 1 view exists in this DB AND in the user's permissions
+            results = vector_store.search_by_vector(
+                vector=dummy_vector,
+                k=1, # We only need to know if at least 1 exists
+                view_ids=allowed_view_ids_str,
+                database_names=[db_name]
+            )
+            if results: # If the list is not empty, the user has access
+                filtered_last_update["DATABASE"][db_name] = timestamp
+
+    # Filter Tags
+    if "TAG" in full_last_update:
+        filtered_last_update["TAG"] = {}
+        for tag_name, timestamp in full_last_update["TAG"].items():
+            # Check if at least 1 view exists with this Tag AND in the user's permissions
+            results = vector_store.search_by_vector(
+                vector=dummy_vector,
+                k=1, # We only need to know if at least 1 exists
+                view_ids=allowed_view_ids_str,
+                tag_names=[tag_name]
+            )
+            if results: # If the list is not empty, the user has access
+                filtered_last_update["TAG"][tag_name] = timestamp
+
+    return filtered_last_update

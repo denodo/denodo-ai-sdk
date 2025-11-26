@@ -16,11 +16,15 @@ from utils.uniformLLM import UniformLLM
 from utils.uniformEmbeddings import UniformEmbeddings
 from utils.uniformVectorStore import UniformVectorStore
 from utils.utils import normalize_root_path, generate_transaction_id
-from sample_chatbot.chatbot_engine import ChatbotEngine
 from sample_chatbot.chatbot_config_loader import load_config
+
+# Load env variables before any other imports
+load_config()
+
+from sample_chatbot.chatbot_engine import ChatbotEngine
 from sample_chatbot.chatbot_tools import deep_query, denodo_query, metadata_query, kb_lookup
 from sample_chatbot.chatbot_utils import ai_sdk_health_check, get_user_views, setup_user_details
-from sample_chatbot.chatbot_utils import prepare_unstructured_vector_store, check_env_variables, connect_to_ai_sdk, setup_directories, write_to_report, update_feedback_in_report
+from sample_chatbot.chatbot_utils import prepare_unstructured_vector_store, check_env_variables, connect_to_ai_sdk, setup_directories, write_to_report, update_feedback_in_report, get_synced_resources
 
 required_vars = [
     'CHATBOT_LLM_PROVIDER',
@@ -38,9 +42,6 @@ required_vars = [
 
 # Ignore warnings
 warnings.filterwarnings("ignore")
-
-# Load configuration variables
-load_config()
 
 # Check that the minimum required variables are set
 check_env_variables(required_vars)
@@ -73,6 +74,7 @@ CHATBOT_PORT = int(os.getenv('CHATBOT_PORT', 9992))
 CHATBOT_ROOT_PATH = normalize_root_path(os.getenv("CHATBOT_ROOT_PATH", ""))
 CHATBOT_SSL_CERT = os.getenv('CHATBOT_SSL_CERT')
 CHATBOT_SSL_KEY = os.getenv('CHATBOT_SSL_KEY')
+CHATBOT_DEEPQUERY = bool(int(os.getenv('CHATBOT_DEEPQUERY', '1')))
 CHATBOT_REPORTING = bool(int(os.getenv('CHATBOT_REPORTING', '0')))
 CHATBOT_REPORT_MAX_SIZE = int(os.getenv('CHATBOT_REPORT_MAX_SIZE', '10'))
 CHATBOT_REPORT_MAX_FILES = int(os.getenv('CHATBOT_REPORT_MAX_FILES', '10'))
@@ -95,6 +97,7 @@ logging.info(f"    - Embeddings Model: {CHATBOT_EMBEDDINGS_PROVIDER}/{CHATBOT_EM
 logging.info(f"    - Vector Store Provider: {CHATBOT_VECTOR_STORE_PROVIDER}")
 logging.info(f"    - AI SDK Host: {AI_SDK_HOST}")
 logging.info(f"    - Using SSL: {bool(CHATBOT_SSL_CERT and CHATBOT_SSL_KEY)}")
+logging.info(f"    - DeepQuery: {'enabled' if CHATBOT_DEEPQUERY else 'disabled'}")
 logging.info(f"    - Reporting: {CHATBOT_REPORTING}")
 logging.info(f"    - Report Max Size: {CHATBOT_REPORT_MAX_SIZE}mb")
 logging.info(f"    - Report Max Files: {'unlimited' if CHATBOT_REPORT_MAX_FILES <= 0 else CHATBOT_REPORT_MAX_FILES}")
@@ -157,6 +160,7 @@ class User(UserMixin):
         self.denodo_tables = None
         self.custom_instructions = ""
         self.user_details = ""
+        self.synced_resources = {}
 
         # LLM preferences for different components
         self.chatbot_llm_preferences = {}
@@ -246,10 +250,13 @@ class User(UserMixin):
                     "password": self.password,
                     "verify_ssl": AI_SDK_VERIFY_SSL
                 }
-            },
-            "deep_query": {
+            }
+        }
+
+        if CHATBOT_DEEPQUERY:
+            tools["deep_query"] = {
                 "function": deep_query,
-            "params": {
+                "params": {
                     "api_host": AI_SDK_HOST,
                     "username": self.id,
                     "password": self.password,
@@ -258,7 +265,6 @@ class User(UserMixin):
                     **thinking_llm_params
                 }
             }
-        }
 
         if self.unstructured_vector_store:
             tools["kb_lookup"] = {"function": kb_lookup, "params": {"vector_store": self.unstructured_vector_store}}
@@ -271,8 +277,10 @@ class User(UserMixin):
         else:
             database_query_tool = CHATBOT_DATABASE_QUERY_TOOL.format(auto_graph="You can only request a plot of the data if explicitly requested by the user.")
 
-        # Always include core tools
-        core_tools = [database_query_tool, CHATBOT_METADATA_QUERY_TOOL, CHATBOT_DEEPQUERY_TOOL]
+        core_tools = [database_query_tool, CHATBOT_METADATA_QUERY_TOOL]
+        
+        if CHATBOT_DEEPQUERY:
+            core_tools.append(CHATBOT_DEEPQUERY_TOOL)
 
         if self.unstructured_vector_store:
             kb_tool_prompt = CHATBOT_KNOWLEDGE_BASE_TOOL.format(description=self.csv_file_description)
@@ -298,7 +306,8 @@ class User(UserMixin):
                 password=self.password,
                 vector_store_provider=CHATBOT_VECTOR_STORE_PROVIDER,
                 denodo_tables=self.denodo_tables,
-                user_details=self.user_details
+                user_details=self.user_details,
+                enable_deepquery=CHATBOT_DEEPQUERY
             )
         return self.chatbot
 
@@ -352,7 +361,15 @@ def login():
         else:
             return jsonify({"success": False, "message": response_data}), status
 
+    synced_resources = get_synced_resources(
+        api_host=AI_SDK_HOST,
+        username=username,
+        password=password,
+        verify_ssl=AI_SDK_VERIFY_SSL
+    )
+
     user = User(username, password)
+    user.synced_resources = synced_resources
 
     if response_data:
         user.denodo_tables = "Here are some of the views available in the user's Denodo instance:\n- " + "\n- ".join(response_data) + "\n\nThis is not an exhaustive list, you can use the Metadata tool to query more."
@@ -375,7 +392,7 @@ def login():
         if not user.unstructured_vector_store:
             return jsonify({"success": False, "message": "Failed to prepare unstructured vector store"}), 500
 
-    return jsonify({"success": True}), 200
+    return jsonify({"success": True, "syncedResources": synced_resources}), 200
 
 @chatbot_bp.route('/update_csv', methods=['POST'])
 @login_required
@@ -407,13 +424,19 @@ def question():
     query = request.args.get('query')
     user_id = current_user.id
     question_type = request.args.get('type', 'default')
+
+    databases_str = request.args.get('databases', '')
+    tags_str = request.args.get('tags', '')
+    allow_ext_assoc_str = request.args.get('allow_external_associations', 'true')
+    allow_external_associations = allow_ext_assoc_str.lower() == 'true'
+
     # Capture the actual user object, not the proxy
     user_obj = current_user._get_current_object()
 
     if not query:
         return jsonify({"error": "Missing query parameter"}), 400
 
-    def generate(query, user_id, question_type, user_obj):
+    def generate(query, user_id, question_type, user_obj, vdp_databases, vdp_tags, allow_external_associations):
         try:
             chatbot = user_obj.get_or_create_chatbot()
         except Exception as e:
@@ -424,7 +447,13 @@ def question():
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
             return
 
-        for chunk in chatbot.process_query(query=query, tool=question_type):
+        for chunk in chatbot.process_query(
+            query=query,
+            tool=question_type,
+            vdp_database_names=vdp_databases,
+            vdp_tag_names=vdp_tags,
+            allow_external_associations=allow_external_associations
+        ):
             if isinstance(chunk, dict):
                 yield "data: <STREAMOFF>\n\n"
                 chunk_json = json.dumps(chunk)
@@ -438,7 +467,15 @@ def question():
             else:
                 yield f"data: {chunk}\n\n"
 
-    return Response(generate(query, user_id, question_type, user_obj), mimetype='text/event-stream')
+    return Response(generate(
+        query,
+        user_id,
+        question_type,
+        user_obj,
+        databases_str,
+        tags_str,
+        allow_external_associations
+    ), mimetype='text/event-stream')
 
 @chatbot_bp.route('/clear_history', methods=['POST'])
 @login_required
@@ -489,7 +526,21 @@ def delete_metadata():
                 else:
                     current_user.denodo_tables = "No views where found in the user's Denodo instance. Either the user has no views, the connection is failing or he does not have enough permissions."
                 current_user.chatbot = None
-            return jsonify({"success": True, "message": response.json().get('message', 'Deletion successful.')}), 200
+
+            synced_resources = get_synced_resources(
+                api_host=AI_SDK_HOST,
+                username=current_user.id,
+                password=current_user.password,
+                verify_ssl=AI_SDK_VERIFY_SSL
+            )
+            current_user.synced_resources = synced_resources # Update synced_resources
+
+            return jsonify({
+                "success": True,
+                "message": response.json().get('message', 'Deletion successful.'),
+                "syncedResources": synced_resources
+            }), 200
+
         elif response.status_code == 204:
             return Response(status=204)
         else:
@@ -544,7 +595,20 @@ def sync_vdbs():
                 current_user.denodo_tables = "No views where found in the user's Denodo instance. Either the user has no views, the connection is failing or he does not have enough permissions."
             current_user.chatbot = None
 
-        return jsonify({"success": True, "message": f"VectorDB synchronization successful for VDBs: {result}"}), status
+        synced_resources = get_synced_resources(
+            api_host=AI_SDK_HOST,
+            username=current_user.id,
+            password=current_user.password,
+            verify_ssl=AI_SDK_VERIFY_SSL
+        )
+        current_user.synced_resources = synced_resources # Update synced_resources
+
+        return jsonify({
+            "success": True,
+            "message": f"VectorDB synchronization successful for VDBs: {result}",
+            "syncedResources": synced_resources
+        }), status
+
     elif status == 204:
         return jsonify({"success": True, "message": result}), status
     else:
@@ -568,7 +632,8 @@ def get_config():
         "unstructuredMode": CHATBOT_UNSTRUCTURED_MODE,
         "syncTimeout": CHATBOT_SYNC_VDBS_TIMEOUT,
         "llm_response_rows_limit": CHATBOT_LLM_RESPONSE_ROWS_LIMIT,
-        "userEditLLM": CHATBOT_USER_EDIT_LLM
+        "userEditLLM": CHATBOT_USER_EDIT_LLM,
+        "enableDeepQuery": CHATBOT_DEEPQUERY
     }
     if DATA_CATALOG_URL:
         config["dataCatalogUrl"] = DATA_CATALOG_URL.rstrip('/')
@@ -667,22 +732,21 @@ def update_llm_settings():
 def get_current_user():
     return jsonify({"username": current_user.id}), 200
 
-@chatbot_bp.route('/generate_pdf', methods=['POST'])
+@chatbot_bp.route('/generate_report', methods=['POST'])
 @login_required
-def generate_pdf():
-    """Generate PDF from DeepQuery metadata by calling the generateDeepQueryPDF endpoint."""
+def generate_report():
+    """Generate an HTML report from DeepQuery metadata by calling the generateDeepQueryReport endpoint."""
     try:
         data = request.json
         deepquery_metadata = data.get('deepquery_metadata')
         color_palette = data.get('color_palette', 'red')
-
         if not deepquery_metadata:
             return jsonify({"error": "Missing deepquery_metadata"}), 400
 
-        # Make request to the generateDeepQueryPDF endpoint
+        # Make request to the generateDeepQueryReport endpoint
         auth = (AI_SDK_USERNAME, AI_SDK_PASSWORD)
         response = requests.post(
-            f"{AI_SDK_HOST}/generateDeepQueryPDF",
+            f"{AI_SDK_HOST}/generateDeepQueryReport",
             json={
                 "deepquery_metadata": deepquery_metadata,
                 "color_palette": color_palette
@@ -695,14 +759,14 @@ def generate_pdf():
         if response.status_code == 200:
             return jsonify(response.json()), 200
         else:
-            return jsonify({"error": f"PDF generation failed with status {response.status_code}"}), response.status_code
+            return jsonify({"error": f"Report generation failed with status {response.status_code}"}), response.status_code
 
     except requests.exceptions.Timeout:
-        return jsonify({"error": "PDF generation timeout"}), 504
+        return jsonify({"error": "Report generation timeout"}), 504
     except requests.exceptions.RequestException as e:
         return jsonify({"error": f"Request failed: {str(e)}"}), 500
     except Exception as e:
-        logging.error(f"Error in generate_pdf: {str(e)}")
+        logging.error(f"Error in generate_report: {str(e)}")
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
 
 @chatbot_bp.route('/submit_feedback', methods=['POST'])

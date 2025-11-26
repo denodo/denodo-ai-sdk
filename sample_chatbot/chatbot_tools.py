@@ -2,7 +2,7 @@ from utils.utils import timed
 from sample_chatbot.chatbot_utils import make_ai_sdk_request
 
 @timed
-def deep_query(analysis_request, api_host, username, password, verify_ssl=False, **llm_params):
+def deep_query(analysis_request, api_host, username, password, verify_ssl=False, vdp_database_names=None, vdp_tag_names=None, allow_external_associations=True, **llm_params):
     """
     Call the DeepQuery endpoint to perform advanced analysis.
 
@@ -17,8 +17,14 @@ def deep_query(analysis_request, api_host, username, password, verify_ssl=False,
         Dict containing the analysis result and deepquery_metadata
     """
     request_body = {
-        'question': analysis_request
+        'question': analysis_request,
+        'allow_external_associations': allow_external_associations
     }
+
+    if vdp_database_names:
+        request_body['vdp_database_names'] = vdp_database_names
+    if vdp_tag_names:
+        request_body['vdp_tag_names'] = vdp_tag_names
 
     # Add LLM parameters if provided
     request_body.update(llm_params)
@@ -29,23 +35,23 @@ def deep_query(analysis_request, api_host, username, password, verify_ssl=False,
     return response
 
 @timed
-def kb_lookup(search_query, vector_store, k = 5, result_limit = 10000):
+def kb_lookup(search_query, vector_store, k = 5, result_limit = 10000, **kwargs):
     result = vector_store.search(query = search_query, k = k, scores = False)
     information = [f"Result {i+1}: {document.page_content[:result_limit]}\n" for i, document in enumerate(result)]
     information = '\n'.join(information)
     return information
 
 @timed
-def metadata_query(search_query, api_host, username, password, database_names = None, tag_names = None, n_results = 5, verify_ssl=False):
+def metadata_query(search_query, api_host, username, password, vdp_database_names = None, vdp_tag_names = None, n_results = 5, verify_ssl=False, **kwargs):
     request_body = {
         'query': search_query,
         'n_results': n_results,
     }
 
-    if database_names:
-        request_body['vdp_database_names'] = ",".join(database_names)
-    if tag_names:
-        request_body['vdp_tag_names'] = ",".join(tag_names)
+    if vdp_database_names:
+        request_body['vdp_database_names'] = vdp_database_names
+    if vdp_tag_names:
+        request_body['vdp_tag_names'] = vdp_tag_names
 
     endpoint = f'{api_host}/similaritySearch'
     response = make_ai_sdk_request(endpoint, request_body, (username, password), "GET", verify_ssl=verify_ssl)
@@ -55,7 +61,7 @@ def metadata_query(search_query, api_host, username, password, database_names = 
     return response
 
 @timed
-def denodo_query(natural_language_query, api_host, username, password, database_names = None, tag_names = None, plot = 0, plot_details = '', custom_instructions = '', verify_ssl=False, **llm_params):
+def denodo_query(natural_language_query, api_host, username, password, vdp_database_names = None, vdp_tag_names = None, allow_external_associations=True, plot = 0, plot_details = '', custom_instructions = '', verify_ssl=False, **llm_params):
     request_body = {
         'question': natural_language_query,
         'mode': 'data',
@@ -63,12 +69,13 @@ def denodo_query(natural_language_query, api_host, username, password, database_
         'plot': bool(int(plot)),
         'plot_details': plot_details,
         'custom_instructions': custom_instructions,
+        'allow_external_associations': allow_external_associations,
     }
 
-    if database_names:
-        request_body['vdp_database_names'] = ",".join(database_names)
-    if tag_names:
-        request_body['vdp_tag_names'] = ",".join(tag_names)
+    if vdp_database_names:
+        request_body['vdp_database_names'] = vdp_database_names
+    if vdp_tag_names:
+        request_body['vdp_tag_names'] = vdp_tag_names
 
     # Add LLM parameters if provided
     request_body.update(llm_params)

@@ -13,6 +13,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.callbacks import get_usage_metadata_callback
 
 from utils import utils
+from utils import langfuse
 from utils.data_catalog import get_allowed_view_ids
 from api.utils import sdk_utils
 
@@ -72,10 +73,11 @@ async def generate_view_answer(
     }
 
     with get_usage_metadata_callback() as cb:
-        chain_config = {
-            "callbacks": utils.add_langfuse_callback(f"{llm.provider_name}.{llm.model_name}", session_id),
-            "run_name": inspect.currentframe().f_code.co_name,
-        }
+        chain_config = langfuse.build_config(
+            model_id=f"{llm.provider_name}.{llm.model_name}",
+            session_id=session_id,
+            run_name=inspect.currentframe().f_code.co_name
+        )
         response = await chain.ainvoke(chain_params, config=chain_config)
 
     response = utils.custom_tag_parser(response, 'final_answer', default = 'There was an error while generating the answer. Please try again later.')[0].strip()
@@ -135,10 +137,11 @@ async def query_to_vql(
                 "vql_restrictions": vql_restrictions,
                 "custom_instructions": custom_instructions
             },
-            config={
-                "callbacks": utils.add_langfuse_callback(f"{llm.provider_name}.{llm.model_name}", session_id),
-                "run_name": inspect.currentframe().f_code.co_name,
-            }
+            config=langfuse.build_config(
+                model_id=f"{llm.provider_name}.{llm.model_name}",
+                session_id=session_id,
+                run_name=inspect.currentframe().f_code.co_name
+            )
         )
 
     if '```' in response:
@@ -178,10 +181,11 @@ async def related_questions(
                 "question": question,
                 "sql_response": execution_result,
             },
-            config={
-                "callbacks": utils.add_langfuse_callback(f"{llm.provider_name}.{llm.model_name}", session_id),
-                "run_name": inspect.currentframe().f_code.co_name,
-            }
+            config=langfuse.build_config(
+                model_id=f"{llm.provider_name}.{llm.model_name}",
+                session_id=session_id,
+                run_name=inspect.currentframe().f_code.co_name
+            )
         )
 
     related_questions = utils.custom_tag_parser(response, 'related_question', default='')
@@ -324,10 +328,11 @@ async def metadata_category(query, vector_search_tables, llm, custom_instruction
                 "schema": [table['view_json'] for table in vector_search_tables],
                 "custom_instructions": custom_instructions
             },
-            config={
-                "callbacks": utils.add_langfuse_callback(f"{llm.provider_name}.{llm.model_name}", session_id),
-                "run_name": inspect.currentframe().f_code.co_name,
-            }
+            config=langfuse.build_config(
+                model_id=f"{llm.provider_name}.{llm.model_name}",
+                session_id=session_id,
+                run_name=inspect.currentframe().f_code.co_name
+            )
         )
 
     category = utils.custom_tag_parser(response, 'cat', default="OTHER")[0].strip()
@@ -349,10 +354,11 @@ async def direct_metadata_category(query, vector_search_tables, llm, custom_inst
                 "schema": [table['view_json'] for table in vector_search_tables],
                 "custom_instructions": custom_instructions
             },
-            config={
-                "callbacks": utils.add_langfuse_callback(f"{llm.provider_name}.{llm.model_name}", session_id),
-                "run_name": inspect.currentframe().f_code.co_name,
-            }
+            config=langfuse.build_config(
+                model_id=f"{llm.provider_name}.{llm.model_name}",
+                session_id=session_id,
+                run_name=inspect.currentframe().f_code.co_name
+            )
         )
 
     category = "METADATA"
@@ -372,10 +378,11 @@ async def direct_sql_category(query, vector_search_tables, llm, custom_instructi
             "instruction": query,
             "schema": sdk_utils.readable_tables(vector_search_tables),
             "custom_instructions": custom_instructions
-        }, config={
-            "callbacks": utils.add_langfuse_callback(f"{llm.provider_name}.{llm.model_name}", session_id),
-            "run_name": inspect.currentframe().f_code.co_name,
-        })
+        }, config=langfuse.build_config(
+            model_id=f"{llm.provider_name}.{llm.model_name}",
+            session_id=session_id,
+            run_name=inspect.currentframe().f_code.co_name
+        ))
 
     category = "SQL"
     filter_params = utils.custom_tag_parser(response, 'query', default=[])
@@ -423,10 +430,11 @@ async def sql_category(query, vector_search_tables, llm, mode = 'default', custo
                     "instruction": query,
                     "schema": sdk_utils.readable_tables(vector_search_tables),
                     "custom_instructions": custom_instructions
-                }, config={
-                    "callbacks": utils.add_langfuse_callback(f"{llm.provider_name}.{llm.model_name}", session_id),
-                    "run_name": inspect.currentframe().f_code.co_name,
-                })
+                }, config=langfuse.build_config(
+                    model_id=f"{llm.provider_name}.{llm.model_name}",
+                    session_id=session_id,
+                    run_name=inspect.currentframe().f_code.co_name
+                ))
             )
 
             # Wait for either task to complete
@@ -487,10 +495,11 @@ async def graph_generator(
             "sample_data": json.dumps(execution_result_df[:3].to_dict(orient='records')),
             "sample_data_stats": data_stats
         },
-            config = {
-                "callbacks": utils.add_langfuse_callback(f"{llm.provider_name}.{llm.model_name}", session_id),
-                "run_name": inspect.currentframe().f_code.co_name,
-            }
+            config = langfuse.build_config(
+                model_id=f"{llm.provider_name}.{llm.model_name}",
+                session_id=session_id,
+                run_name=inspect.currentframe().f_code.co_name
+            )
         )
 
     response = response.replace('```python', '<python>').replace('```', '</python>').strip()
@@ -550,10 +559,11 @@ async def query_fixer(
     with get_usage_metadata_callback() as cb:
         response = await final_chain.ainvoke(
             parameters,
-            config = {
-                "callbacks": utils.add_langfuse_callback(f"{llm.provider_name}.{llm.model_name}", session_id),
-                "run_name": inspect.currentframe().f_code.co_name,
-            }
+            config = langfuse.build_config(
+                model_id=f"{llm.provider_name}.{llm.model_name}",
+                session_id=session_id,
+                run_name=inspect.currentframe().f_code.co_name
+            )
         )
 
     if '```' in response:
@@ -621,10 +631,11 @@ async def query_reviewer(
                 "query": vql_query,
                 "schema": relevant_tables
             },
-            config = {
-                "callbacks": utils.add_langfuse_callback(f"{llm.provider_name}.{llm.model_name}", session_id),
-                "run_name": inspect.currentframe().f_code.co_name,
-            }
+            config = langfuse.build_config(
+                model_id=f"{llm.provider_name}.{llm.model_name}",
+                session_id=session_id,
+                run_name=inspect.currentframe().f_code.co_name
+            )
         )
 
     if '```' in response:
@@ -697,7 +708,8 @@ async def get_relevant_tables(
     k = 5,
     use_views = '',
     expand_set_views = True,
-    vector_search_sample_data_k = 3
+    vector_search_sample_data_k = 3,
+    allow_external_associations = True
 ):
     vdb_list = [db.strip() for db in vdb_list.split(',')] if vdb_list else []
     tag_list = [tag.strip() for tag in tag_list.split(',')] if tag_list else []
@@ -790,6 +802,24 @@ async def get_relevant_tables(
         # Lookup new associations in vector_store
         with sdk_utils.timing_context("vector_store_search_time", timings):
             association_lookup = vector_store.get_views(new_associations)
+
+        if not allow_external_associations and (vdb_list or tag_list):
+            logging.info("Restricting external associations based on user filter...")
+            filtered_lookup = []
+            for assoc_doc in association_lookup:
+                db_match = not vdb_list
+                tag_match = not tag_list
+
+                if vdb_list:
+                    db_match = assoc_doc.metadata.get('database_name') in vdb_list
+
+                if tag_list:
+                    tag_match = any(f"tag_{tag}" in assoc_doc.metadata and assoc_doc.metadata[f"tag_{tag}"] == "1" for tag in tag_list)
+
+                if db_match and tag_match:
+                    filtered_lookup.append(assoc_doc)
+
+            association_lookup = filtered_lookup
 
         # Add new associations to relevant_tables
         for assoc in association_lookup:

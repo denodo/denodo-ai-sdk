@@ -250,7 +250,7 @@ class UniformLLM:
             "api_key": api_key,
         }
 
-        OPENAI_REASONING_EFFORTS = ["minimal", "low", "medium", "high"]
+        OPENAI_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high"]
 
         # Allow to set the reasoning effort via model_id, like o1-high, o1-medium, gpt-5-high
         if any(effort in self.model_name for effort in OPENAI_REASONING_EFFORTS):

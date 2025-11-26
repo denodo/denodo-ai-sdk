@@ -20,7 +20,6 @@ The complete user manual for the Denodo AI SDK is available [here](https://commu
 
 1. Delete any previous vector store and virtual environment.
 2. Create a new virtual environment (`python -m venv venv`), activate it (`source venv/bin/activate` or `.\venv\Scripts\activate`) and install the requirements.txt (`python -m pip install -r requirements.txt`)
-3. Run `venv/bin/playwright install`
 
 ### Configuration
 

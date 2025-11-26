@@ -1,0 +1,28 @@
+.custom-report-toast {
+  background-color: #e7e9ea !important;
+  border: none !important;
+  border-radius: .75rem !important;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1), 0 4px 12px rgba(0, 0, 0, 0.1);
+  margin-bottom: 110px !important;
+  z-index: 1060;
+}
+
+.custom-report-toast .toast-header {
+  background-color: #e7e9ea !important;
+  color: #006699 !important;
+  border-bottom: none !important;
+  padding-bottom: 0;
+}
+
+.custom-report-toast .toast-body {
+  color: black !important;
+  font-weight: 500;
+}
+
+.toast-icon-container {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

@@ -40,8 +40,8 @@ const CSVUploadModal = ({ show, handleClose, onUpload }) => {
   };
 
   return (
-    <Modal show={show} onHide={handleClose} style={{ '--bs-modal-bg': '#112533' }} contentClassName="text-white border border-white">
-      <Modal.Header closeButton className="custom-header-modal">
+    <Modal show={show} onHide={handleClose} centered>
+      <Modal.Header closeButton data-bs-theme="light">
         <Modal.Title>Upload CSV File</Modal.Title>
       </Modal.Header>
       <Modal.Body>
@@ -50,7 +50,7 @@ const CSVUploadModal = ({ show, handleClose, onUpload }) => {
             Please make sure your CSV file is UTF-8 encoded. The recommended delimiter is semicolon (;).
           </small>
         </Alert>
-        <Form onSubmit={handleSubmit}>
+        <Form id="csv-upload-form" onSubmit={handleSubmit}>
           <Form.Group controlId="formFile" className="mb-3">
             <Form.Label>Select CSV file</Form.Label>
             <Form.Control type="file" onChange={handleFileChange} accept=".csv" />
@@ -64,7 +64,7 @@ const CSVUploadModal = ({ show, handleClose, onUpload }) => {
               onChange={(e) => setDelimiter(e.target.value)}
               maxLength={1}
             />
-            <Form.Text className="text-white">
+            <Form.Text>
               Default is semicolon (;). Use comma (,) for comma-separated files.
             </Form.Text>
           </Form.Group>
@@ -78,7 +78,19 @@ const CSVUploadModal = ({ show, handleClose, onUpload }) => {
               onChange={(e) => setDescription(e.target.value)}
             />
           </Form.Group>
-          <Button variant="primary" type="submit" disabled={isLoading} style={{ backgroundColor: '#2D3E4B', borderColor: '#2D3E4B' }}>
+        </Form>
+      </Modal.Body>
+      
+      <Modal.Footer>
+        <Button variant="light" onClick={handleClose} disabled={isLoading}>
+          Cancel
+        </Button>
+        <Button 
+          variant="dark" 
+          type="submit" 
+          form="csv-upload-form"
+          disabled={isLoading || !file || !description}
+        >
             {isLoading ? (
               <>
                 <Spinner
@@ -93,9 +105,8 @@ const CSVUploadModal = ({ show, handleClose, onUpload }) => {
             ) : (
               'Upload'
             )}
-          </Button>
-        </Form>
-      </Modal.Body>
+        </Button>
+      </Modal.Footer>
     </Modal>
   );
 };

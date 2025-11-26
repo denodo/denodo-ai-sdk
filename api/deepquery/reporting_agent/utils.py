@@ -1,12 +1,9 @@
-import sys
 import base64
 import logging
 import os
-import asyncio
 
 from pathlib import Path
 from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +21,9 @@ def load_color_palettes():
     for color_name in ['blue', 'black', 'red', 'green']:
         color_upper = color_name.upper()
         palettes[color_name] = {
-            'primary': os.getenv(f'DEEPQUERY_PDF_COLOR_SCHEME_{color_upper}_PRIMARY',
+            'primary': os.getenv(f'DEEPQUERY_REPORT_COLOR_SCHEME_{color_upper}_PRIMARY',
                                default_palettes[color_name]['primary']),
-            'text': os.getenv(f'DEEPQUERY_PDF_COLOR_SCHEME_{color_upper}_TEXT',
+            'text': os.getenv(f'DEEPQUERY_REPORT_COLOR_SCHEME_{color_upper}_TEXT',
                             default_palettes[color_name]['text']),
             'name': color_name
         }
@@ -81,6 +78,9 @@ def get_css_styles(palette):
         color: #333;
         background-color: #fff;
         font-size: 11pt;
+        max-width: 900px;
+        margin: 5px auto;
+        padding: 16px;
     }}
 
     /* Center images */
@@ -356,7 +356,7 @@ def get_css_styles(palette):
     }}
     """
 
-def prepare_html_for_pdf(html_content, logo_data_uri=None):
+def prepare_html(html_content, logo_data_uri=None):
     """
     Processes raw HTML to add branding and responsive classes for styling.
     Returns the processed HTML for the 'body' of the document.
@@ -423,16 +423,17 @@ def prepare_html_for_pdf(html_content, logo_data_uri=None):
     return str(body)
 
 
-async def convert_html_to_pdf(html_content, output_file, color_palette, title):
-    """Convert HTML file to PDF using Playwright with professional styling."""
-    output_path = Path(output_file)
-
-    logger.info(f"Converting the provided html_content (length: {len(html_content)}) to {output_file} using '{color_palette['name']}' theme with Playwright...")
+def build_styled_html(html_content: str, color_palette: dict, title: str) -> str:
+    """
+    Build a complete styled HTML document with Denodo branding and color palette.
+    """
+    logger.info(
+        f"Building styled HTML document (input length: {len(html_content)}) "
+        f"using '{color_palette['name']}' theme."
+    )
 
     logo_data_uri = get_denodo_logo()
-
-    processed_body_content = prepare_html_for_pdf(html_content, logo_data_uri)
-
+    processed_body_content = prepare_html(html_content, logo_data_uri)
     css_styles = get_css_styles(color_palette)
 
     final_html_doc = f"""
@@ -447,43 +448,4 @@ async def convert_html_to_pdf(html_content, output_file, color_palette, title):
     </html>
     """
 
-    async def _convert_with_playwright():
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
-            await page.set_content(final_html_doc)
-
-            # Generate PDF with A4 format and background graphics
-            await page.pdf(
-                path=output_path,
-                format='A4',
-                print_background=True,
-                margin={
-                    'top': '2cm',
-                    'right': '1.5cm',
-                    'bottom': '2cm',
-                    'left': '1.5cm'
-                }
-            )
-
-            await browser.close()
-
-    try:
-        await _convert_with_playwright()
-        logger.info(f"Successfully generated PDF using Playwright: {output_path}")
-    except NotImplementedError as e:
-        if sys.platform == 'win32':
-            logger.info("NotImplementedError detected on Windows, trying with WindowsSelectorEventLoopPolicy...")
-            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-            try:
-                await _convert_with_playwright()
-                logger.info(f"Successfully generated PDF using Playwright after changing Windows event loop policy: {output_path}")
-            except Exception as retry_e:
-                logger.error(f"Error converting HTML to PDF with Playwright after changing Windows event loop policy: {retry_e}")
-                raise
-        else:
-            logger.error(f"NotImplementedError on non-Windows platform: {e}")
-            raise
-    except Exception as e:
-        logger.error(f"Error converting HTML to PDF with Playwright: {e}")
-        raise
+    return final_html_doc

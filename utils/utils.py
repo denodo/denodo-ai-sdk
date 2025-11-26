@@ -24,11 +24,10 @@ from time import time
 from uuid import uuid4
 from boto3 import Session
 from datetime import datetime
-from functools import wraps, cache
+from functools import wraps
 from botocore.session import get_session
 from langchain_core.documents.base import Document
 from botocore.credentials import RefreshableCredentials
-from utils.version import AI_SDK_VERSION
 
 # ContextVar to store the current endpoint name
 current_endpoint: contextvars.ContextVar[str] = contextvars.ContextVar('current_endpoint', default=None)
@@ -117,42 +116,9 @@ def log_params(func):
     else:
         return sync_wrapper
 
-@cache
-def get_langfuse_callback(model_id, session_id = None):
-    if os.getenv('LANGFUSE_PUBLIC_KEY') and os.getenv('LANGFUSE_USER'):
-        from langfuse.callback import CallbackHandler
-        params = {
-            "user_id": os.getenv('LANGFUSE_USER'),
-            "release": AI_SDK_VERSION,
-            "metadata": {
-                "model_id": model_id
-            }
-        }
-        if session_id is not None:
-            params["session_id"] = session_id
-        return CallbackHandler(**params)
-    return None
-
-def generate_langfuse_session_id():
-    """Generate a session ID in format: timestamp_user_shortUUID"""
-    user = os.getenv('LANGFUSE_USER')
-    if user:
-        current_time = datetime.now().strftime("%Y_%m_%d_%H_%M")
-        session_uuid = uuid4().hex[:4]
-        return f"{current_time}_{user}_{session_uuid}"
-    else:
-        return None
-
 def generate_transaction_id():
     """Generates a unique transaction ID (UUID4) for tracking a request."""
     return str(uuid4())
-
-def add_langfuse_callback(model_id, session_id = None):
-    callbacks = []
-    langfuse_callback = get_langfuse_callback(model_id, session_id)
-    if langfuse_callback:
-        callbacks.append(langfuse_callback)
-    return callbacks
 
 # Timer Decorator
 def timed(func):
