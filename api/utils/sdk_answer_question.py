@@ -48,7 +48,8 @@ async def process_sql_category(request, vector_search_tables, sql_gen_llm, chat_
         )
 
 
-    max_attempts = 2
+    # For now, we are only having this run once
+    max_attempts = 1
     attempt = 0
     fixer_history = []
     original_vql_query = vql_query

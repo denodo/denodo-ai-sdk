@@ -120,7 +120,7 @@ async def deep_query_post(
         raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
 
     # Get relevant tables using enhanced schema discovery
-    vector_search_tables, sample_data, timings = await sdk_ai_tools.get_relevant_tables(
+    vector_search_tables, sample_data, timings, error_message = await sdk_ai_tools.get_relevant_tables(
         query=endpoint_request.question,
         vector_store=vector_store,
         sample_data_vector_store=sample_data_vector_store,
@@ -133,6 +133,9 @@ async def deep_query_post(
         vector_search_sample_data_k=endpoint_request.vector_search_sample_data_k,
         allow_external_associations=endpoint_request.allow_external_associations
     )
+    
+    if not vector_search_tables:
+        raise HTTPException(status_code=404, detail=error_message or "The vector search result returned 0 views. This could be due to limited permissions or an empty vector store.")
 
     # Format schema text using the same function as answerQuestion.py
     formatted_schema = sdk_ai_tools.format_schema_text(

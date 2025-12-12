@@ -723,9 +723,12 @@ async def get_relevant_tables(
     # Wait for both tasks to complete
     embedded_query, valid_view_ids = await asyncio.gather(embedding_task, view_ids_task)
 
+    # Check if user has any view permissions at all
+    if not valid_view_ids:
+        return [], {}, timings, "You don't have permissions to access any views. Please contact your administrator."
+
     # Convert view_ids to strings
     valid_view_ids = [str(view_id) for view_id in valid_view_ids]
-
     search_params = {
         "vector": embedded_query,
         "k": k,
@@ -862,4 +865,24 @@ async def get_relevant_tables(
                         column_samples[col].append(val)
 
                 sample_data[view_id] = column_samples
-    return relevant_tables, sample_data, timings
+    
+    # Generate specific error message if no relevant tables were found
+    error_message = None
+    if not relevant_tables:
+        if not vector_search:
+            if vdb_list or tag_list:
+                filters = []
+                if vdb_list:
+                    filters.append(f"database filters: {', '.join(vdb_list)}")
+                if tag_list:
+                    filters.append(f"tag filters: {', '.join(tag_list)}")
+                
+                error_message = f"No relevant views found matching your query with the specified {' and '.join(filters)}. Try adjusting your filters or query."
+            else:
+                error_message = "No relevant views found matching your query. Please try a different query."
+        elif use_views and not expand_set_views:
+            error_message = f"The specified views ({', '.join(use_views)}) were not found or you don't have permission to access them."
+        else:
+            error_message = "The vector search found results, but they were filtered out due to permission restrictions."
+    
+    return relevant_tables, sample_data, timings, error_message
