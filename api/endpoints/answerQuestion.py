@@ -10,13 +10,14 @@
 """
 
 import os
+import json
 import logging
 import traceback
 
 from pydantic import BaseModel, Field
 from typing import Dict, List, Literal
 
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -251,3 +252,174 @@ async def process_question(request_data: answerQuestionRequest, auth: str):
     response['llm_model'] = request_data.llm_model
 
     return JSONResponse(content=jsonable_encoder(response), media_type='application/json')
+
+
+@router.get( # SSE response
+        '/answerQuestion/stream',
+        response_class = StreamingResponse,
+        tags = ['Ask a Question']
+)
+@handle_endpoint_error("answerQuestion")
+async def answer_question_stream(
+    request: answerQuestionRequest = Query(),
+    auth: str = Depends(authenticate),
+):
+    """This endpoint processes a natural language question using SSE (Server-Sent Events):
+
+    - Streams real-time progress updates
+    - Searches for relevant tables using vector search
+    - Determines whether the question should be answered using a SQL query or a metadata search
+    - Generates a VQL query using an LLM if the question should be answered using a SQL query
+    - Executes the VQL query and gets the data
+    - Generates an answer to the question using the data and the VQL query
+
+    This endpoint will also automatically look for the the following values in the environment variables for convenience:
+
+    - EMBEDDINGS_PROVIDER
+    - EMBEDDINGS_MODEL
+    - VECTOR_STORE
+    - LLM_PROVIDER
+    - LLM_MODEL
+    - LLM_TEMPERATURE
+    - LLM_MAX_TOKENS
+    - CUSTOM_INSTRUCTIONS
+    - VQL_EXECUTE_ROWS_LIMIT
+    - LLM_RESPONSE_ROWS_LIMIT
+
+    You can also override the LLM temperature and max_tokens via API parameters for fine-tuning the model behavior."""
+    return StreamingResponse(
+        sse_process_question(request, auth),
+        media_type="text/event-stream"
+    )
+
+
+async def sse_process_question(request_data: answerQuestionRequest, auth: str):
+    """Generator function to process the question and stream progress updates via SSE"""
+    # Generate session ID for Langfuse debugging purposes
+    session_id = generate_session_id(request_data.question)
+
+    try:
+        llm = state_manager.get_llm(
+            provider_name=request_data.llm_provider,
+            model_name=request_data.llm_model,
+            temperature=request_data.llm_temperature,
+            max_tokens=request_data.llm_max_tokens
+        )
+
+        vector_store = state_manager.get_vector_store(
+            provider=request_data.vector_store_provider,
+            embeddings_provider=request_data.embeddings_provider,
+            embeddings_model=request_data.embeddings_model
+        )
+        sample_data_vector_store = state_manager.get_vector_store(
+            provider=request_data.vector_store_provider,
+            embeddings_provider=request_data.embeddings_provider,
+            embeddings_model=request_data.embeddings_model,
+            index_name="ai_sdk_sample_data"
+        )
+    except Exception as e:
+        logging.error(f"Resource initialization error: {str(e)}")
+        logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
+        error_data = {"error": f"Error initializing resources: {str(e)}"}
+        yield f"data: {json.dumps(error_data)}\n\n"
+        return
+
+    vector_search_tables, sample_data, timings = await sdk_ai_tools.get_relevant_tables(
+        query=request_data.question,
+        vector_store=vector_store,
+        sample_data_vector_store=sample_data_vector_store,
+        vdb_list=request_data.vdp_database_names,
+        tag_list=request_data.vdp_tag_names,
+        auth=auth,
+        k=request_data.vector_search_k,
+        use_views=request_data.use_views,
+        expand_set_views=request_data.expand_set_views,
+        vector_search_sample_data_k=request_data.vector_search_sample_data_k,
+        allow_external_associations=request_data.allow_external_associations
+    )
+
+    if not vector_search_tables:
+        error_data = {"error": "The vector search result returned 0 views. This could be due to limited permissions or an empty vector store."}
+        yield f"data: {json.dumps(error_data)}\n\n"
+        return
+
+    # Send vector search completion message
+    tables_list = [table.get('database_name', '') + '.' + table.get('view_name', '') for table in vector_search_tables]
+    vector_progress_data = {
+        "status": "vector_search_completed",
+        "result": {
+            "answer": tables_list,
+            "message": "Vector search completed",
+            "tables_found": len(vector_search_tables)
+        }
+    }
+
+    yield f"data: {json.dumps(vector_progress_data)}\n\n"
+
+    # Combine custom instructions from environment and request
+    base_instructions = os.getenv('CUSTOM_INSTRUCTIONS', '')
+    if request_data.custom_instructions:
+        request_data.custom_instructions = f"{base_instructions}\n{request_data.custom_instructions}".strip()
+    else:
+        request_data.custom_instructions = base_instructions
+
+    with timing_context("llm_time", timings):
+        category, category_response, category_related_questions, sql_category_tokens = await sdk_ai_tools.sql_category(
+            query=request_data.question,
+            vector_search_tables=vector_search_tables,
+            llm=llm,
+            mode=request_data.mode,
+            custom_instructions=request_data.custom_instructions,
+            session_id=session_id
+        )
+    
+    if category == "SQL":
+        async for chunk in sdk_answer_question.async_gen_process_sql_category(
+            request=request_data,
+            vector_search_tables=vector_search_tables,
+            category_response=category_response,
+            auth=auth,
+            timings=timings,
+            session_id=session_id,
+            sample_data=sample_data,
+            chat_llm=llm,
+            sql_gen_llm=llm
+        ):
+            event = chunk.get("type")
+            c_data = chunk.get("data")
+
+            if event == "query_gen":
+                # print(c_data)
+                vql_progress_data = {
+                    "status": "vql_generation_completed",
+                    "result": {
+                        "answer": c_data,
+                        "message": "VQL generation completed"
+                    }
+                }
+                yield f"data: {json.dumps(vql_progress_data)}\n\n"
+            elif event == "result":
+                response = c_data
+
+        response['tokens'] = add_tokens(response['tokens'], sql_category_tokens)
+    elif category == "METADATA":
+        response = sdk_answer_question.process_metadata_category(
+            category_response=category_response,
+            category_related_questions=category_related_questions,
+            vector_search_tables=vector_search_tables,
+            timings=timings,
+            tokens=sql_category_tokens,
+            disclaimer=request_data.disclaimer
+        )
+    else:
+        response = sdk_answer_question.process_unknown_category(timings=timings)
+    
+    response['llm_provider'] = request_data.llm_provider
+    response['llm_model'] = request_data.llm_model
+    
+    # Send final completion message
+    final_data = {
+        "status": "completed",
+        "result": jsonable_encoder(response)
+    }
+    yield f"data: {json.dumps(final_data)}\n\n"
