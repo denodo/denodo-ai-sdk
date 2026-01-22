@@ -135,10 +135,10 @@ def log_output(process, process_type, success_event, production=False, root_path
 
             if (process_type == "api" and
                     not data_catalog_warning_shown and
-                    "Could not establish connection to Data Catalog" in line):
+                    "Could not establish connection to Data Marketplace" in line):
                 console.print(Panel(
-                    "[bold yellow]WARNING: Data Catalog Connection Failed[/]\n"
-                    "[yellow]Could not establish connection to Data Catalog. Please check your configuration.",
+                    "[bold yellow]WARNING: Data Marketplace Connection Failed[/]\n"
+                    "[yellow]Could not establish connection to Data Marketplace. Please check your configuration.",
                     border_style="yellow",
                     width=PANEL_WIDTH
                 ))

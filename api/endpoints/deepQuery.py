@@ -119,15 +119,14 @@ async def deep_query_post(
         logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
 
-    # Get relevant tables using enhanced schema discovery
-    vector_search_tables, sample_data, timings = await sdk_ai_tools.get_relevant_tables(
+    vector_search_tables, sample_data, timings, error_message = await sdk_ai_tools.get_relevant_tables(
         query=endpoint_request.question,
         vector_store=vector_store,
         sample_data_vector_store=sample_data_vector_store,
         vdb_list=endpoint_request.vdp_database_names,
         tag_list=endpoint_request.vdp_tag_names,
         auth=auth,
-        k=endpoint_request.vector_search_k,
+        vector_search_k=endpoint_request.vector_search_k,
         use_views=endpoint_request.use_views,
         expand_set_views=endpoint_request.expand_set_views,
         vector_search_sample_data_k=endpoint_request.vector_search_sample_data_k,

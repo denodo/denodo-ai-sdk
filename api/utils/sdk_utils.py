@@ -43,13 +43,39 @@ def timing_context(name, timings):
     for key, value in timings.items():
         timings[key] = round(value, 2)
 
-def readable_tables(relevant_tables):
+def readable_tables(relevant_tables, column_description_char_limit = None):
     readable_output = ""
+    include_descriptions = column_description_char_limit is not None and column_description_char_limit > 0
+
+    def truncate(text):
+        if column_description_char_limit and len(text) > column_description_char_limit:
+            return f"{text[:column_description_char_limit]}..."
+        return text
 
     for table in relevant_tables:
         table_schema = table['view_json']['schema']
-        table_columns = [column['columnName'] for column in table_schema]
-        readable_output += f'<table>Table {table["view_name"]} with columns {", ".join(table_columns)}\n</table>\n'
+        table_name = table['view_json']['tableName']
+        table_description = table['view_json'].get('description', '')
+
+        readable_output += "<table>\n"
+        readable_output += f"Table: {table_name}\n"
+
+        if include_descriptions and table_description:
+            readable_output += f"Table description: {truncate(table_description)}\n"
+
+        readable_output += "Table columns:\n"
+        for column in table_schema:
+            column_name = column.get('columnName', '').replace('"', '').replace("'", "")
+            column_description = column.get('description', '')
+            if include_descriptions:
+                if column_description:
+                    readable_output += f"   - {column_name}. Description: {truncate(column_description)}\n"
+                else:
+                    readable_output += f"   - {column_name}\n"
+            else:
+                readable_output += f"   - {column_name}\n"
+
+        readable_output += "</table>\n"
 
     return readable_output
 
@@ -525,14 +551,44 @@ def process_metadata_source(
 
     # Validate response
     if not result:
-        logging.info(f"Empty response from the Denodo Data Catalog for {source_type.lower()} {source_name}")
+        logging.info(f"Empty response from the Denodo Data Marketplace for {source_type.lower()} {source_name}")
         return {}, []
 
     # Process schema
     if isinstance(result, dict):
         db_schema = result
         logging.info(f"{source_type} schema for {source_name} has {calculate_tokens(str(db_schema))} tokens.")
-        db_schema_text = [schema_summary(table) for table in db_schema['views']]
+
+        db_schema_text = []
+        found_tags_by_db = {} # For each synced DB -> [Partial Tags]
+        found_dbs_by_tag = {} # For each synced Tag -> [Partial DBs]
+        found_tags_by_tag = {} # For each synced Tag -> [Partial Tags]
+
+        if 'views' in db_schema:
+            for view in db_schema['views']:
+                db_schema_text.append(schema_summary(view))
+
+                if vector_store:
+                    tags = view.get('tagDetails', [])
+
+                    # Get partial tags
+                    if tags:
+                        for tag in tags:
+                            if 'name' in tag:
+                                if source_type == "DATABASE":
+                                    found_tags_by_db.setdefault(source_name, set()).add(tag['name'])
+
+                                elif source_type == "TAG":
+                                    found_tags_by_tag.setdefault(source_name, set()).add(tag['name'])
+
+                    # Get partial DBs
+                    if source_type == "TAG":
+                        table_name = view.get('tableName', '')
+                        if '.' in table_name:
+                            db_name = table_name.split('.')[0]
+
+                            if db_name:
+                                found_dbs_by_tag.setdefault(source_name, set()).add(db_name)
 
         # Add to vector store if provided
         if vector_store:
@@ -541,7 +597,10 @@ def process_metadata_source(
                 views=views,
                 parallel=request.parallel,
                 source_type=source_type,
-                source_name=source_name
+                source_name=source_name,
+                tags_by_db=found_tags_by_db,
+                dbs_by_tag=found_dbs_by_tag,
+                tags_by_tag=found_tags_by_tag
             )
 
         # Add sample data if enabled
@@ -616,14 +675,13 @@ def delete_by_db_or_tag(vector_store, sample_data_vector_store, vdp_database_nam
     more_results_left = True
 
     while more_results_left:
-        results = vector_store.search_by_vector(
-            vector=[0]*vector_store.dimensions,
-            k=K_BATCH_SIZE,
-            database_names=vdp_database_names,
-            tag_names=vdp_tag_names,
-            view_ids=allowed_view_ids,
-            view_names=None
-        )
+        results = vector_store.search_batched(
+                vector=vector_store.search_vector,
+                k=K_BATCH_SIZE,
+                database_names=vdp_database_names,
+                tag_names=vdp_tag_names,
+                view_ids=allowed_view_ids
+            )
 
         if not results:
             break
@@ -631,7 +689,7 @@ def delete_by_db_or_tag(vector_store, sample_data_vector_store, vdp_database_nam
         view_ids_to_delete = set()
         document_ids_to_delete = set()
 
-        last_update_dict = vector_store.get_last_update_dict()
+        last_update_dict = vector_store.get_last_update_dict() or {}
         for doc in results:
             if not delete_conflicting:
                 if not is_non_conflicting_doc(doc, vdp_database_names, vdp_tag_names, last_update_dict):
@@ -695,7 +753,7 @@ def get_by_db_or_tag(
         if current_k > max_results_limit:
             logging.warning(f"K limit ({max_results_limit}) reached. Returning partial results.")
             all_results = vector_store.search_by_vector(
-                vector=[0] * vector_store.dimensions,
+                vector=vector_store.search_vector,
                 k=max_results_limit,
                 database_names=vdp_database_names,
                 tag_names=vdp_tag_names
@@ -703,7 +761,7 @@ def get_by_db_or_tag(
             break
 
         results = vector_store.search_by_vector(
-            vector=[0] * vector_store.dimensions,
+            vector=vector_store.search_vector,
             k=current_k,
             database_names=vdp_database_names,
             tag_names=vdp_tag_names
@@ -778,11 +836,11 @@ def handle_detagged_views(
     """
     view_ids_to_delete = []
     conflicting_docs_to_update = []
-    last_update_dict = vector_store.get_last_update_dict()
+    last_update_dict = vector_store.get_last_update_dict() or {}
 
     for view_id in detagged_view_ids:
         # Fetch all documents/chunks associated with this view_id
-        docs = vector_store.search_by_vector(vector=[0] * vector_store.dimensions, k=100, view_ids=[view_id])
+        docs = vector_store.search_by_vector(vector=vector_store.search_vector, k=100, view_ids=[view_id])
         if not docs:
             continue
 
@@ -830,29 +888,31 @@ def handle_detagged_views(
 
 def get_user_synced_resources(vector_store, allowed_view_ids_str):
     """
-    Gets the last_update dict and filters it based on user's allowed_view_ids.
+    Gets the synced resources (last_update and partial_resources),
+    filtered based on user's allowed_view_ids.
     """
-    # Get the complete 'last_update' dictionary
-    full_last_update = vector_store.get_last_update_dict()
-    if not full_last_update:
-        logging.info("getVectorDBInfo: No 'last_update' info found in vector store.")
-        return {}
+    full_last_update, full_partial_resources = vector_store.get_sync_metadata()
+
+    if full_last_update is None: full_last_update = {}
+    if full_partial_resources is None: full_partial_resources = {}
+
+    if not full_last_update and not full_partial_resources:
+        logging.info("getVectorDBInfo: No sync info found in vector store.")
+        return {}, {}
 
     filtered_last_update = {}
-    dummy_vector = [0] * vector_store.dimensions
+    filtered_partial_resources = {
+        "partial_tags_by_db": {},
+        "partial_dbs_by_tag": {},
+        "partial_tags_by_tag": {}
+    }
 
     # Filter Databases
     if "DATABASE" in full_last_update:
         filtered_last_update["DATABASE"] = {}
         for db_name, timestamp in full_last_update["DATABASE"].items():
             # Check if at least 1 view exists in this DB AND in the user's permissions
-            results = vector_store.search_by_vector(
-                vector=dummy_vector,
-                k=1, # We only need to know if at least 1 exists
-                view_ids=allowed_view_ids_str,
-                database_names=[db_name]
-            )
-            if results: # If the list is not empty, the user has access
+            if vector_store.check_existence(allowed_view_ids_str, database_names=[db_name]):
                 filtered_last_update["DATABASE"][db_name] = timestamp
 
     # Filter Tags
@@ -860,13 +920,47 @@ def get_user_synced_resources(vector_store, allowed_view_ids_str):
         filtered_last_update["TAG"] = {}
         for tag_name, timestamp in full_last_update["TAG"].items():
             # Check if at least 1 view exists with this Tag AND in the user's permissions
-            results = vector_store.search_by_vector(
-                vector=dummy_vector,
-                k=1, # We only need to know if at least 1 exists
-                view_ids=allowed_view_ids_str,
-                tag_names=[tag_name]
-            )
-            if results: # If the list is not empty, the user has access
+            if vector_store.check_existence(allowed_view_ids_str, tag_names=[tag_name]):
                 filtered_last_update["TAG"][tag_name] = timestamp
 
-    return filtered_last_update
+
+    # Filter partial_tags_by_db
+    p_tags_by_db = full_partial_resources.get("partial_tags_by_db", {})
+    for db_name, tags_list in p_tags_by_db.items():
+        valid_tags = []
+        if tags_list:
+            for tag in tags_list:
+                # Has the user access to (DB + TAG)?
+                if vector_store.check_existence(allowed_view_ids_str, database_names=[db_name], tag_names=[tag]):
+                    valid_tags.append(tag)
+
+        if valid_tags:
+            filtered_partial_resources["partial_tags_by_db"][db_name] = valid_tags
+
+    # Filter partial_dbs_by_tag
+    p_dbs_by_tag = full_partial_resources.get("partial_dbs_by_tag", {})
+    for tag_name, db_list in p_dbs_by_tag.items():
+        valid_dbs = []
+        if db_list:
+            for db_name in db_list:
+                # Has the user access to (TAG + DB)?
+                if vector_store.check_existence(allowed_view_ids_str, database_names=[db_name], tag_names=[tag_name]):
+                    valid_dbs.append(db_name)
+
+        if valid_dbs:
+            filtered_partial_resources["partial_dbs_by_tag"][tag_name] = valid_dbs
+
+    # Filter partial_tags_by_tag
+    p_tags_by_tag = full_partial_resources.get("partial_tags_by_tag", {})
+    for tag_name, tags_list in p_tags_by_tag.items():
+        valid_tags = []
+        if tags_list:
+            for other_tag in tags_list:
+                # Has the user access to views that have BOTH the source TAG and the found TAG?
+                if vector_store.check_existence(allowed_view_ids_str, tag_names=[tag_name, other_tag]):
+                    valid_tags.append(other_tag)
+
+        if valid_tags:
+            filtered_partial_resources["partial_tags_by_tag"][tag_name] = valid_tags
+
+    return filtered_last_update, filtered_partial_resources

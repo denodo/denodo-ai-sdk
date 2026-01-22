@@ -57,11 +57,11 @@ async def getVectorDBInfo(auth: str = Depends(authenticate)):
     except DataCatalogAuthError as e:
         raise HTTPException(status_code=401, detail=f"Authentication failed during getVectorDBInfo: {str(e)}") from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get user permissions from Data Catalog: {str(e)}") from e
+        raise HTTPException(status_code=500, detail=f"Failed to get user permissions from Data Marketplace: {str(e)}") from e
 
     if not allowed_view_ids_str:
         logging.info("getVectorDBInfo: User has no allowed view IDs.")
-        return JSONResponse(content={"syncedResources": {}}, status_code=200)
+        return JSONResponse(content={"syncedResources": {}, "partialResources": {}}, status_code=200)
 
     try:
         vector_store = state_manager.get_vector_store(
@@ -75,11 +75,11 @@ async def getVectorDBInfo(auth: str = Depends(authenticate)):
         raise HTTPException(status_code=500, detail=f"Failed to get vector store from state manager: {e}") from e
 
     try:
-        filtered_resources = get_user_synced_resources(
+        filtered_synced_resources, filtered_partial_resources = get_user_synced_resources(
             vector_store=vector_store,
             allowed_view_ids_str=allowed_view_ids_str
         )
-        return JSONResponse(content={"syncedResources": filtered_resources}, status_code=200)
+        return JSONResponse(content={"syncedResources": filtered_synced_resources, "partialResources": filtered_partial_resources}, status_code=200)
 
     except Exception as e:
         logging.error(f"Error in getVectorDBInfo endpoint: {str(e)}")

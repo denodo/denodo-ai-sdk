@@ -1,10 +1,10 @@
 import os
 import inspect
+import logging
 
 from uuid import uuid4
 from datetime import datetime
 from utils.version import AI_SDK_VERSION
-import logging
 
 _ENABLED = bool(os.getenv("LANGFUSE_SECRET_KEY") and os.getenv("LANGFUSE_PUBLIC_KEY"))
 
@@ -37,6 +37,7 @@ def build_config(model_id=None, session_id=None, run_name=None, user_id=None, ex
         config["run_name"] = run_name
 
     if not _ENABLED or _handler is None:
+        logging.warning("Langfuse is not enabled.")
         return config
 
     config["callbacks"] = [_handler]

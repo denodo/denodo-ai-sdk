@@ -1,14 +1,14 @@
 import os
-import sys
 import requests
-import traceback
 
 from fastmcp import FastMCP
+from utils import denodo_tools
+from utils.denodo_tools import format_data_query_output_mcp, format_metadata_query_output_mcp
 
 mcp = FastMCP("Denodo_AI_SDK_MCP")
 
-AI_SDK_ENDPOINT = os.getenv("MCP_AI_SDK_ENDPOINT", "http://localhost:8008").rstrip('/')
 AI_SDK_AUTH = os.getenv("MCP_AI_SDK_AUTH")
+AI_SDK_ENDPOINT = os.getenv("MCP_AI_SDK_ENDPOINT", "http://localhost:8008").rstrip('/')
 AI_SDK_VERIFY_SSL = os.getenv("MCP_AI_SDK_VERIFY_SSL", "false").lower() == "true"
 
 if not AI_SDK_AUTH:
@@ -25,41 +25,45 @@ except Exception as e:
     raise ConnectionError(f"Failed to connect to AI SDK endpoint at {AI_SDK_ENDPOINT}/health: {str(e)}") from e
 
 @mcp.tool()
-def ask_database(question: str, mode: str = "data"):
-    """Query the user's database in natural language.
-
-    Accepts a mode parameter to specify the mode to use for the query:
-    - data: Query the data in the database. For example, 'how many new customers did we get last month?'
-    - metadata: Query the metadata in the database. For example, 'what is the type of the column 'customer_id' in the customers table?'
+def data_query(
+    question: str,
+):
+    """Query the user's database in Denodo in natural language to retrieve data. For example,
+    you can use this tool to answer questions like "how many new customers did we get last month?"
 
     Args:
         question: Natural language question (e.g. "how many new customers did we get last month?")
-        mode: The mode to use for the query. Can be "data" or "metadata".
     """
-    params = {
-        "question": question,
-        "mode": mode,
-        "verbose": False
-    }
+    response = denodo_tools.data_query(
+        natural_language_query=question,
+        api_host=AI_SDK_ENDPOINT,
+        auth=AI_SDK_AUTH,
+        verify_ssl=AI_SDK_VERIFY_SSL,
+    )
 
-    headers = {}
-    if AI_SDK_AUTH:
-        headers["Authorization"] = AI_SDK_AUTH
+    return format_data_query_output_mcp(response)
 
-    try:
-        response = requests.post(
-            f"{AI_SDK_ENDPOINT}/answerQuestion",
-            json=params,
-            headers=headers,
-            timeout=120.0,
-            verify=AI_SDK_VERIFY_SSL
-        )
-        response.raise_for_status()
-        data = response.json()
-        if mode == "data":
-            return data.get('execution_result', 'The AI SDK did not return a result.')
-        else:
-            return data.get('answer', 'The AI SDK did not return a result.')
-    except Exception as e:
-            traceback.print_exc(file=sys.stderr)
-            return f"Error fetching response: {str(e)}"
+@mcp.tool()
+def metadata_query(
+    search_query: str,
+    n_results: int = 5,
+):
+    """Perform a similarity search in the user's database in Denodo and return the schema of the most similar tables.
+    For example, it can be helpful to answer metadata questions like:
+    - What tables do we have related to X topic.
+    - What is the primary key of this table.
+    - What associations does this table have.
+
+    Args:
+        search_query: Natural language query to search for the metadata of the tables. For example, 'tables related to loans'.
+        n_results: Maximum number of results to return.
+    """
+    response = denodo_tools.metadata_query(
+        search_query=search_query,
+        api_host=AI_SDK_ENDPOINT,
+        auth=AI_SDK_AUTH,
+        n_results=n_results,
+        verify_ssl=AI_SDK_VERIFY_SSL,
+    )
+
+    return format_metadata_query_output_mcp(response)

@@ -1,31 +1,42 @@
-import React, { useState } from "react";
-import './Modal.css';
+import React, { useState, useReducer } from "react";
+import "./Modal.css";
 import Header from "./components/Header/Header";
-import Results from "./components/Results/Results";
+import Chat from "./components/Chat/Chat";
 import QuestionForm from "./components/QuestionForm/QuestionForm";
-import ReportManagementModal from "./components/ReportManagementModal";
-import axios from 'axios';
-import CSVUploadModal from "./components/CSVUploadModal";
-import useSDK from './hooks/useSDK';
+import ReportManagementModal from "./components/Header/ReportManagementModal";
+import axios from "axios";
+import CSVUploadModal from "./components/Header/CSVUploadModal";
+import useSDK from "./hooks/useSDK";
 import LoginPage from "./components/LoginPage/LoginPage";
+import { chatReducer, actionTypes } from "./reducers/chatReducer";
 
 const App = () => {
-  const [results, setResults] = useState([]);
+  const [results, dispatch] = useReducer(chatReducer, []);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [questionType, setQuestionType] = useState("general");
   const [showCSVModal, setShowCSVModal] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState("");
   const [completedRequestId, setCompletedRequestId] = useState(null);
   const [customLogoFailed, setCustomLogoFailed] = useState(false);
   const [syncedResources, setSyncedResources] = useState({});
+  const [partialResources, setPartialResources] = useState({});
+
   const handleRequestCompletion = (requestId) => {
     setCompletedRequestId(requestId);
   };
 
-  const sdk = useSDK(setResults, handleRequestCompletion);
+  const sdk = useSDK(dispatch, handleRequestCompletion);
 
   const handleLogoError = () => {
     setCustomLogoFailed(true);
+  };
+
+  const handleResourcesUpdate = (data) => {
+    if (data.syncedResources) {
+      setSyncedResources(data.syncedResources);
+    }
+    if (data.partialResources) {
+      setPartialResources(data.partialResources);
+    }
   };
 
   const renderLogo = () => {
@@ -63,6 +74,7 @@ const App = () => {
       if (response.data.success) {
         setIsAuthenticated(true);
         setSyncedResources(response.data.syncedResources || {});
+        setPartialResources(response.data.partialResources || {});
       } else {
         const errorMessage = response.data.message || 'Invalid credentials. Please try again.';
         alert(errorMessage);
@@ -75,7 +87,7 @@ const App = () => {
 
   const handleClearResults = async () => {
     try {
-      setResults([]);
+      dispatch({ type: actionTypes.CLEAR_CHAT });
       await axios.post(`clear_history`);
     } catch (error) {
       console.error("There was an error clearing the memory!", error);
@@ -120,27 +132,26 @@ const App = () => {
         onLoadCSV={() => setShowCSVModal(true)}
         renderLogo={renderLogo}
         syncedResources={syncedResources}
-        onSyncUpdate={setSyncedResources}
+        partialResources={partialResources}
+        onResourcesUpdate={handleResourcesUpdate}
       />
       <div className="flex-grow-1 overflow-auto" style={{ marginTop: "76px", marginBottom: "100px", padding: "0 20px" }}>
-        <Results
+        <Chat
           results={results}
-          setResults={setResults}
+          dispatch={dispatch}
           setCurrentQuestion={setCurrentQuestion}
-          setQuestionType={setQuestionType}
         />
       </div>
       <QuestionForm
         results={results}
-        setResults={setResults}
+        dispatch={dispatch}
         isAuthenticated={isAuthenticated}
-        questionType={questionType}
-        setQuestionType={setQuestionType}
         currentQuestion={currentQuestion}
         setCurrentQuestion={setCurrentQuestion}
         sdk={sdk}
         completedRequestId={completedRequestId}
         syncedResources={syncedResources}
+        partialResources={partialResources}
       />
       <CSVUploadModal
         show={showCSVModal}

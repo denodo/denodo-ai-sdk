@@ -4,11 +4,12 @@ import base64
 import logging
 
 from fastmcp import FastMCP
-from fastmcp.server.auth import RemoteAuthProvider
-from fastmcp.server.auth.providers.jwt import JWTVerifier
-from fastmcp.server.dependencies import get_http_headers
 from pydantic import AnyHttpUrl
+from fastmcp.server.auth import RemoteAuthProvider
+from fastmcp.server.dependencies import get_http_headers
+from fastmcp.server.auth.providers.jwt import JWTVerifier
 from api.endpoints.answerQuestion import answerQuestionRequest, process_question
+from utils.denodo_tools import format_data_query_output_mcp, format_metadata_query_output_mcp
 
 logger = logging.getLogger(__name__)
 
@@ -68,20 +69,7 @@ def get_mcp_app(host, port, root_path):
 
     logger.info("MCP Server initialized")
 
-    @mcp.tool()
-    async def ask_database(question: str, mode: str = "data"):
-        """Query the user's database in natural language.
-
-        Accepts a mode parameter to specify the mode to use for the query:
-        - data: Query the data in the database. For example, 'how many new customers did we get last month?'
-        - metadata: Query the metadata in the database. For example, 'what is the type of the column 'customer_id' in the customers table?'
-
-        Args:
-            question: Natural language question (e.g. "how many new customers did we get last month?")
-            mode: The mode to use for the query. Can be "data" or "metadata".
-        """
-        logger.info(f"MCP request received - Mode: {mode}, Question: {question}")
-
+    def _extract_auth():
         raw_headers = get_http_headers()
         headers = {k.lower(): v for k, v in raw_headers.items()}
         auth = headers.get("authorization")
@@ -108,28 +96,76 @@ def get_mcp_app(host, port, root_path):
                 logger.error(f"Failed to extract Bearer token: {str(e)}")
                 raise ValueError("Invalid Bearer authentication format") from e
 
+        return auth
+
+    @mcp.tool()
+    async def data_query(
+        question: str,
+    ):
+        """Query the user's database in Denodo in natural language to retrieve data. For example,
+        you can use this tool to answer questions like "how many new customers did we get last month?"
+
+        Args:
+            question: Natural language question (e.g. "how many new customers did we get last month?")
+        """
+        logger.info(f"MCP request received - Mode: data, Question: {question}")
+
+        auth = _extract_auth()
+
         try:
             logger.debug("Processing request directly via process_question function")
 
             request = answerQuestionRequest(
                 question=question,
-                mode=mode,
+                mode="data",
                 verbose=False,
             )
 
             response = await process_question(request, auth)
-
             response_body = json.loads(response.body.decode())
 
-            if mode == "data":
-                result = response_body.get("execution_result", "The AI SDK did not return a result.")
-            else:
-                result = response_body.get("answer", "The AI SDK did not return a result.")
-
-            logger.info(f"MCP request completed successfully for mode: {mode}")
-            return result
+            logger.info("MCP request completed successfully for mode: data")
+            return format_data_query_output_mcp(response_body)
         except Exception as e:
-            logger.exception(f"Error processing MCP request - Mode: {mode}, Question: {question}")
+            logger.exception(f"Error processing MCP request - Mode: data, Question: {question}")
+            return f"Error fetching response: {str(e)}"
+
+    @mcp.tool()
+    async def metadata_query(
+        search_query: str,
+        n_results: int = 5,
+    ):
+        """Perform a similarity search in the user's database in Denodo and return the schema of the most similar tables.
+        For example, it can be helpful to answer metadata questions like:
+        - What tables do we have related to X topic.
+        - What is the primary key of this table.
+        - What associations does this table have.
+
+        Args:
+            search_query: Natural language query to search for the metadata of the tables. For example, 'tables related to loans'.
+            n_results: Maximum number of results to return.
+        """
+        logger.info(f"MCP request received - Mode: metadata, Question: {search_query}")
+
+        auth = _extract_auth()
+
+        try:
+            logger.debug("Processing request directly via process_question function")
+
+            request = answerQuestionRequest(
+                question=search_query,
+                mode="metadata",
+                verbose=False,
+                vector_search_k=n_results,
+            )
+
+            response = await process_question(request, auth)
+            response_body = json.loads(response.body.decode())
+
+            logger.info("MCP request completed successfully for mode: metadata")
+            return format_metadata_query_output_mcp(response_body)
+        except Exception as e:
+            logger.exception(f"Error processing MCP request - Mode: metadata, Question: {search_query}")
             return f"Error fetching response: {str(e)}"
 
     return mcp.http_app(transport="http", path="/mcp", stateless_http=True)

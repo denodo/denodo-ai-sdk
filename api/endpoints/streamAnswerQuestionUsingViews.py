@@ -57,8 +57,22 @@ class streamAnswerQuestionUsingViewsRequest(BaseModel):
     )
     custom_instructions: str = ''
     markdown_response: bool = True
-    vector_search_k: int = 5
-    vector_search_sample_data_k: int = 3
+    vector_search_k: int = Field(
+        default = 5,
+        description="Number of results to return from the similarity search in the vector store."
+    )
+    vector_search_sample_data_k: int = Field(
+        default = 3,
+        description="Number of similar sample data rows to return for the given question."
+    )
+    vector_search_total_limit: int = Field(
+        default = 20,
+        description="Maximum number of views to consider in total, including associations of the initial vector_search_k results."
+    )
+    vector_search_column_description_char_limit: int = Field(
+        default = 200,
+        description="Maximum characters of table or column descriptions used when filtering how many views to keep. Not applied during vector search or VQL generation (those use full descriptions). Refer to the docs for when this trimming is applied."
+    )
     mode: Literal["default", "data", "metadata"] = Field(default = "default")
     disclaimer: bool = True
     verbose: bool = True
@@ -122,8 +136,16 @@ async def streamAnswerQuestionUsingViews(endpoint_request: streamAnswerQuestionU
             llm=llm,
             mode=endpoint_request.mode,
             custom_instructions=endpoint_request.custom_instructions,
-            session_id=session_id
+            session_id=session_id,
+            column_description_char_limit=endpoint_request.vector_search_column_description_char_limit
         )
+
+    ambiguity_message = sdk_answer_question.build_ambiguity_message(category_response)
+
+    if ambiguity_message:
+        def generator():
+            yield from ambiguity_message
+        return StreamingResponse(generator(), media_type = 'text/plain')
 
     if category == "SQL":
         response = await sdk_answer_question.process_sql_category(

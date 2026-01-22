@@ -197,7 +197,7 @@ class UniformLLM:
 
         google_credentials_file = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
         if google_credentials_file is None:
-            raise ValueError("GOOGLE_APPLICATION_CREDENTIALS environment variable not set.")
+            logging.warning("GOOGLE_APPLICATION_CREDENTIALS environment variable not set. Attempting to use Application Default Credentials (ADC).")
 
         GOOGLE_THINKING_TOKENS = os.getenv("GOOGLE_THINKING_TOKENS", "2000")
 
@@ -250,10 +250,12 @@ class UniformLLM:
             "api_key": api_key,
         }
 
-        OPENAI_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high"]
+        OPENAI_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"]
+
+        suffixes = [f"-{effort}" for effort in OPENAI_REASONING_EFFORTS]
 
         # Allow to set the reasoning effort via model_id, like o1-high, o1-medium, gpt-5-high
-        if any(effort in self.model_name for effort in OPENAI_REASONING_EFFORTS):
+        if any(self.model_name.endswith(suffix) for suffix in suffixes):
             kwargs["max_completion_tokens"] = self.max_tokens
             reasoning_strengh = self.model_name.split('-')
             if len(reasoning_strengh) > 1 and reasoning_strengh[-1] in OPENAI_REASONING_EFFORTS:
@@ -383,6 +385,7 @@ class UniformLLM:
         AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
         AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
         AWS_CLAUDE_THINKING_TOKENS = os.getenv("AWS_CLAUDE_THINKING_TOKENS", "2000")
+        AWS_CUSTOM_URL = os.getenv("AWS_CUSTOM_URL")
 
         model = self.model_name
         provider = None
@@ -417,7 +420,12 @@ class UniformLLM:
         )
 
         session = refreshable_session_instance.refreshable_session()
-        client = session.client('bedrock-runtime')
+
+        client_kwargs = {'service_name': 'bedrock-runtime'}
+        if AWS_CUSTOM_URL:
+            client_kwargs['endpoint_url'] = AWS_CUSTOM_URL
+
+        client = session.client(**client_kwargs)
 
         # Prepare ChatBedrock initialization parameters
         bedrock_kwargs = {

@@ -33,7 +33,7 @@ from utils.utils import normalize_root_path, generate_transaction_id
 from utils.version import AI_SDK_VERSION
 
 required_vars = [
-    ("AI_SDK_DATA_CATALOG_URL", "DATA_CATALOG_URL"),
+    "AI_SDK_DATA_MARKETPLACE_URL",
     "LLM_PROVIDER",
     "LLM_MODEL",
     "EMBEDDINGS_PROVIDER",
@@ -97,8 +97,8 @@ THINKING_MODEL_AVAILABLE = bool(
 AI_SDK_EMBEDDINGS_PROVIDER = os.getenv("EMBEDDINGS_PROVIDER")
 AI_SDK_EMBEDDINGS_MODEL = os.getenv("EMBEDDINGS_MODEL")
 AI_SDK_VECTOR_STORE_PROVIDER = os.getenv("VECTOR_STORE")
-AI_SDK_DATA_CATALOG_URL = os.getenv("AI_SDK_DATA_CATALOG_URL") or os.getenv("DATA_CATALOG_URL")
-AI_SDK_DATA_CATALOG_VERIFY_SSL = bool(int(os.getenv("DATA_CATALOG_VERIFY_SSL", 0)))
+AI_SDK_DATA_MARKETPLACE_URL = os.getenv("AI_SDK_DATA_MARKETPLACE_URL")
+AI_SDK_DATA_MARKETPLACE_VERIFY_SSL = bool(int(os.getenv("DATA_MARKETPLACE_VERIFY_SSL", 0)))
 
 if THINKING_MODEL_AVAILABLE:
     AI_SDK_THINKING_LLM_TEMPERATURE = os.getenv("THINKING_LLM_TEMPERATURE")
@@ -135,9 +135,9 @@ def log_ai_sdk_parameters():
         ),
         "Embeddings Model": f"{AI_SDK_EMBEDDINGS_PROVIDER}/{AI_SDK_EMBEDDINGS_MODEL}",
         "Vector Store Provider": AI_SDK_VECTOR_STORE_PROVIDER,
-        "Data Catalog URL": AI_SDK_DATA_CATALOG_URL,
-        "Data Catalog Connection": test_data_catalog_connection(AI_SDK_DATA_CATALOG_URL, AI_SDK_DATA_CATALOG_VERIFY_SSL),
-        "Data Catalog Verify SSL": AI_SDK_DATA_CATALOG_VERIFY_SSL,
+        "Data Marketplace URL": AI_SDK_DATA_MARKETPLACE_URL,
+        "Data Marketplace Connection": test_data_catalog_connection(AI_SDK_DATA_MARKETPLACE_URL, AI_SDK_DATA_MARKETPLACE_VERIFY_SSL),
+        "Data Marketplace Verify SSL": AI_SDK_DATA_MARKETPLACE_VERIFY_SSL,
     }
 
     if THINKING_MODEL_AVAILABLE:
@@ -154,10 +154,10 @@ def log_ai_sdk_parameters():
     for key, value in ai_sdk_params.items():
         logging.info(f"    - {key}: {value}")
 
-    if not ai_sdk_params["Data Catalog Connection"]:
-        logging.warning("Could not establish connection to Data Catalog. Please check your configuration.")
+    if not ai_sdk_params["Data Marketplace Connection"]:
+        logging.warning("Could not establish connection to Data Marketplace. Please check your configuration.")
 
-    return ai_sdk_params["Data Catalog Connection"]
+    return ai_sdk_params["Data Marketplace Connection"]
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

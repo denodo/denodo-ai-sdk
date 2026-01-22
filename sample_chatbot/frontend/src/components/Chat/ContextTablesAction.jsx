@@ -7,12 +7,20 @@ const renderTooltip = (content) => (
   <Tooltip id="context-tooltip">{content}</Tooltip>
 );
 
-const ContextTablesStrip = ({ tables, vql, dataCatalogUrl, icons, onOpenContext }) => {
+const ContextTablesAction = ({ tables, vql, dataCatalogUrl, icons, onOpenContext }) => {
   if (!tables || tables.length === 0) {
     return icons || null;
   }
 
-  const cleanVql = vql?.replace(/"/g, "").toLowerCase() || "";
+  let cleanVql = "";
+  if (Array.isArray(vql)) {
+    cleanVql = vql
+      .filter(Boolean)
+      .map((x) => String(x).replace(/"/g, "").toLowerCase())
+      .join(" ");
+  } else if (vql) {
+    cleanVql = String(vql).replace(/"/g, "").toLowerCase();
+  }
 
   const usedTables = [];
   const unusedTables = [];
@@ -131,6 +139,5 @@ const ContextTablesStrip = ({ tables, vql, dataCatalogUrl, icons, onOpenContext 
   );
 };
 
-export default ContextTablesStrip;
-
+export default ContextTablesAction;
 

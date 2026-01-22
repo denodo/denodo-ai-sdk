@@ -2,9 +2,9 @@ import os
 import httpx
 import logging
 
-from langchain.storage import LocalFileStore
+from langchain_classic.storage import LocalFileStore
 from utils.utils import RefreshableBotoSession, get_custom_headers_from_env
-from langchain.embeddings import CacheBackedEmbeddings
+from langchain_classic.embeddings import CacheBackedEmbeddings
 
 class UniformEmbeddings:
     VALID_PROVIDERS = [
@@ -113,7 +113,7 @@ class UniformEmbeddings:
 
         api_key = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
         if api_key is None:
-            raise ValueError("GOOGLE_APPLICATION_CREDENTIALS environment variable not set.")
+            logging.warning("GOOGLE_APPLICATION_CREDENTIALS environment variable not set. Attempting to use Application Default Credentials (ADC).")
 
         self.base_embeddings = VertexAIEmbeddings(model_name = self.model_name)
 
@@ -271,6 +271,7 @@ class UniformEmbeddings:
         AWS_ROLE_ARN = os.getenv("AWS_ROLE_ARN")
         AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
         AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+        AWS_CUSTOM_URL = os.getenv("AWS_CUSTOM_URL")
 
         refreshable_session_instance = RefreshableBotoSession(
             region_name = AWS_REGION,
@@ -282,7 +283,11 @@ class UniformEmbeddings:
 
         session = refreshable_session_instance.refreshable_session()
 
-        client = session.client('bedrock-runtime')
+        client_kwargs = {'service_name': 'bedrock-runtime'}
+        if AWS_CUSTOM_URL:
+            client_kwargs['endpoint_url'] = AWS_CUSTOM_URL
+
+        client = session.client(**client_kwargs)
 
         self.base_embeddings = BedrockEmbeddings(
             client = client,

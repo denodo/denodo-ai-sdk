@@ -1,204 +1,83 @@
 import Form from "react-bootstrap/Form";
 import Navbar from "react-bootstrap/Navbar";
 import Button from "react-bootstrap/Button";
-import React, { useState, useEffect, useRef } from "react";
-import ResourcesFilterModal from "../ResourcesFilterModal";
-import { useConfig } from "../../contexts/ConfigContext";
-import './QuestionForm.css';
+import React, { useEffect, useState } from "react";
+import ResourcesFilterModal from "./ResourcesFilterModal";
+import useQuestionForm from "../../hooks/useQuestionForm";
+import NotificationToast from "../NotificationToast/NotificationToast";
+import "./QuestionForm.css";
 
-const QuestionForm = ({
-  results,
-  setResults,
-  isAuthenticated,
-  questionType,
-  setQuestionType,
-  currentQuestion,
-  setCurrentQuestion,
+const QuestionForm = ({ 
+  results, 
+  dispatch, 
+  isAuthenticated, 
+  currentQuestion: propCurrentQuestion,
+  setCurrentQuestion: propSetCurrentQuestion,
   sdk,
   completedRequestId,
-  syncedResources
+  syncedResources,
+  partialResources
 }) => {
-  const { isLoading, processQuestion, cancelDeepQuery, runningDeepQueries } = sdk;
-  const [lastRequestId, setLastRequestId] = useState(null);
-  const textInputRef = useRef(null);
-  const [showFilterModal, setShowFilterModal] = useState(false);
-  const [searchFilters, setSearchFilters] = useState({
-    databases: [],
-    tags: []
+  const {
+    currentQuestion,
+    showFilterModal,
+    setShowFilterModal,
+    searchFilters,
+    allowExternalAssociations,
+    isDeepQueryRunning,
+    isAnyQueryRunning,
+    filterCount,
+    textInputRef,
+    handleQuestionChange,
+    handleFilterSave,
+    handleSubmit,
+    handleKeyDown,
+    handleSendClick,
+    handleDeepQueryClick,
+    handleCancelDeepQuery,
+    lastToolRequest,
+    config,
+  } = useQuestionForm(
+    propCurrentQuestion,
+    propSetCurrentQuestion,
+    results,
+    dispatch,
+    sdk,
+    isAuthenticated
+  );
+  
+  const [toastConfig, setToastConfig] = useState({
+    show: false,
+    message: "",
+    variant: "info",
+    title: "",
   });
-  const [allowExternalAssociations, setAllowExternalAssociations] = useState(true);
-  const { config } = useConfig();
 
-  const handleFilterSave = ({ databases, tags, allowExternalAssociations }) => {
-    setSearchFilters({ databases, tags });
-    setAllowExternalAssociations(allowExternalAssociations);
+  const handleToastClose = () => {
+    setToastConfig((prev) => ({ ...prev, show: false }));
   };
 
   useEffect(() => {
-    const commandType = getCommandType(currentQuestion);
-    if (commandType) {
-      setQuestionType(commandType);
+    if (lastToolRequest) {
+      const toolLabel = lastToolRequest.prettyName || lastToolRequest.name || "tool";
+      setToastConfig({
+        show: true,
+        message: `Requested the "${toolLabel}" tool for this question.`,
+        variant: "info",
+        title: "Tool Requested",
+      });
     }
-  }, [currentQuestion, setQuestionType]);
+  }, [lastToolRequest]);
 
-  const isOnlyCommand = (input) => {
-    const trimmed = input.trim();
-    return !!getCommandType(trimmed) && trimmed.split(/\s+/).length === 1;
+  const getPlaceholder = () => {
+    if (!isAuthenticated) {
+      return "Please sign in to ask questions";
+    }
+    if (config.enableDeepQuery) {
+      return "Type your question here. Use @ to ask the LLM to use a specific tool(s), e.g. @data_query, @metadata_query, @deep_query.";
+    }
+    return "Type your question here. Use @ to ask the LLM to use a specific tool(s), e.g. @data_query, @metadata_query.";
   };
-
-  const getCommandType = (input) => {
-    const trimmedInput = input.trim().toLowerCase();
-    if (trimmedInput.startsWith("/sql") || trimmedInput.startsWith("/data")) {
-      return "data";
-    } else if (trimmedInput.startsWith("/metadata") || trimmedInput.startsWith("/schema")) {
-      return "metadata";
-    }
-    return null;
-  };
-
-  const handleQuestionChange = (event) => {
-    const newQuestion = event.target.value;
-    setCurrentQuestion(newQuestion);
-    
-    const commandType = getCommandType(newQuestion);
-    if (commandType) {
-      setQuestionType(commandType);
-    } else if (questionType !== "default") {
-      setQuestionType("default");
-    }
-  };
-
-  const handleKeyDown = (event) => {
-    // Submit with Enter, add new line with Shift+Enter
-    if (event.key === "Enter" && !event.shiftKey) {
-      if (!isAnyQueryRunning) {
-        event.preventDefault();
-        handleSubmit(event);
-      }
-    }
-  };
-
-  const handleSubmit = async (event) => {
-    event.preventDefault();
-    if (!isAuthenticated || !currentQuestion.trim() || isAnyQueryRunning) return;
-
-    const commandType = getCommandType(currentQuestion);
-    const finalQuestion = commandType ? currentQuestion.replace(/^\/\w+\s*/, '').trim() : currentQuestion.trim();
-
-    if (!finalQuestion) return;
-
-    const finalQuestionType = commandType || questionType;
-
-    const resultIndex = results.length;
-    setResults((prevResults) => [
-      ...prevResults,
-      { 
-        question: finalQuestion, 
-        isLoading: true, 
-        result: "", 
-        questionType: finalQuestionType,
-        isShowingBadge: false,
-        isShowingQuery: false,
-        intermediateQuery: "",
-        queryPhase: "initial"
-      },
-    ]);
-
-    const options = {
-      databases: searchFilters.databases.join(','),
-      tags: searchFilters.tags.join(','),
-      allow_external_associations: allowExternalAssociations
-    };
-
-    const requestId = await processQuestion(finalQuestion, finalQuestionType, resultIndex, options);
-    
-    if (requestId) {
-      setLastRequestId(requestId);
-    }
-    
-    setCurrentQuestion("");
-  };
-
-  const handleDeepQuerySubmit = async (event) => {
-    event.preventDefault();
-    if (!isAuthenticated || !currentQuestion.trim() || isAnyQueryRunning) return;
-
-    const finalQuestion = currentQuestion.trim();
-    if (!finalQuestion) return;
-
-    const resultIndex = results.length;
-    
-    setResults((prevResults) => [
-      ...prevResults,
-      { 
-        question: finalQuestion, 
-        isLoading: true, 
-        result: "", 
-        questionType: "deep_query",
-        isShowingBadge: false,
-        isShowingQuery: false,
-        intermediateQuery: "",
-        queryPhase: "initial"
-      },
-    ]);
-
-    const options = {
-      databases: searchFilters.databases.join(','),
-      tags: searchFilters.tags.join(','),
-      allow_external_associations: allowExternalAssociations
-    };
-
-    const requestId = await processQuestion(finalQuestion, "deep_query", resultIndex, options);
-
-    if (requestId) {
-      setLastRequestId(requestId);
-    }
-    setCurrentQuestion("");
-  };
-
-  const handleCancelDeepQuery = () => {
-    if (lastRequestId && runningDeepQueries.includes(lastRequestId)) {
-      cancelDeepQuery(lastRequestId);
-    }
-  };
-
-  const handleSendClick = (event) => {
-    if (!isAuthenticated || isAnyQueryRunning) return;
-    
-    if (!currentQuestion.trim() || isOnlyCommand(currentQuestion)) {
-      // Focus the text input if no valid text
-      textInputRef.current?.focus();
-      return;
-    }
-    
-    // Submit if there's valid text
-    handleSubmit(event);
-  };
-
-  const handleDeepQueryClick = (event) => {
-    if (!isAuthenticated || isAnyQueryRunning) return;
-    
-    if (!currentQuestion.trim() || isOnlyCommand(currentQuestion)) {
-      // Focus the text input if no valid text
-      textInputRef.current?.focus();
-      return;
-    }
-    
-    // Submit deep query if there's valid text
-    handleDeepQuerySubmit(event);
-  };
-
-  // Clean up completed requests
-  useEffect(() => {
-    if (completedRequestId && completedRequestId === lastRequestId) {
-      setLastRequestId(null);
-    }
-  }, [completedRequestId, lastRequestId]);
-
-  const isDeepQueryRunning = config.enableDeepQuery && lastRequestId !== null && runningDeepQueries.includes(lastRequestId);
-  const isAnyQueryRunning = isLoading || results.some(r => r.isLoading);
-
-  const filterCount = searchFilters.databases.length + searchFilters.tags.length;
 
   const getPaddingRight = () => {
     if (isDeepQueryRunning) return "150px";
@@ -208,6 +87,14 @@ const QuestionForm = ({
 
   return (
     <>
+    <NotificationToast
+      show={toastConfig.show}
+      message={toastConfig.message}
+      variant={toastConfig.variant}
+      title={toastConfig.title}
+      onClose={handleToastClose}
+    />
+
     <Navbar className="justify-content-center" data-bs-theme="dark" fixed="bottom" style={{ padding: "10px 0", backgroundColor: "transparent" }}>
       <div className="w-100 d-flex justify-content-center">
         <div style={{ width: '70%', maxWidth: '70%' }}>
@@ -242,12 +129,11 @@ const QuestionForm = ({
                   )}
                 </Button>
               </div>
-
               <Form.Control
                 ref={textInputRef}
                 as="textarea"
                 type="text"
-                placeholder={isAuthenticated ? "Type your question here. You can directly query data questions with /sql or /data. You can directly query metadata questions with /metadata or /schema commands." : "Please sign in to ask questions"}
+                placeholder={getPlaceholder()}
                 value={currentQuestion}
                 onChange={handleQuestionChange}
                 onKeyDown={handleKeyDown}
@@ -325,6 +211,7 @@ const QuestionForm = ({
       show={showFilterModal}
       handleClose={() => setShowFilterModal(false)}
       syncedResources={syncedResources}
+      partialResources={partialResources}
       currentFilters={searchFilters}
       currentAllowExternalAssociations={allowExternalAssociations}
       onSave={handleFilterSave}

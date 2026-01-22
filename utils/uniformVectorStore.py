@@ -12,7 +12,8 @@ class UniformVectorStore:
         self.index_name = index_name
         self.rate_limit_rpm = rate_limit_rpm
         self.client = None
-        self.dimensions = self.get_dimensions()
+        self.search_vector = self.embeddings.embed_query("tables")
+        self.dimensions = len(self.search_vector)
         self.chunk_factor = chunk_factor
         self._connect()
 
@@ -89,17 +90,37 @@ class UniformVectorStore:
         else:
             raise ValueError(f"Unsupported vector store provider: {self.provider}")
 
-    @timed
-    def get_dimensions(self):
-        test_vector = self.embeddings.embed_query("test")
-        return len(test_vector)
-
     def get_last_update_dict(self):
-        search_vector = self.search_by_vector([0] * self.dimensions, k = 1, view_ids = ["last_update"])
+        search_vector = self.search_by_vector(self.search_vector, k = 1, view_ids = ["last_update"])
         if search_vector and 'last_update_dict' in search_vector[0].metadata:
             return json.loads(search_vector[0].metadata['last_update_dict'])
         else:
             return None
+
+    def get_partial_resources_dict(self):
+        search_vector = self.search_by_vector(self.search_vector, k=1, view_ids=["last_update"])
+        if search_vector and 'partial_resources_dict' in search_vector[0].metadata:
+            return json.loads(search_vector[0].metadata['partial_resources_dict'])
+        else:
+            return None
+
+    @timed
+    def get_sync_metadata(self):
+        search_vector = self.search_by_vector(self.search_vector, k=1, view_ids=["last_update"])
+
+        last_update_dict = None
+        partial_resources_dict = None
+
+        if search_vector:
+            metadata = search_vector[0].metadata
+
+            if 'last_update_dict' in metadata:
+                last_update_dict = json.loads(metadata['last_update_dict'])
+
+            if 'partial_resources_dict' in metadata:
+                partial_resources_dict = json.loads(metadata['partial_resources_dict'])
+
+        return last_update_dict, partial_resources_dict
 
     @timed
     def get_last_update(self, source_type, source_name):
@@ -110,14 +131,16 @@ class UniformVectorStore:
             return None
 
     @timed
-    def update_last_update(self, last_update_dict):
+    def update_last_update(self, last_update_dict, partial_resources_dict):
         self.client.delete(ids=["last_update"])
-        if last_update_dict:
-            self.client.add_documents(prepare_last_update_vector(last_update_dict), ids = ["last_update"])
+        self.client.add_documents(
+            prepare_last_update_vector(last_update_dict, partial_resources_dict),
+            ids=["last_update"]
+        )
 
     @timed
     def remove_from_last_update(self, database_names=None, tag_names=None):
-        last_update_dict = self.get_last_update_dict()
+        last_update_dict, partial_resources_dict = self.get_sync_metadata()
         modified = False
 
         if last_update_dict:
@@ -139,8 +162,31 @@ class UniformVectorStore:
                     del last_update_dict["TAG"]
                     modified = True
 
-            if modified:
-                self.update_last_update(last_update_dict)
+        if partial_resources_dict:
+            if database_names and "partial_tags_by_db" in partial_resources_dict:
+                partial_tags_by_db = partial_resources_dict["partial_tags_by_db"]
+                for db_name in database_names:
+                    if db_name in partial_tags_by_db:
+                        del partial_tags_by_db[db_name]
+                        modified = True
+
+            if tag_names:
+                if "partial_dbs_by_tag" in partial_resources_dict:
+                    partial_dbs_by_tag = partial_resources_dict["partial_dbs_by_tag"]
+                    for tag_name in tag_names:
+                        if tag_name in partial_dbs_by_tag:
+                            del partial_dbs_by_tag[tag_name]
+                            modified = True
+
+                if "partial_tags_by_tag" in partial_resources_dict:
+                    partial_tags_by_tag = partial_resources_dict["partial_tags_by_tag"]
+                    for tag_name in tag_names:
+                        if tag_name in partial_tags_by_tag:
+                            del partial_tags_by_tag[tag_name]
+                            modified = True
+
+        if modified:
+            self.update_last_update(last_update_dict, partial_resources_dict)
 
     @log_params
     @timed
@@ -168,7 +214,7 @@ class UniformVectorStore:
 
     @log_params
     @timed
-    def search_by_vector(self, vector, k=3, view_ids=None, database_names=None, tag_names=None, view_names=None):
+    def search_by_vector(self, vector, k=3, view_ids=None, database_names=None, tag_names=None, view_names=None, scores=False):
         # If view_ids is provided and it's empty, return empty list
         if view_ids is not None and len(view_ids) == 0:
             return []
@@ -180,10 +226,18 @@ class UniformVectorStore:
         else:
             search_filter = self._build_get_view_ids_search_filter(view_names)
 
-        if self.provider == "opensearch":
-            return self.client.similarity_search_by_vector(vector, k=k, search_type="script_scoring", pre_filter=search_filter)
-        elif self.provider in ["chroma", "pgvector"]:
-            return self.client.similarity_search_by_vector(vector, k=k, filter=search_filter)
+        if scores:
+            if self.provider == "opensearch":
+                return self.client.similarity_search_with_score_by_vector(vector, k=k, search_type="script_scoring", pre_filter=search_filter)
+            elif self.provider == "pgvector":
+                return self.client.similarity_search_with_score_by_vector(vector, k=k, filter=search_filter)
+            elif self.provider == "chroma":
+                return self.client.similarity_search_by_vector_with_relevance_scores(vector, k=k, filter=search_filter)
+        else:
+            if self.provider == "opensearch":
+                return self.client.similarity_search_by_vector(vector, k=k, search_type="script_scoring", pre_filter=search_filter)
+            elif self.provider in ["chroma", "pgvector"]:
+                return self.client.similarity_search_by_vector(vector, k=k, filter=search_filter)
 
     @log_params
     def _build_metadata_search_filter(self, database_names=None, tag_names=None):
@@ -352,7 +406,7 @@ class UniformVectorStore:
             batch_ids = ids[i:i+batch_size]
             self.client.delete(ids=batch_ids)
 
-    def add_views(self, views, parallel = True, source_type = "OTHER", source_name = "default", sample_data = False):
+    def add_views(self, views, parallel = True, source_type = "OTHER", source_name = "default", sample_data = False, tags_by_db=None, dbs_by_tag=None, tags_by_tag=None):
         views = list({view.id: view for view in views}.values())
 
         if source_type in ["DATABASE", "TAG"]:
@@ -414,11 +468,29 @@ class UniformVectorStore:
                 self.client.add_documents(views, ids=view_ids)
 
         if source_type in ["DATABASE", "TAG"] and not sample_data:
-            last_update = int(time.time() * 1000)
-            last_update_dict = self.get_last_update_dict()
-            if last_update_dict:
-                self.client.delete(ids = ["last_update"])
-            self.client.add_documents(prepare_last_update_vector(last_update_dict, last_update, source_type, source_name), ids = ["last_update"])
+            last_update_timestamp = int(time.time() * 1000)
+
+            current_last_update_dict, current_partial_resources_dict = self.get_sync_metadata()
+
+            if current_last_update_dict or current_partial_resources_dict:
+                self.client.delete(ids=["last_update"])
+
+            new_partial_resources = {
+                "partial_tags_by_db": {k: list(v) for k, v in (tags_by_db or {}).items()},
+                "partial_dbs_by_tag": {k: list(v) for k, v in (dbs_by_tag or {}).items()},
+                "partial_tags_by_tag": {k: list(v) for k, v in (tags_by_tag or {}).items()}
+            }
+
+            docs_to_save = prepare_last_update_vector(
+                last_update_dict=current_last_update_dict,
+                partial_resources_dict=current_partial_resources_dict,
+                new_partial_resources=new_partial_resources,
+                last_update=last_update_timestamp,
+                source_type=source_type,
+                source_name=source_name
+            )
+
+            self.client.add_documents(docs_to_save, ids=["last_update"])
 
     def _add_views_parallel(self, views, ids, batch_size=5, max_retries=3):
         """Add views in parallel with batching and error handling."""
@@ -469,7 +541,7 @@ class UniformVectorStore:
 
     @log_params
     def get_view_ids(self, view_names):
-        view_ids = self.search_by_vector([0]*self.dimensions, k = len(view_names) * self.chunk_factor, view_names = view_names)
+        view_ids = self.search_by_vector(self.search_vector, k = len(view_names) * self.chunk_factor, view_names = view_names)
         return [view.metadata['view_id'] for view in view_ids]
 
     @log_params
@@ -477,7 +549,7 @@ class UniformVectorStore:
         if len(view_ids) == 0:
             return []
 
-        views = self.search_by_vector([0]*self.dimensions, k=len(view_ids) * self.chunk_factor, view_ids=view_ids)
+        views = self.search_by_vector(self.search_vector, k=len(view_ids) * self.chunk_factor, view_ids=view_ids)
 
         # Create a dictionary to keep only unique views based on view_name
         # Necessary because now there might be chunks of the same view
@@ -510,13 +582,10 @@ class UniformVectorStore:
         more_results_left = True
 
         while more_results_left:
-            results = self.search_by_vector(
-                vector=[0]*self.dimensions,
+            results = self.search_batched(
+                vector=self.search_vector,
                 k=K_BATCH_SIZE,
-                database_names=None,
-                tag_names=None,
-                view_ids=view_ids,
-                view_names=None
+                view_ids=view_ids
             )
 
             if not results:
@@ -531,3 +600,78 @@ class UniformVectorStore:
             self.delete(ids=ids_to_delete)
 
             more_results_left = len(results) == K_BATCH_SIZE
+
+    def check_existence(self, view_ids, database_names=None, tag_names=None):
+        """
+        Checks if ANY document exists for the given view_ids/filters, handling batching.
+        Returns True immediately if found.
+        """
+        BATCH_SIZE = 30000
+        total_ids = len(view_ids) if view_ids else 0
+
+        if view_ids is not None and total_ids == 0:
+            return False
+
+        if not view_ids or total_ids <= BATCH_SIZE:
+            results = self.search_by_vector(
+                vector=self.search_vector,
+                k=1, # We only need to know if at least 1 exists
+                view_ids=view_ids,
+                database_names=database_names,
+                tag_names=tag_names
+            )
+            return bool(results)
+
+        for i in range(0, total_ids, BATCH_SIZE):
+            batch_ids = view_ids[i : i + BATCH_SIZE]
+
+            if self.search_by_vector(
+                vector=self.search_vector,
+                k=1, # We only need to know if at least 1 exists
+                view_ids=batch_ids,
+                database_names=database_names,
+                tag_names=tag_names
+            ):
+                return True
+
+        return False
+
+    def search_batched(self, k, view_ids=None, query=None, vector=None, scores=False, **kwargs):
+        """
+        Performs a search (text or vector) handling large lists of view_ids by batching.
+        Safe to use with >65k view_ids on Postgres.
+        """
+
+        BATCH_SIZE = 30000
+        total_ids = len(view_ids) if view_ids else 0
+
+        if view_ids is not None and total_ids == 0:
+            return []
+
+        if vector is not None:
+            search_method = self.search_by_vector
+            search_arg = vector
+        else:
+            search_method = self.search
+            search_arg = query
+
+        if not view_ids or total_ids <= BATCH_SIZE:
+            return search_method(search_arg, k=k, view_ids=view_ids, scores=scores, **kwargs)
+
+        all_candidates = []
+        for i in range(0, total_ids, BATCH_SIZE):
+            batch_ids = view_ids[i : i + BATCH_SIZE]
+            batch_results = search_method(search_arg, k=k, view_ids=batch_ids, scores=True, **kwargs)
+            all_candidates.extend(batch_results)
+
+        # Sort by score (distance ascending for most VectorStores)
+        # Check if results are tuples (doc, score)
+        if all_candidates and isinstance(all_candidates[0], tuple):
+            all_candidates.sort(key=lambda x: x[1])
+
+        top_k = all_candidates[:k]
+
+        if not scores:
+            return [item[0] if isinstance(item, tuple) else item for item in top_k]
+
+        return top_k

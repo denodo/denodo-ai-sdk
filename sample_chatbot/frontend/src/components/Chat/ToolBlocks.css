@@ -1,0 +1,36 @@
+.toolbox-container {
+  margin-bottom: 1rem;
+  padding: 0.5rem;
+  border: 1px solid #2D3E4B;
+  border-radius: 0.25rem;
+}
+
+.toolbox-container-error {
+  border-color: #dc3545;
+  border-width: 2px;
+}
+
+.report-palette-popup {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 8px;
+  background-color: #e7e9ea;
+  color: #112533;
+  padding: 8px 10px;
+  border-radius: 0.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 20;
+  min-width: 190px;
+}
+
+.report-palette-label {
+  display: block;
+  font-size: 0.8rem;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.report-palette-select {
+  font-size: 0.8rem;
+}

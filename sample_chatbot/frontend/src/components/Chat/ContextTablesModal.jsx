@@ -8,7 +8,15 @@ const ContextTablesModal = ({ show, onClose, tables, vql, dataCatalogUrl }) => {
       return { usedTables: [], unusedTables: [] };
     }
 
-    const cleanVql = vql?.replace(/"/g, "").toLowerCase() || "";
+    let cleanVql = "";
+    if (Array.isArray(vql)) {
+      cleanVql = vql
+        .filter(Boolean)
+        .map((x) => String(x).replace(/"/g, "").toLowerCase())
+        .join(" ");
+    } else if (vql) {
+      cleanVql = String(vql).replace(/"/g, "").toLowerCase();
+    }
     const used = [];
     const unused = [];
 
@@ -125,5 +133,4 @@ const ContextTablesModal = ({ show, onClose, tables, vql, dataCatalogUrl }) => {
 };
 
 export default ContextTablesModal;
-
 

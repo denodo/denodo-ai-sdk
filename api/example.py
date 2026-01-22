@@ -5,8 +5,8 @@ import time
 # API_HOST for demo purposes
 API_HOST = 'http://localhost:8008'
 API_VDB = 'samples_bank'
-DATA_CATALOG_USER = 'admin'
-DATA_CATALOG_PWD = 'admin'
+DATA_MARKETPLACE_USER = 'admin'
+DATA_MARKETPLACE_PWD = 'admin'
 
 def get_metadata(database_name, insert = True, incremental = False):
     """Get metadata from VDP and optionally insert it into the vector store."""
@@ -15,7 +15,7 @@ def get_metadata(database_name, insert = True, incremental = False):
         'insert': insert,
         'incremental': incremental
     }
-    response = requests.get(f'{API_HOST}/getMetadata', params=request_params, auth = (DATA_CATALOG_USER, DATA_CATALOG_PWD))
+    response = requests.get(f'{API_HOST}/getMetadata', params=request_params, auth = (DATA_MARKETPLACE_USER, DATA_MARKETPLACE_PWD))
 
     if response.status_code == 200:
         return response.json()
@@ -25,7 +25,7 @@ def get_metadata(database_name, insert = True, incremental = False):
 def stream_answer_question(question):
     """Stream the answer to a question from the LLM."""
     request_params = {'question': question}
-    response = requests.get(f'{API_HOST}/streamAnswerQuestion', params=request_params, stream=True, auth = (DATA_CATALOG_USER, DATA_CATALOG_PWD))
+    response = requests.get(f'{API_HOST}/streamAnswerQuestion', params=request_params, stream=True, auth = (DATA_MARKETPLACE_USER, DATA_MARKETPLACE_PWD))
 
     for chunk in response.iter_lines(decode_unicode = True):
         print(chunk, end='', flush=True)
@@ -33,7 +33,7 @@ def stream_answer_question(question):
 def answer_question(question, mode="default"):
     """Get the answer to a question from the LLM."""
     request_params = {'question': question, "mode": mode}
-    response = requests.get(f'{API_HOST}/answerQuestion', params=request_params, auth = (DATA_CATALOG_USER, DATA_CATALOG_PWD))
+    response = requests.get(f'{API_HOST}/answerQuestion', params=request_params, auth = (DATA_MARKETPLACE_USER, DATA_MARKETPLACE_PWD))
     if response.status_code == 200:
         try:
             response_data = response.json()

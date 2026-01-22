@@ -7,7 +7,7 @@
       "fastmcp",
       "fastmcp",
       "run",
-      "{ABSOLUTE_PATH}/api/mcp/local.py"
+      "{ABSOLUTE_PATH}/run_local_mcp.py"
     ],
     "env": {
       "MCP_AI_SDK_ENDPOINT": "http://localhost:8008",

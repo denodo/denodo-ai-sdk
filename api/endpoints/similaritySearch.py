@@ -88,7 +88,7 @@ async def similaritySearch(endpoint_request: similaritySearchRequest = Depends()
     except DataCatalogAuthError as e:
         raise HTTPException(status_code=401, detail=f"Authentication failed during similaritySearch: {str(e)}") from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Retrieving allowed view IDs from Denodo Data Catalog failed: {str(e)}") from e
+        raise HTTPException(status_code=500, detail=f"Retrieving allowed view IDs from Denodo Data Marketplace failed: {str(e)}") from e
 
     search_params = {
         "query": endpoint_request.query,
@@ -99,7 +99,7 @@ async def similaritySearch(endpoint_request: similaritySearchRequest = Depends()
         "view_ids": valid_view_ids
     }
 
-    search_results = vector_store.search(**search_params)
+    search_results = vector_store.search_batched(**search_params)
 
     output = {
         "views": [

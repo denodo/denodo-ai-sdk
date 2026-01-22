@@ -1,257 +1,181 @@
-import { useState, useRef } from 'react';
+import { useState, useRef } from "react";
+import { actionTypes } from "../reducers/chatReducer";
 
-const useSDK = (setResults, onRequestComplete) => {
+const useSDK = (dispatch, onRequestComplete) => {
   const [isLoading, setLoading] = useState(false);
   const [runningDeepQueries, setRunningDeepQueries] = useState(new Set());
-  const activeConnections = useRef(new Map()); // Map of requestId -> {eventSource, resultIndex}
+  const activeControllers = useRef(new Map()); // Map of requestId -> { controller, resultIndex }
   const requestIdCounter = useRef(0);
 
-  const parseQueryFromMessage = (message) => {
-    const match = message.match(/(Querying the Denodo AI SDK for|Starting DeepQuery analysis for):\s*\*\*(.*?)\*\*/);
-    return match ? match[2].replace(/\.$/, '').replace(/\n/g, '') : null;
-  };
-
-  const processQuestion = async (question, type, resultIndex, options = {}) => {
-    setLoading(true);
+  const handleStream = async (url, body, resultIndex, requestId, onMessage) => {
+    const controller = new AbortController();
+    const signal = controller.signal;
     
-    // Generate unique request ID
-    const requestId = `${type}_${Date.now()}_${++requestIdCounter.current}`;
+    activeControllers.current.set(requestId, { controller, resultIndex });
+
     try {
-
-      const params = new URLSearchParams();
-      params.append('query', question);
-      params.append('type', type);
-
-      if (options.databases) {
-        params.append('databases', options.databases);
-      }
-      if (options.tags) {
-        params.append('tags', options.tags);
-      }
-
-      if (options.allow_external_associations !== undefined) {
-        params.append('allow_external_associations', options.allow_external_associations);
-      }
-
-      const eventSource = new EventSource(`question?${params.toString()}`);
       
-      // Store the connection for potential cancellation
-      activeConnections.current.set(requestId, { eventSource, resultIndex });
+      const isQuestion = url.includes('question');
+      const fetchUrl = isQuestion ? 'question' : url;
+      const method = isQuestion ? 'POST' : 'GET';
+      
+      const fetchOptions = {
+        method,
+        headers: isQuestion ? { 'Content-Type': 'application/json' } : undefined,
+        body: isQuestion ? JSON.stringify(body) : undefined,
+        signal
+      };
 
-      let isStreamOff = false;
-      let completedSuccessfully = false;
+      const response = await fetch(fetchUrl, fetchOptions);
 
-      eventSource.onmessage = (event) => {
-        const data = event.data;
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
-        if (data.startsWith("<TOOL:")) {
-          const newQuestionType = data.split(":")[1].replace(">", "");
-          
-          // DeepQuery tracking - ONLY on TOOL:deep_query detection
-          if (newQuestionType === "deep_query") {            
-            setRunningDeepQueries(prev => {
-              const newSet = new Set([...prev, requestId]);
-              return newSet;
-            });
-          }
-          
-          setResults((prevResults) => {
-            const updatedResults = prevResults.map((result, index) =>
-              index === resultIndex
-                ? { ...result, questionType: newQuestionType, queryPhase: "waiting" }
-                : result
-            );
-            return updatedResults;
-          });
-          
-          return;
-        }      
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
         
-        if (data === "<STREAMOFF>") {
-          isStreamOff = true;
-          return;
-        }
+        buffer += decoder.decode(value, { stream: true });
+        
+        // Process complete lines (SSE format usually ends with \n\n)
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop(); // Keep the incomplete part
 
-        if (isStreamOff) {
-          try {
-            const jsonData = JSON.parse(data);
-            setResults((prevResults) => {
-              const updatedResults = prevResults.map((result, index) =>
-                index === resultIndex
-                  ? {
-                      ...result,
-                      isLoading: false,
-                      isShowingQuery: false,
-                      queryPhase: "complete",
-                      vql: jsonData.vql,
-                      data_sources: jsonData.data_sources,
-                      chatbot_llm: jsonData.chatbot_llm,
-                      embeddings: jsonData.embeddings,
-                      relatedQuestions: jsonData.related_questions,
-                      relatedQuestionsDeepQuery: jsonData.related_questions_deepquery,
-                      query_explanation: jsonData.query_explanation,
-                      execution_result: jsonData.execution_result,
-                      tables_used: jsonData.tables_used,
-                      tokens: jsonData.tokens,
-                      ai_sdk_time: jsonData.ai_sdk_time,
-                      uuid: jsonData.uuid,
-                      llm_provider: jsonData.llm_provider,
-                      llm_model: jsonData.llm_model,
-                      ...(jsonData.graph && { graph: jsonData.graph }),
-                      ...(jsonData.pdf_url && { pdf_url: jsonData.pdf_url }),
-                      ...(jsonData.pdf_path && { pdf_path: jsonData.pdf_path }),
-                      ...(jsonData.deepquery_metadata && { deepquery_metadata: jsonData.deepquery_metadata }),
-                      ...(jsonData.total_execution_time && { total_execution_time: jsonData.total_execution_time }),
-                    }
-                  : result
-              );
-              return updatedResults;
-            });
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data.trim() === '[DONE]') continue; // OpenAI style, just in case
             
-            completedSuccessfully = true;
+            // Check for special markers from backend if any (e.g. <STREAMOFF>)
+            if (data.includes('<STREAMOFF>')) continue;
 
-            // Clean up connection and DeepQuery tracking
-            activeConnections.current.delete(requestId);
-            setRunningDeepQueries(prev => {
-              const newSet = new Set(prev);
-              newSet.delete(requestId);
-              return newSet;
-            });
-            eventSource.close();
-          } catch (e) {
-            setResults((prevResults) =>
-              prevResults.map((result, index) =>
-                index === resultIndex
-                  ? { 
-                      ...result, 
-                      isLoading: false, 
-                      result: "Error: Failed to parse response data. Details: " + e.message 
-                    }
-                  : result
-              )
-            );
-            completedSuccessfully = false;
-          } finally {
-            onRequestComplete(requestId);
-            setLoading(false);
-          }
-        } else {
-          const extractedQuery = parseQueryFromMessage(data);
-          
-          if (extractedQuery) {
-            setResults((prevResults) => {
-              const updatedResults = prevResults.map((result, index) =>
-                index === resultIndex
-                  ? { 
-                      ...result, 
-                      isShowingQuery: true, 
-                      intermediateQuery: extractedQuery,
-                      queryPhase: "query"
-                    }
-                  : result
-              );
-              return updatedResults;
-            });
-          } else {
-            // Regular streaming content
-            setResults((prevResults) => {
-              const updatedResults = prevResults.map((result, index) => {
-                if (index === resultIndex) {
-                  const currentResult = result;
-                  
-                  // If this is the first content and we're in query phase, switch to streaming
-                  if (currentResult.queryPhase === "query" && data.trim() && !data.startsWith("<")) {
-                    return { 
-                      ...currentResult, 
-                      queryPhase: "streaming",
-                      result: currentResult.result + data.replace(/<NEWLINE>/g, '\n') 
-                    };
-                  } else {
-                    // Continue accumulating content
-                    return { 
-                      ...currentResult, 
-                      result: currentResult.result + data.replace(/<NEWLINE>/g, '\n') 
-                    };
-                  }
-                }
-                return result;
-              });
-              return updatedResults;
-            });
+            try {
+               // Check if it is a JSON object
+               if (data.startsWith('{')) {
+                   const payload = JSON.parse(data);
+                   onMessage(payload);
+               } else {
+
+                   onMessage({ type: 'message', content: data });
+               }
+            } catch (e) {
+               // Fallback for plain text
+               onMessage({ type: 'message', content: data });
+            }
           }
         }
-      };
-      
-      eventSource.onerror = (err) => {        
-        // Only treat as error if we haven't successfully completed
-        if (!completedSuccessfully) {
-          eventSource.close();
+      }
 
-          // Update the result to show an appropriate error message
-          setResults((prevResults) =>
-            prevResults.map((result, index) =>
-              index === resultIndex
-                ? { 
-                    ...result, 
-                    isLoading: false, 
-                    result: err.message,
-                    queryPhase: "complete"
-                  }
-                : result
-            )
-          );
-          
-          activeConnections.current.delete(requestId);
-          setRunningDeepQueries(prev => {
-            const newSet = new Set(prev);
-            newSet.delete(requestId);
-            return newSet;
-          });
-          onRequestComplete(requestId);
-        } else {
-          eventSource.close();
-        }
-        setLoading(false);
-      };
-      
-      eventSource.onopen = () => {};
-      
-      return requestId; // Return the request ID so the caller can track it
     } catch (error) {
-      setResults((prevResults) =>
-        prevResults.map((result, index) =>
-          index === resultIndex
-            ? { ...result, isLoading: false, result: "An error occurred while processing the question." }
-            : result
-        )
-      );
-      activeConnections.current.delete(requestId);
-      setRunningDeepQueries(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(requestId);
-        return newSet;
+      if (error.name === 'AbortError') {
+        return;
+      }
+      console.error("Stream error:", error);
+      const backendMessage = error.message || 'Unknown error';
+      dispatch({
+        type: actionTypes.ERROR_CHAT_ITEM,
+        payload: {
+          resultIndex,
+          message: `Fatal error when connecting to chatbot backend: ${backendMessage}`,
+          errorDetails: backendMessage
+        }
       });
+    } finally {
+      activeControllers.current.delete(requestId);
+      if (url.includes('deep_query')) { // Logic for deep query tracking might need adjustment based on tool usage
+         // This cleanup is handled in onMessage for 'done' or explicit cancel usually
+      }
       onRequestComplete(requestId);
       setLoading(false);
-      return null;
     }
   };
 
-  const cancelDeepQuery = (requestId) => {    
-    const connection = activeConnections.current.get(requestId);
+  const processQuestion = async (question, _type, resultIndex, options = {}) => {
+    setLoading(true);
+    const requestId = `agent_${Date.now()}_${++requestIdCounter.current}`;
+
+    const body = {
+      query: question,
+      tool: _type,
+      databases: options.databases,
+      tags: options.tags,
+      allow_external_associations: options.allow_external_associations
+    };
+
+    
+    handleStream('question', body, resultIndex, requestId, (payload) => {
+      const type = payload.type;
+
+      if (type === 'message') {
+        const text = (payload.content || '').replace(/<NEWLINE>/g, '\n');
+        dispatch({
+          type: actionTypes.UPDATE_CHAT_ITEM_TEXT,
+          payload: { resultIndex, text }
+        });
+      } else if (type === 'tool_start') {
+        const { tool_name, tool_call_id, args } = payload;
+        if (tool_name === 'deep_query') {
+          setRunningDeepQueries(prev => new Set([...prev, requestId]));
+        }
+        dispatch({
+          type: actionTypes.TOOL_CALL_START,
+          payload: {
+             resultIndex,
+             toolCall: { toolName: tool_name, toolCallId: tool_call_id, args: args || {}, status: 'running' }
+          }
+        });
+      } else if (type === 'tool_end') {
+        const { tool_name, tool_call_id, content, artifact } = payload;
+        dispatch({
+            type: actionTypes.TOOL_CALL_END,
+            payload: { resultIndex, toolName: tool_name, toolCallId: tool_call_id, content, artifact }
+        });
+        if (tool_name === 'deep_query') {
+            setRunningDeepQueries(prev => {
+              const next = new Set(prev);
+              next.delete(requestId);
+              return next;
+            });
+        }
+      } else if (type === 'done') {
+        dispatch({
+            type: actionTypes.COMPLETE_CHAT_ITEM,
+            payload: { resultIndex, payload }
+        });
+      } else if (type === 'error') {
+        const rawMessage = payload.message || 'Error';
+        const message = `Fatal error when connecting to chatbot backend: ${rawMessage}`;
+        dispatch({
+          type: actionTypes.ERROR_CHAT_ITEM,
+          payload: {
+            resultIndex,
+            message,
+            errorDetails: payload.traceback || rawMessage
+          }
+        });
+      }
+    });
+
+    return requestId;
+  };
+
+  const cancelDeepQuery = (requestId) => {
+    const connection = activeControllers.current.get(requestId);
     if (connection) {
-      const { eventSource, resultIndex } = connection;
-      
-      eventSource.close();
-      activeConnections.current.delete(requestId);
-      
-      // Remove the cancelled result from the results array
-      setResults((prevResults) => {
-        const filteredResults = prevResults.filter((_, index) => index !== resultIndex);
-        return filteredResults;
+      const { controller, resultIndex } = connection;
+      controller.abort();
+      activeControllers.current.delete(requestId);
+
+      dispatch({
+        type: actionTypes.DELETE_CHAT_ITEM,
+        payload: { resultIndex }
       });
       
-      // Update running DeepQueries
       setRunningDeepQueries(prev => {
         const newSet = new Set(prev);
         newSet.delete(requestId);
@@ -262,11 +186,11 @@ const useSDK = (setResults, onRequestComplete) => {
     }
   };
 
-  return { 
-    isLoading, 
-    processQuestion, 
-    cancelDeepQuery, 
-    runningDeepQueries: Array.from(runningDeepQueries) 
+  return {
+    isLoading,
+    processQuestion,
+    cancelDeepQuery,
+    runningDeepQueries: Array.from(runningDeepQueries)
   };
 };
 

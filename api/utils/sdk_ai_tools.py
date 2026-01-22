@@ -369,14 +369,14 @@ async def direct_metadata_category(query, vector_search_tables, llm, custom_inst
 
 @utils.log_params
 @utils.timed
-async def direct_sql_category(query, vector_search_tables, llm, custom_instructions = '', session_id = None):
+async def direct_sql_category(query, vector_search_tables, llm, custom_instructions = '', session_id = None, column_description_char_limit = None):
     prompt = PromptTemplate.from_template(DIRECT_SQL_CATEGORY_PROMPT)
     chain = prompt | llm.llm | StrOutputParser()
 
     with get_usage_metadata_callback() as cb:
         response = await chain.ainvoke({
             "instruction": query,
-            "schema": sdk_utils.readable_tables(vector_search_tables),
+            "schema": sdk_utils.readable_tables(vector_search_tables, column_description_char_limit),
             "custom_instructions": custom_instructions
         }, config=langfuse.build_config(
             model_id=f"{llm.provider_name}.{llm.model_name}",
@@ -385,14 +385,19 @@ async def direct_sql_category(query, vector_search_tables, llm, custom_instructi
         ))
 
     category = "SQL"
-    filter_params = utils.custom_tag_parser(response, 'query', default=[])
+    ambiguity_params = utils.custom_tag_parser(response, 'ambiguity', default = [])
+    if ambiguity_params:
+        category_response = ambiguity_params[0]
+    else:
+        filter_params = utils.custom_tag_parser(response, 'query', default = [])
+        category_response = filter_params[0] if len(filter_params) > 0 else ''
     sql_related_questions = []
 
-    return category, filter_params[0] if len(filter_params) > 0 else '', sql_related_questions, next(iter(cb.usage_metadata.values())) if cb.usage_metadata else {'input_tokens': 0, 'output_tokens': 0, 'total_tokens': 0}
+    return category, category_response, sql_related_questions, next(iter(cb.usage_metadata.values())) if cb.usage_metadata else {'input_tokens': 0, 'output_tokens': 0, 'total_tokens': 0}
 
 @utils.log_params
 @utils.timed
-async def sql_category(query, vector_search_tables, llm, mode = 'default', custom_instructions = '', session_id = None):
+async def sql_category(query, vector_search_tables, llm, mode = 'default', custom_instructions = '', session_id = None, column_description_char_limit = None):
     prompt = PromptTemplate.from_template(SQL_CATEGORY_PROMPT)
     chain = prompt | llm.llm | StrOutputParser()
 
@@ -410,7 +415,8 @@ async def sql_category(query, vector_search_tables, llm, mode = 'default', custo
             vector_search_tables=vector_search_tables,
             llm=llm,
             custom_instructions=custom_instructions,
-            session_id=session_id
+            session_id=session_id,
+            column_description_char_limit=column_description_char_limit
         )
     else:
         # Create tasks for both operations to run in parallel
@@ -428,7 +434,7 @@ async def sql_category(query, vector_search_tables, llm, mode = 'default', custo
             sql_task = asyncio.create_task(
                 chain.ainvoke({
                     "instruction": query,
-                    "schema": sdk_utils.readable_tables(vector_search_tables),
+                    "schema": sdk_utils.readable_tables(vector_search_tables, column_description_char_limit),
                     "custom_instructions": custom_instructions
                 }, config=langfuse.build_config(
                     model_id=f"{llm.provider_name}.{llm.model_name}",
@@ -469,11 +475,16 @@ async def sql_category(query, vector_search_tables, llm, mode = 'default', custo
                 # Otherwise wait for sql_task to complete
                 response = await sql_task
 
-            category = utils.custom_tag_parser(response, 'cat', default="OTHER")[0].strip()
-            filter_params = utils.custom_tag_parser(response, 'query', default=[])
+            category = utils.custom_tag_parser(response, 'cat', default = "OTHER")[0].strip()
+            ambiguity_params = utils.custom_tag_parser(response, 'ambiguity', default = [])
+            if ambiguity_params:
+                category_response = ambiguity_params[0]
+            else:
+                filter_params = utils.custom_tag_parser(response, 'query', default = [])
+                category_response = filter_params[0] if len(filter_params) > 0 else ''
             sql_related_questions = []
 
-            return category, filter_params[0] if len(filter_params) > 0 else '', sql_related_questions, next(iter(cb.usage_metadata.values())) if cb.usage_metadata else {'input_tokens': 0, 'output_tokens': 0, 'total_tokens': 0}
+            return category, category_response, sql_related_questions, next(iter(cb.usage_metadata.values())) if cb.usage_metadata else {'input_tokens': 0, 'output_tokens': 0, 'total_tokens': 0}
 
 @utils.log_params
 @utils.timed
@@ -705,11 +716,12 @@ def _get_prompt_and_parameters(question, vql_query, error_log, error_categories,
 @utils.timed
 async def get_relevant_tables(
     query, vector_store, sample_data_vector_store, vdb_list, tag_list, auth,
-    k = 5,
+    vector_search_k = 5,
     use_views = '',
     expand_set_views = True,
     vector_search_sample_data_k = 3,
-    allow_external_associations = True
+    allow_external_associations = True,
+    vector_search_total_limit = 20
 ):
     vdb_list = [db.strip() for db in vdb_list.split(',')] if vdb_list else []
     tag_list = [tag.strip() for tag in tag_list.split(',')] if tag_list else []
@@ -723,26 +735,34 @@ async def get_relevant_tables(
     # Wait for both tasks to complete
     embedded_query, valid_view_ids = await asyncio.gather(embedding_task, view_ids_task)
 
+    # Check if user has any view permissions at all
+    if not valid_view_ids:
+        return [], {}, timings, "You don't have permission to access any views in Denodo. Please contact your administrator."
+
     # Convert view_ids to strings
     valid_view_ids = [str(view_id) for view_id in valid_view_ids]
 
     search_params = {
         "vector": embedded_query,
-        "k": k,
+        "k": vector_search_k,
         "database_names": vdb_list,
         "tag_names": tag_list,
         "view_ids": valid_view_ids
     }
 
     with sdk_utils.timing_context("vector_store_search_time", timings):
-        vector_search = vector_store.search_by_vector(**search_params)
+        vector_search = vector_store.search_batched(**search_params)
 
     # Keep track of seen view_names to remove duplicates
     seen_view_ids = set()
     relevant_tables = []
+    have_chunks = False
 
     for table in vector_search:
         view_id = table.metadata['view_id']
+        document_id = table.id
+        if "_" in document_id:
+            have_chunks = True
         if view_id not in seen_view_ids:
             seen_view_ids.add(view_id)
             relevant_tables.append({
@@ -752,82 +772,91 @@ async def get_relevant_tables(
                 "view_id": table.metadata['view_id']
             })
 
+    #MAX_ROUNDS is setup in the case where "chunks" have been enabled in the vector store
+    #If so, then multiple chunks of the same view may appear in a single vector search
+    #With MAX_ROUNDS, we can ensure that we don't miss any relevant views
     MAX_ROUNDS = 2
     current_round = 0
 
-    with sdk_utils.timing_context("vector_store_search_time", timings):
-        while len(relevant_tables) < k and len(valid_view_ids) > len(relevant_tables) and current_round < MAX_ROUNDS:
-            remaining_view_ids = [view_id for view_id in valid_view_ids if view_id not in seen_view_ids]
-            search_params["view_ids"] = remaining_view_ids
-            new_search = vector_store.search_by_vector(**search_params)
-            if not new_search:  # Break if no new results found
-                break
+    have_multiple_chunks = have_chunks and len(vector_search) > vector_search_k
+    have_more_to_search = len(valid_view_ids) > len(relevant_tables)
 
-            for table in new_search:
-                view_id = table.metadata['view_id']
-                if view_id not in seen_view_ids and len(relevant_tables) < k:
-                    seen_view_ids.add(view_id)
-                    relevant_tables.append({
-                        "view_text": table.page_content,
-                        "view_name": table.metadata['view_name'],
-                        "view_json": json.loads(table.metadata['view_json']),
-                        "view_id": table.metadata['view_id']
-                    })
+    if have_multiple_chunks and have_more_to_search:
+        logging.info("Multiple chunks detected in vector store results, performing additional rounds to find unique views.")
+        with sdk_utils.timing_context("vector_store_search_time", timings):
+            while len(relevant_tables) < vector_search_k and len(valid_view_ids) > len(relevant_tables) and current_round < MAX_ROUNDS and len(vector_search):
+                remaining_view_ids = [view_id for view_id in valid_view_ids if view_id not in seen_view_ids]
+                search_params["view_ids"] = remaining_view_ids
+                new_search = vector_store.search_batched(**search_params)
+                if not new_search:  # Break if no new results found
+                    break
 
-            current_round += 1
+                for table in new_search:
+                    view_id = table.metadata['view_id']
+                    if view_id not in seen_view_ids and len(relevant_tables) < vector_search_k:
+                        seen_view_ids.add(view_id)
+                        relevant_tables.append({
+                            "view_text": table.page_content,
+                            "view_name": table.metadata['view_name'],
+                            "view_json": json.loads(table.metadata['view_json']),
+                            "view_id": table.metadata['view_id']
+                        })
 
-    new_associations = []
+                current_round += 1
+
+    association_ids = []
 
     # Get associations for each table
     for table in relevant_tables:
         table_associations = utils.get_table_associations(table['view_name'], table['view_json'])
-        new_associations.extend([
-            assoc_id for assoc_id in table_associations
-            if assoc_id not in seen_view_ids
-        ])
+        for assoc_id in table_associations:
+            if assoc_id not in seen_view_ids and assoc_id not in association_ids:
+                association_ids.append(assoc_id)
 
     if use_views != '':
-        use_views = [view.strip() for view in use_views.split(',')]
+        use_views = [view.strip() for view in use_views.split(',') if view.strip()]
         use_view_ids = vector_store.get_view_ids(use_views)
-        new_associations.extend([
-            view_id for view_id in use_view_ids
-            if view_id not in seen_view_ids
-        ])
+        for view_id in use_view_ids:
+            if view_id not in seen_view_ids and view_id not in association_ids:
+                association_ids.append(view_id)
 
-    # Remove duplicates from new_associations
-    new_associations = list(set(new_associations))
-    new_associations = [assoc_id for assoc_id in new_associations if assoc_id in valid_view_ids]
+    association_ids = [assoc_id for assoc_id in association_ids if assoc_id in valid_view_ids]
+    remaining_slots = vector_search_total_limit - len(relevant_tables)
+    if remaining_slots < 0:
+        remaining_slots = 0
+        #If remaining slots is less than 0, then we have more relevant tables than the total limit
+        #So we need to truncate the list of relevant tables to the total limit
+        relevant_tables = relevant_tables[:vector_search_total_limit]
 
-    if new_associations:
+    if remaining_slots and association_ids:
         # Lookup new associations in vector_store
         with sdk_utils.timing_context("vector_store_search_time", timings):
-            association_lookup = vector_store.get_views(new_associations)
+            association_lookup = vector_store.get_views(association_ids)
 
-        if not allow_external_associations and (vdb_list or tag_list):
-            logging.info("Restricting external associations based on user filter...")
-            filtered_lookup = []
-            for assoc_doc in association_lookup:
-                db_match = not vdb_list
-                tag_match = not tag_list
+        association_lookup_map = {assoc.metadata['view_id']: assoc for assoc in association_lookup}
 
-                if vdb_list:
-                    db_match = assoc_doc.metadata.get('database_name') in vdb_list
+        for assoc_id in association_ids:
+            if len(relevant_tables) >= vector_search_total_limit:
+                break
 
-                if tag_list:
-                    tag_match = any(f"tag_{tag}" in assoc_doc.metadata and assoc_doc.metadata[f"tag_{tag}"] == "1" for tag in tag_list)
+            assoc_doc = association_lookup_map.get(assoc_id)
+            if not assoc_doc or assoc_doc.metadata['view_id'] in seen_view_ids:
+                continue
 
-                if db_match and tag_match:
-                    filtered_lookup.append(assoc_doc)
+            if not allow_external_associations and (vdb_list or tag_list):
+                db_match = not vdb_list or assoc_doc.metadata.get('database_name') in vdb_list
+                tag_match = not tag_list or any(
+                    f"tag_{tag}" in assoc_doc.metadata and assoc_doc.metadata[f"tag_{tag}"] == "1" for tag in tag_list
+                )
+                if not (db_match and tag_match):
+                    continue
 
-            association_lookup = filtered_lookup
-
-        # Add new associations to relevant_tables
-        for assoc in association_lookup:
+            seen_view_ids.add(assoc_doc.metadata['view_id'])
             relevant_tables.append({
-                "view_text": assoc.page_content,
-                "view_name": assoc.metadata['view_name'],
-                "view_json": sdk_utils.filter_non_allowed_associations(json.loads(assoc.metadata['view_json']), valid_view_ids),
-                "view_id": assoc.metadata['view_id']
+                "view_text": assoc_doc.page_content,
+                "view_name": assoc_doc.metadata['view_name'],
+                "view_json": sdk_utils.filter_non_allowed_associations(json.loads(assoc_doc.metadata['view_json']), valid_view_ids),
+                "view_id": assoc_doc.metadata['view_id']
             })
 
     if not expand_set_views:
@@ -862,4 +891,36 @@ async def get_relevant_tables(
                         column_samples[col].append(val)
 
                 sample_data[view_id] = column_samples
-    return relevant_tables, sample_data, timings
+
+    # Generate specific error message if no relevant tables were found
+    error_message = None
+    if not relevant_tables:
+        # Check if the vector store has any data at all
+        vector_store_has_data = bool(vector_store.search("tables", k=1))
+
+        if not vector_store_has_data:
+            error_message = "The vector store is empty. Please synchronize the metadata first."
+        else:
+            # Check if the user has permissions to any views in the vector store
+            user_has_accessible_views = vector_store.check_existence(valid_view_ids)
+
+            if not user_has_accessible_views:
+                error_message = "You don't have permission to access any views that are currently indexed in the vector store. Please contact your administrator."
+            elif not vector_search:
+                if vdb_list or tag_list:
+                    filters = []
+                    if vdb_list:
+                        vdb_list = [f'"{vdb}"' for vdb in vdb_list]
+                        filters.append(f"database filters: {', '.join(vdb_list)}")
+                    if tag_list:
+                        tag_list = [f'"{tag}"' for tag in tag_list]
+                        filters.append(f"tag filters: {', '.join(tag_list)}")
+                    error_message = f"No relevant views found in the vector store matching your query with the specified {' and '.join(filters)}. Try adjusting your filters or query."
+                else:
+                    error_message = "No relevant views found in the vector store matching your query. Please try a different query."
+            elif use_views and not expand_set_views:
+                error_message = f"The specified views ({', '.join(use_views)}) were not found in the vector store or you don't have permission to access them."
+            else:
+                error_message = "The vector search found results, but they were filtered out because you don't have permission to access them."
+
+    return relevant_tables, sample_data, timings, error_message

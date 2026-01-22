@@ -21,5 +21,3 @@ const GraphModal = ({ show, graph, onClose }) => {
 };
 
 export default GraphModal;
-
-

@@ -9,6 +9,37 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.callbacks import get_usage_metadata_callback
 from api.utils.sdk_utils import timing_context, add_tokens
 
+AMBIGUITY_TYPE_LABELS = {
+    "UNCL_SCHEMA": "Unclear schema reference",
+    "TEMP": "Temporal ambiguity",
+    "OUTPUT": "Output schema ambiguity",
+    "QUAL": "Qualitative ambiguity",
+}
+
+
+def build_ambiguity_message(category_response):
+    ambiguous_inputs = custom_tag_parser(category_response, 'ambiguous_input', default = [])
+    if not ambiguous_inputs:
+        return None
+
+    lines = [
+        "The LLM detected some ambiguity in your input. Please re-submit your question clarifying the following things:",
+        "",
+    ]
+
+    for ambiguous in ambiguous_inputs:
+        type_code = custom_tag_parser(ambiguous, 'type', default = [''])[0].strip()
+        question = custom_tag_parser(ambiguous, 'cl_question', default = [''])[0].strip()
+        if not question:
+            continue
+        pretty_type = AMBIGUITY_TYPE_LABELS.get(type_code, type_code or "Ambiguity")
+        lines.append(f"- {pretty_type}: {question}")
+
+    if len(lines) <= 2:
+        return None
+
+    return "\n".join(lines)
+
 async def process_sql_category(request, vector_search_tables, sql_gen_llm, chat_llm, category_response, auth, timings, session_id = None, sample_data = None):
     with timing_context("llm_time", timings):
         vql_query, query_explanation, query_to_vql_tokens = await sdk_ai_tools.query_to_vql(
@@ -137,7 +168,11 @@ async def process_sql_category(request, vector_search_tables, sql_gen_llm, chat_
 
 def process_metadata_category(category_response, category_related_questions, disclaimer, vector_search_tables, timings, tokens):
     if disclaimer:
-        category_response += "\n\nDISCLAIMER: This response has been generated based on an LLM's interpretation of the data and may not be accurate."
+        category_response += """
+        DISCLAIMER: This response has been generated based on an LLM's interpretation of the data and may not be accurate.
+        Also, since this is a metadata response, please note that the views used to generate the response are the result
+        of a similarity search in the vector store. Therefore, it will not be an exhaustive search. For that purpose, please use the Denodo Data Marketplace.
+        """
 
     # Normalize tokens to only include input_tokens, output_tokens, total_tokens
     normalized_tokens = {
@@ -156,7 +191,34 @@ def process_metadata_category(category_response, category_related_questions, dis
         'query_explanation': '',
         'tokens': normalized_tokens,
         'related_questions': category_related_questions,
-        'execution_result': {},
+        'execution_result': {"views": vector_search_tables},
+        'tables_used': [table['view_name'] for table in vector_search_tables],
+        'raw_graph': '',
+        'sql_execution_time': 0,
+        'vector_store_search_time': timings.get('vector_store_search_time', 0),
+        'llm_time': timings.get('llm_time', 0),
+        'total_execution_time': round(sum(timings.values()), 2) if timings else 0
+    }
+
+
+def process_ambiguity_category(ambiguity_message, vector_search_tables, timings, tokens):
+    normalized_tokens = {
+        'input_tokens': 0,
+        'output_tokens': 0,
+        'total_tokens': 0
+    }
+    if isinstance(tokens, dict):
+        normalized_tokens['input_tokens'] = tokens.get('input_tokens', 0)
+        normalized_tokens['output_tokens'] = tokens.get('output_tokens', 0)
+        normalized_tokens['total_tokens'] = tokens.get('total_tokens', 0)
+
+    return {
+        'answer': ambiguity_message,
+        'sql_query': '',
+        'query_explanation': '',
+        'tokens': normalized_tokens,
+        'related_questions': [],
+        'execution_result': {"views": vector_search_tables},
         'tables_used': [table['view_name'] for table in vector_search_tables],
         'raw_graph': '',
         'sql_execution_time': 0,
@@ -297,8 +359,13 @@ def prepare_response(vql_query, query_explanation, tokens, execution_result, vec
     #Remove conditions from query explanation as it contains sample data the final user might not have access to
     if "Conditions:" in query_explanation:
         query_explanation = query_explanation.split("Conditions:")[0].strip()
+    #If execution result is empty, modify the answer.
+    if not execution_result:
+        answer = "The SQL query executed correctly, but returned no results."
+    else:
+        answer = vql_query
     return {
-        "answer": vql_query,
+        "answer": answer,
         "sql_query": vql_query if "FROM" in vql_query else "",
         "query_explanation": query_explanation,
         "tokens": tokens,

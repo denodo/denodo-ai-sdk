@@ -6,10 +6,10 @@ import Badge from "react-bootstrap/Badge";
 import Nav from 'react-bootstrap/Nav';
 import NavDropdown from 'react-bootstrap/NavDropdown';
 import axios from "axios";
-import VectorDBSyncModal from '../VectorDBSyncModal';
-import ChatbotSettingsModal from '../ChatbotSettingsModal';
-import AISDKSettingsModal from '../AISDKSettingsModal';
-import CustomInstructionsModal from '../CustomInstructionsModal';
+import VectorDBSyncModal from './VectorDBSyncModal';
+import ChatbotSettingsModal from './ChatbotSettingsModal';
+import AISDKSettingsModal from './AISDKSettingsModal';
+import CustomInstructionsModal from './CustomInstructionsModal';
 import { useReport } from '../../contexts/ReportContext';
 import './Header.css';
 
@@ -21,7 +21,7 @@ const Header = ({
   onLoadCSV, 
   renderLogo,
   syncedResources,
-  onSyncUpdate
+  onResourcesUpdate
 }) => {
   const [showVectorDBSync, setShowVectorDBSync] = useState(false);
   const [showChatbotSettings, setShowChatbotSettings] = useState(false);
@@ -126,6 +126,27 @@ const Header = ({
     }
   };
 
+  const getBadgeProps = () => {
+    // Default if no reports exist
+    if (!reports || reports.length === 0) {
+      return { bg: 'warning', text: 'dark' };
+    }
+    
+    // Check the LAST report in the array
+    const lastReport = reports[reports.length - 1];
+    const status = lastReport?.status;
+
+    if (status === 'completed') {
+      return { bg: 'success', text: 'white' };
+    } else if (status === 'failed') {
+      return { bg: 'danger', text: 'white' }; 
+    } else {
+      return { bg: 'warning', text: 'dark' };
+    }
+  };
+
+  const badgeProps = getBadgeProps();
+
   return (
     <>
       <div
@@ -167,7 +188,11 @@ const Header = ({
                     <NavDropdown.Item onClick={() => setIsModalOpen(true)}>
                       DeepQuery Reports
                       {reports.length > 0 && (
-                        <Badge bg="warning" text="dark" className="ms-2">
+                        <Badge 
+                          bg={badgeProps.bg} 
+                          text={badgeProps.text} 
+                          className="ms-2"
+                        >
                           {reports.length}
                         </Badge>
                       )}
@@ -220,7 +245,7 @@ const Header = ({
         syncTimeout={config.syncTimeout}
         handleClose={() => setShowVectorDBSync(false)}
         syncedResources={syncedResources} 
-        onSyncUpdate={onSyncUpdate}
+        onResourcesUpdate={onResourcesUpdate}
       />
       <ChatbotSettingsModal
         show={showChatbotSettings}

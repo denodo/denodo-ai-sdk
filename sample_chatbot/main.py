@@ -10,21 +10,21 @@ import logging.config
 from flask_httpauth import HTTPBasicAuth
 from flask import Flask, Response, request, jsonify, send_from_directory, Blueprint
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
-
-from utils.logging_utils import get_logging_config, transaction_id_var
-from utils.uniformLLM import UniformLLM
-from utils.uniformEmbeddings import UniformEmbeddings
-from utils.uniformVectorStore import UniformVectorStore
-from utils.utils import normalize_root_path, generate_transaction_id
 from sample_chatbot.chatbot_config_loader import load_config
 
 # Load env variables before any other imports
 load_config()
 
+from utils.uniformLLM import UniformLLM
+from utils.uniformEmbeddings import UniformEmbeddings
+from utils.uniformVectorStore import UniformVectorStore
+from utils.utils import normalize_root_path, generate_transaction_id
+from utils.logging_utils import get_logging_config, transaction_id_var
 from sample_chatbot.chatbot_engine import ChatbotEngine
-from sample_chatbot.chatbot_tools import deep_query, denodo_query, metadata_query, kb_lookup
+
 from sample_chatbot.chatbot_utils import ai_sdk_health_check, get_user_views, setup_user_details
-from sample_chatbot.chatbot_utils import prepare_unstructured_vector_store, check_env_variables, connect_to_ai_sdk, setup_directories, write_to_report, update_feedback_in_report, get_synced_resources
+from sample_chatbot.chatbot_utils import check_env_variables, connect_to_ai_sdk, get_synced_resources, prepare_unstructured_vector_store, setup_directories
+from sample_chatbot.reporting import update_feedback_in_report, write_to_report
 
 required_vars = [
     'CHATBOT_LLM_PROVIDER',
@@ -32,12 +32,7 @@ required_vars = [
     'CHATBOT_EMBEDDINGS_PROVIDER',
     'CHATBOT_EMBEDDINGS_MODEL',
     'CHATBOT_SYSTEM_PROMPT',
-    'CHATBOT_TOOL_SELECTION_PROMPT',
     'AI_SDK_URL',
-    'CHATBOT_DATABASE_QUERY_TOOL',
-    'CHATBOT_KNOWLEDGE_BASE_TOOL',
-    'CHATBOT_METADATA_QUERY_TOOL',
-    'CHATBOT_DEEPQUERY_TOOL'
 ]
 
 # Ignore warnings
@@ -63,12 +58,7 @@ CHATBOT_EMBEDDINGS_PROVIDER = os.environ['CHATBOT_EMBEDDINGS_PROVIDER']
 CHATBOT_EMBEDDINGS_MODEL = os.environ['CHATBOT_EMBEDDINGS_MODEL']
 CHATBOT_VECTOR_STORE_PROVIDER = os.environ['CHATBOT_VECTOR_STORE_PROVIDER']
 CHATBOT_SYSTEM_PROMPT = os.environ['CHATBOT_SYSTEM_PROMPT']
-CHATBOT_TOOL_SELECTION_PROMPT = os.environ['CHATBOT_TOOL_SELECTION_PROMPT']
-CHATBOT_RELATED_QUESTIONS_PROMPT = os.environ['CHATBOT_RELATED_QUESTIONS_PROMPT']
-CHATBOT_KNOWLEDGE_BASE_TOOL = os.environ['CHATBOT_KNOWLEDGE_BASE_TOOL']
-CHATBOT_METADATA_QUERY_TOOL = os.environ['CHATBOT_METADATA_QUERY_TOOL']
-CHATBOT_DATABASE_QUERY_TOOL = os.environ['CHATBOT_DATABASE_QUERY_TOOL']
-CHATBOT_DEEPQUERY_TOOL = os.environ['CHATBOT_DEEPQUERY_TOOL']
+CHATBOT_DEEPQUERY_GUIDANCE = os.environ['CHATBOT_DEEPQUERY_GUIDANCE']
 CHATBOT_HOST = os.getenv('CHATBOT_HOST', '0.0.0.0')
 CHATBOT_PORT = int(os.getenv('CHATBOT_PORT', 9992))
 CHATBOT_ROOT_PATH = normalize_root_path(os.getenv("CHATBOT_ROOT_PATH", ""))
@@ -88,7 +78,7 @@ CHATBOT_SYNC_VDBS_TIMEOUT = int(os.getenv('CHATBOT_SYNC_VDBS_TIMEOUT', '600000')
 AI_SDK_HOST = os.getenv('AI_SDK_URL', 'http://localhost:8008')
 AI_SDK_USERNAME = os.getenv('AI_SDK_USERNAME')
 AI_SDK_PASSWORD = os.getenv('AI_SDK_PASSWORD')
-DATA_CATALOG_URL = os.getenv("CHATBOT_DATA_CATALOG_URL") or os.getenv("DATA_CATALOG_URL")
+DATA_MARKETPLACE_URL = os.getenv("CHATBOT_DATA_MARKETPLACE_URL")
 AI_SDK_VERIFY_SSL = bool(int(os.getenv('AI_SDK_VERIFY_SSL', '0')))
 
 logging.info("Chatbot parameters:")
@@ -154,22 +144,21 @@ class User(UserMixin):
         self.csv_file_path = None
         self.csv_file_description = None
         self.unstructured_vector_store = None
-        self.tools = None
-        self.tools_prompt = None
         self.chatbot = None
         self.denodo_tables = None
         self.custom_instructions = ""
         self.user_details = ""
         self.synced_resources = {}
+        self.partial_resources = {}
+        self.thread_id = None
 
         # LLM preferences for different components
         self.chatbot_llm_preferences = {}
         self.ai_sdk_base_llm_preferences = {}
         self.ai_sdk_thinking_llm_preferences = {}
 
-        ## Initialize tools
+        # Initialize custom knowledge base if configured
         self.check_custom_kb()
-        self.update_tools()
 
     def check_custom_kb(self):
         if CHATBOT_UNSTRUCTURED_INDEX and CHATBOT_UNSTRUCTURED_DESCRIPTION:
@@ -191,123 +180,65 @@ class User(UserMixin):
             embeddings_model=CHATBOT_EMBEDDINGS_MODEL,
             delimiter=delimiter
         )
-        self.update_tools()
 
     def set_custom_instructions(self):
         self.custom_instructions = self.custom_instructions + "\n" + setup_user_details(self.user_details, username = self.id)
-        self.update_tools()
-        # Reset the chatbot to create a new one with updated tools and custom_instructions
+        # Reset the chatbot to create a new one with updated context and custom_instructions
         self.chatbot = None
-
-    def update_tools(self):
-        self.tools = self.generate_tools()
-        self.tools_prompt = self.generate_tools_prompt()
-
-    def generate_tools(self):
-        # Prepare LLM parameters for AI SDK tools
-        ai_sdk_llm_params = {}
-
-        # Add base LLM preferences if set
-        if self.ai_sdk_base_llm_preferences:
-            if self.ai_sdk_base_llm_preferences.get('provider'):
-                ai_sdk_llm_params['llm_provider'] = self.ai_sdk_base_llm_preferences['provider']
-            if self.ai_sdk_base_llm_preferences.get('model'):
-                ai_sdk_llm_params['llm_model'] = self.ai_sdk_base_llm_preferences['model']
-            if self.ai_sdk_base_llm_preferences.get('temperature') is not None:
-                ai_sdk_llm_params['llm_temperature'] = self.ai_sdk_base_llm_preferences['temperature']
-            if self.ai_sdk_base_llm_preferences.get('max_tokens'):
-                ai_sdk_llm_params['llm_max_tokens'] = self.ai_sdk_base_llm_preferences['max_tokens']
-
-        # Add thinking LLM preferences if set
-        thinking_llm_params = {}
-        if self.ai_sdk_thinking_llm_preferences:
-            if self.ai_sdk_thinking_llm_preferences.get('provider'):
-                thinking_llm_params['thinking_llm_provider'] = self.ai_sdk_thinking_llm_preferences['provider']
-            if self.ai_sdk_thinking_llm_preferences.get('model'):
-                thinking_llm_params['thinking_llm_model'] = self.ai_sdk_thinking_llm_preferences['model']
-            if self.ai_sdk_thinking_llm_preferences.get('temperature') is not None:
-                thinking_llm_params['thinking_llm_temperature'] = self.ai_sdk_thinking_llm_preferences['temperature']
-            if self.ai_sdk_thinking_llm_preferences.get('max_tokens'):
-                thinking_llm_params['thinking_llm_max_tokens'] = self.ai_sdk_thinking_llm_preferences['max_tokens']
-
-        tools = {
-            "database_query": {
-                "function": denodo_query,
-            "params": {
-                    "api_host": AI_SDK_HOST,
-                    "username": self.id,
-                    "password": self.password,
-                    "custom_instructions": self.custom_instructions,
-                    "verify_ssl": AI_SDK_VERIFY_SSL,
-                    **ai_sdk_llm_params
-                }
-            },
-            "metadata_query": {
-                "function": metadata_query,
-            "params": {
-                    "api_host": AI_SDK_HOST,
-                    "username": self.id,
-                    "password": self.password,
-                    "verify_ssl": AI_SDK_VERIFY_SSL
-                }
-            }
-        }
-
-        if CHATBOT_DEEPQUERY:
-            tools["deep_query"] = {
-                "function": deep_query,
-                "params": {
-                    "api_host": AI_SDK_HOST,
-                    "username": self.id,
-                    "password": self.password,
-                    "verify_ssl": AI_SDK_VERIFY_SSL,
-                    **ai_sdk_llm_params,
-                    **thinking_llm_params
-                }
-            }
-
-        if self.unstructured_vector_store:
-            tools["kb_lookup"] = {"function": kb_lookup, "params": {"vector_store": self.unstructured_vector_store}}
-
-        return tools
-
-    def generate_tools_prompt(self):
-        if not CHATBOT_AUTO_GRAPH:
-            database_query_tool = CHATBOT_DATABASE_QUERY_TOOL.format(auto_graph="If the data could benefit from a chart, you can request a plot to the tool. Generating a plot takes a few seconds, so do it if you think it will help the user understand the data better.")
-        else:
-            database_query_tool = CHATBOT_DATABASE_QUERY_TOOL.format(auto_graph="You can only request a plot of the data if explicitly requested by the user.")
-
-        core_tools = [database_query_tool, CHATBOT_METADATA_QUERY_TOOL]
-        
-        if CHATBOT_DEEPQUERY:
-            core_tools.append(CHATBOT_DEEPQUERY_TOOL)
-
-        if self.unstructured_vector_store:
-            kb_tool_prompt = CHATBOT_KNOWLEDGE_BASE_TOOL.format(description=self.csv_file_description)
-            final_tools = "\n\n".join(core_tools + [kb_tool_prompt])
-        else:
-            final_tools = "\n\n".join(core_tools)
-        return CHATBOT_TOOL_SELECTION_PROMPT.format(tools=final_tools)
 
     def get_or_create_chatbot(self):
         if not self.chatbot:
             # Use user's chatbot LLM preferences or fall back to global defaults
             chatbot_llm = self._get_chatbot_llm()
 
+            # Prepare LLM parameters for AI SDK tools to be passed via UserContext
+            ai_sdk_llm_params = {}
+
+            if self.ai_sdk_base_llm_preferences:
+                if self.ai_sdk_base_llm_preferences.get('provider'):
+                    ai_sdk_llm_params['llm_provider'] = self.ai_sdk_base_llm_preferences['provider']
+                if self.ai_sdk_base_llm_preferences.get('model'):
+                    ai_sdk_llm_params['llm_model'] = self.ai_sdk_base_llm_preferences['model']
+                if self.ai_sdk_base_llm_preferences.get('temperature') is not None:
+                    ai_sdk_llm_params['llm_temperature'] = self.ai_sdk_base_llm_preferences['temperature']
+                if self.ai_sdk_base_llm_preferences.get('max_tokens'):
+                    ai_sdk_llm_params['llm_max_tokens'] = self.ai_sdk_base_llm_preferences['max_tokens']
+
+            thinking_llm_params = {}
+            if self.ai_sdk_thinking_llm_preferences:
+                if self.ai_sdk_thinking_llm_preferences.get('provider'):
+                    thinking_llm_params['thinking_llm_provider'] = self.ai_sdk_thinking_llm_preferences['provider']
+                if self.ai_sdk_thinking_llm_preferences.get('model'):
+                    thinking_llm_params['thinking_llm_model'] = self.ai_sdk_thinking_llm_preferences['model']
+                if self.ai_sdk_thinking_llm_preferences.get('temperature') is not None:
+                    thinking_llm_params['thinking_llm_temperature'] = self.ai_sdk_thinking_llm_preferences['temperature']
+                if self.ai_sdk_thinking_llm_preferences.get('max_tokens'):
+                    thinking_llm_params['thinking_llm_max_tokens'] = self.ai_sdk_thinking_llm_preferences['max_tokens']
+
+            ai_sdk_params = {
+                **ai_sdk_llm_params,
+                **thinking_llm_params,
+            }
+
             self.chatbot = ChatbotEngine(
                 llm=chatbot_llm,
                 llm_response_rows_limit=CHATBOT_LLM_RESPONSE_ROWS_LIMIT,
-                related_questions_prompt=CHATBOT_RELATED_QUESTIONS_PROMPT,
                 system_prompt=CHATBOT_SYSTEM_PROMPT,
-                tool_selection_prompt=self.tools_prompt,
-                tools=self.tools,
                 api_host=AI_SDK_HOST,
                 username=self.id,
                 password=self.password,
                 vector_store_provider=CHATBOT_VECTOR_STORE_PROVIDER,
+                vector_store=self.unstructured_vector_store,
                 denodo_tables=self.denodo_tables,
                 user_details=self.user_details,
-                enable_deepquery=CHATBOT_DEEPQUERY
+                enable_deepquery=CHATBOT_DEEPQUERY,
+                deep_query_guidance=CHATBOT_DEEPQUERY_GUIDANCE,
+                custom_instructions=self.custom_instructions,
+                thread_id=self.thread_id,
+                verify_ssl=AI_SDK_VERIFY_SSL,
+                ai_sdk_params=ai_sdk_params,
+                auto_graph=CHATBOT_AUTO_GRAPH,
+                kb_description=self.csv_file_description or "",
             )
         return self.chatbot
 
@@ -361,7 +292,7 @@ def login():
         else:
             return jsonify({"success": False, "message": response_data}), status
 
-    synced_resources = get_synced_resources(
+    synced_resources, partial_resources = get_synced_resources(
         api_host=AI_SDK_HOST,
         username=username,
         password=password,
@@ -370,11 +301,13 @@ def login():
 
     user = User(username, password)
     user.synced_resources = synced_resources
+    user.partial_resources = partial_resources
+    user.thread_id = str(username)
 
     if response_data:
-        user.denodo_tables = "Here are some of the views available in the user's Denodo instance:\n- " + "\n- ".join(response_data) + "\n\nThis is not an exhaustive list, you can use the Metadata tool to query more."
+        user.denodo_tables = "Here are some of the tables available in the user's Denodo instance:\n- " + "\n- ".join(response_data) + "\n\nThis is not an exhaustive list, you can use the metadata_query tool to query more."
     else:
-        user.denodo_tables = "No views where found in the user's Denodo instance. Either the user has no views, the connection is failing or he does not have enough permissions."
+        user.denodo_tables = "No tables where found in the user's Denodo instance. Either the user has no views, the connection is failing or they do not have enough permissions."
 
     if user_details or custom_instructions:
         user.user_details = user_details
@@ -392,7 +325,7 @@ def login():
         if not user.unstructured_vector_store:
             return jsonify({"success": False, "message": "Failed to prepare unstructured vector store"}), 500
 
-    return jsonify({"success": True, "syncedResources": synced_resources}), 200
+    return jsonify({"success": True, "syncedResources": synced_resources, "partialResources": partial_resources}), 200
 
 @chatbot_bp.route('/update_csv', methods=['POST'])
 @login_required
@@ -417,39 +350,34 @@ def update_csv():
 
     return jsonify({"error": "Missing file or description"}), 400
 
-@chatbot_bp.route('/question', methods=['GET'])
+@chatbot_bp.route('/question', methods=['POST'])
 @login_required
 def question():
-    # Capture ALL request data first, before any try/except
-    query = request.args.get('query')
+    data = request.get_json()
+    query = data.get('query')
+    tool_name = data.get('tool')
+    databases_str = data.get('databases', '')
+    tags_str = data.get('tags', '')
+    allow_external_associations = data.get('allow_external_associations', True)
+
     user_id = current_user.id
-    question_type = request.args.get('type', 'default')
-
-    databases_str = request.args.get('databases', '')
-    tags_str = request.args.get('tags', '')
-    allow_ext_assoc_str = request.args.get('allow_external_associations', 'true')
-    allow_external_associations = allow_ext_assoc_str.lower() == 'true'
-
     # Capture the actual user object, not the proxy
     user_obj = current_user._get_current_object()
 
     if not query:
         return jsonify({"error": "Missing query parameter"}), 400
 
-    def generate(query, user_id, question_type, user_obj, vdp_databases, vdp_tags, allow_external_associations):
+    def generate(query, user_id, tool_name, user_obj, vdp_databases, vdp_tags, allow_external_associations):
         try:
             chatbot = user_obj.get_or_create_chatbot()
         except Exception as e:
-
             logging.error(f"Error creating chatbot: {str(e)}", exc_info=True)
-            yield f"data: There was an error configuring the chatbot: {str(e)}\n\n"
-            yield "data: <STREAMOFF>\n\n"
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': f'There was an error configuring the chatbot: {str(e)}'})}\n\n"
             return
 
         for chunk in chatbot.process_query(
             query=query,
-            tool=question_type,
+            tool=tool_name,
             vdp_database_names=vdp_databases,
             vdp_tag_names=vdp_tags,
             allow_external_associations=allow_external_associations
@@ -458,7 +386,6 @@ def question():
                 yield "data: <STREAMOFF>\n\n"
                 chunk_json = json.dumps(chunk)
                 yield f"data: {chunk_json}\n\n"
-                # Write to report only if reporting is enabled
                 if CHATBOT_REPORTING:
                     write_to_report(report_lock, CHATBOT_REPORT_MAX_SIZE, CHATBOT_REPORT_MAX_FILES, query, chunk, user_id)
             elif isinstance(chunk, str):
@@ -470,7 +397,7 @@ def question():
     return Response(generate(
         query,
         user_id,
-        question_type,
+        tool_name,
         user_obj,
         databases_str,
         tags_str,
@@ -509,7 +436,8 @@ def delete_metadata():
             f"{AI_SDK_HOST}/deleteMetadata",
             params=payload,
             auth=auth,
-            verify=AI_SDK_VERIFY_SSL
+            verify=AI_SDK_VERIFY_SSL,
+            timeout=300
         )
 
         if response.status_code == 200:
@@ -527,18 +455,20 @@ def delete_metadata():
                     current_user.denodo_tables = "No views where found in the user's Denodo instance. Either the user has no views, the connection is failing or he does not have enough permissions."
                 current_user.chatbot = None
 
-            synced_resources = get_synced_resources(
+            synced_resources, partial_resources = get_synced_resources(
                 api_host=AI_SDK_HOST,
                 username=current_user.id,
                 password=current_user.password,
                 verify_ssl=AI_SDK_VERIFY_SSL
             )
-            current_user.synced_resources = synced_resources # Update synced_resources
+            current_user.synced_resources = synced_resources
+            current_user.partial_resources = partial_resources
 
             return jsonify({
                 "success": True,
                 "message": response.json().get('message', 'Deletion successful.'),
-                "syncedResources": synced_resources
+                "syncedResources": synced_resources,
+                "partialResources": partial_resources
             }), 200
 
         elif response.status_code == 204:
@@ -595,22 +525,38 @@ def sync_vdbs():
                 current_user.denodo_tables = "No views where found in the user's Denodo instance. Either the user has no views, the connection is failing or he does not have enough permissions."
             current_user.chatbot = None
 
-        synced_resources = get_synced_resources(
+        synced_resources, partial_resources = get_synced_resources(
             api_host=AI_SDK_HOST,
             username=current_user.id,
             password=current_user.password,
             verify_ssl=AI_SDK_VERIFY_SSL
         )
-        current_user.synced_resources = synced_resources # Update synced_resources
+        current_user.synced_resources = synced_resources
+        current_user.partial_resources = partial_resources
+
+        message_suffix_parts = []
+
+        if vdbs_to_sync:
+            db_label = "database" if len(vdbs_to_sync) == 1 else "databases"
+            message_suffix_parts.append(f"{db_label} {', '.join(vdbs_to_sync)}")
+
+        if tags_to_sync:
+            tag_label = "tag" if len(tags_to_sync) == 1 else "tags"
+            message_suffix_parts.append(f"{tag_label} {', '.join(tags_to_sync)}")
+
+        message_suffix = " and ".join(message_suffix_parts)
+
+        success_message = f"Metadata associated with {message_suffix} successfully synchronized." if message_suffix else "Metadata successfully synchronized."
 
         return jsonify({
             "success": True,
-            "message": f"VectorDB synchronization successful for VDBs: {result}",
-            "syncedResources": synced_resources
+            "message": success_message,
+            "syncedResources": synced_resources,
+            "partialResources": partial_resources
         }), status
 
     elif status == 204:
-        return jsonify({"success": True, "message": result}), status
+        return jsonify({"success": True, "message": result if result else "Synchronization successful (No Content)"}), status
     else:
         return jsonify({"success": False, "message": result}), status
 
@@ -626,6 +572,8 @@ def logout():
 def get_config():
     """Endpoint to expose configuration variables to the frontend."""
     # Only include dataCatalogUrl if it's explicitly set in the environment
+    from sample_chatbot.agent_tools import TOOL_DEFINITIONS
+
     config = {
         "hasAISDKCredentials": bool(AI_SDK_USERNAME and AI_SDK_PASSWORD),
         "chatbotFeedback": CHATBOT_FEEDBACK if CHATBOT_REPORTING else False,
@@ -633,10 +581,19 @@ def get_config():
         "syncTimeout": CHATBOT_SYNC_VDBS_TIMEOUT,
         "llm_response_rows_limit": CHATBOT_LLM_RESPONSE_ROWS_LIMIT,
         "userEditLLM": CHATBOT_USER_EDIT_LLM,
-        "enableDeepQuery": CHATBOT_DEEPQUERY
+        "enableDeepQuery": CHATBOT_DEEPQUERY,
+        "chatbotTools": [
+            {
+                "name": name,
+                "prettyName": tool_cfg["pretty_name"],
+                "aliases": tool_cfg["aliases"],
+                "optional": tool_cfg["optional"],
+            }
+            for name, tool_cfg in TOOL_DEFINITIONS.items()
+        ],
     }
-    if DATA_CATALOG_URL:
-        config["dataCatalogUrl"] = DATA_CATALOG_URL.rstrip('/')
+    if DATA_MARKETPLACE_URL:
+        config["dataCatalogUrl"] = DATA_MARKETPLACE_URL.rstrip('/')
     return jsonify(config)
 
 @chatbot_bp.route('/update_custom_instructions', methods=['POST'])
@@ -713,9 +670,6 @@ def update_llm_settings():
             }
             # Remove None values
             current_user.ai_sdk_thinking_llm_preferences = {k: v for k, v in current_user.ai_sdk_thinking_llm_preferences.items() if v is not None}
-
-        # Regenerate tools with new preferences
-        current_user.update_tools()
 
         # Reset chatbot to force recreation with new LLM settings
         current_user.chatbot = None

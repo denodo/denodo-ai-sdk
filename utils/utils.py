@@ -40,38 +40,66 @@ def is_in_venv():
     return sys.prefix != sys.base_prefix
 
 def log_params(func):
+    def _safe_str(value):
+        """Converts to string, flattens newlines and truncates if longer than 500 characters."""
+        str_value = str(value)
+        str_value = str_value.replace('\n', ' ').replace('\r', '').strip()
+        max_chars = 500
+        if len(str_value) > max_chars:
+            return str_value[:max_chars] + '...'
+        return str_value
+
+    def _format_input_arg(key, value):
+        if key == "auth":
+            return f"{key}=<redacted>"
+        return f"{key}={_safe_str(value)}"
+
+    def _format_output_result(result):
+        if isinstance(result, (list, tuple)):
+            max_items = 20
+            items_to_show = result[:max_items]
+
+            formatted_items = [_safe_str(item) for item in items_to_show]
+
+            if len(result) > max_items:
+                formatted_items.append(f"... and {len(result) - max_items} more")
+
+            if isinstance(result, tuple):
+                return "(" + ", ".join(formatted_items) + ")"
+            else:
+                return "[" + ", ".join(formatted_items) + "]"
+        return _safe_str(result)
+
+    def _build_params_str(args, kwargs):
+        return ", ".join(
+            [_format_input_arg(f"arg{i}", arg) for i, arg in enumerate(args)] +
+            [_format_input_arg(k, v) for k, v in kwargs.items()]
+        )
+
+    def _get_log_prefix():
+        """Constructs the standard log prefix [endpoint] [func_name]."""
+        func_name = func.__name__
+        endpoint_name = current_endpoint.get()
+        if endpoint_name:
+            return f"[{endpoint_name}] [{func_name}]"
+        return func_name
+
     @functools.wraps(func)
     async def async_wrapper(*args, **kwargs):
         if os.getenv('SENSITIVE_DATA_LOGGING', '0') != '1':
             return await func(*args, **kwargs)
 
-        func_name = func.__name__
-        endpoint_name = current_endpoint.get()
-
         # Format the log prefix
-        if endpoint_name:
-            log_prefix = f"[{endpoint_name}] [{func_name}]"
-        else:
-            log_prefix = func_name
+        log_prefix = _get_log_prefix()
 
         # Log entry
-        def format_param(key, value):
-            if key == "auth":
-                return f"{key}=<redacted>"
-            str_value = str(value)
-            return f"{key}={str_value[:500] + '...' if len(str_value) > 500 else str_value}"
-
-        params = ", ".join([format_param(f"arg{i}", arg) for i, arg in enumerate(args)] +
-                           [format_param(k, v) for k, v in kwargs.items()])
-        logging.info(f"{log_prefix} - Entry: Parameters({params})")
+        logging.info(f"{log_prefix} - Entry: Parameters({_build_params_str(args, kwargs)})")
 
         # Call the original function
         result = await func(*args, **kwargs)
 
         # Log exit
-        str_result = str(result)
-        truncated_result = str_result[:500] + '...' if len(str_result) > 500 else str_result
-        logging.info(f"{log_prefix} - Exit: Returned({truncated_result})")
+        logging.info(f"{log_prefix} - Exit: Returned({_format_output_result(result)})")
 
         return result
 
@@ -80,33 +108,17 @@ def log_params(func):
         if os.getenv('SENSITIVE_DATA_LOGGING', '0') != '1':
             return func(*args, **kwargs)
 
-        func_name = func.__name__
-        endpoint_name = current_endpoint.get()
-
         # Format the log prefix
-        if endpoint_name:
-            log_prefix = f"[{endpoint_name}] [{func_name}]"
-        else:
-            log_prefix = func_name
+        log_prefix = _get_log_prefix()
 
         # Log entry
-        def format_param(key, value):
-            if key == "auth":
-                return f"{key}=<redacted>"
-            str_value = str(value)
-            return f"{key}={str_value[:500] + '...' if len(str_value) > 500 else str_value}"
-
-        params = ", ".join([format_param(f"arg{i}", arg) for i, arg in enumerate(args)] +
-                           [format_param(k, v) for k, v in kwargs.items()])
-        logging.info(f"{log_prefix} - Entry: Parameters({params})")
+        logging.info(f"{log_prefix} - Entry: Parameters({_build_params_str(args, kwargs)})")
 
         # Call the original function
         result = func(*args, **kwargs)
 
         # Log exit
-        str_result = str(result)
-        truncated_result = str_result[:500] + '...' if len(str_result) > 500 else str_result
-        logging.info(f"{log_prefix} - Exit: Returned({truncated_result})")
+        logging.info(f"{log_prefix} - Exit: Returned({_format_output_result(result)})")
 
         return result
 
@@ -337,7 +349,15 @@ def prepare_sample_data_schema(schema):
     return [create_sample_data_document(table) for table in schema['views']]
 
 @timed
-def prepare_last_update_vector(last_update_dict, last_update=None, source_type=None, source_name=None):
+def prepare_last_update_vector(
+    last_update_dict,
+    partial_resources_dict,
+    new_partial_resources=None,
+    last_update=None,
+    source_type=None,
+    source_name=None,
+    filter_dict=None
+):
     if last_update_dict is None:
         last_update_dict = {}
 
@@ -349,10 +369,49 @@ def prepare_last_update_vector(last_update_dict, last_update=None, source_type=N
                 source_name: last_update
             }
 
+    if partial_resources_dict is None:
+        partial_resources_dict = {}
+
+    if new_partial_resources:
+        if "partial_tags_by_db" not in partial_resources_dict:
+            partial_resources_dict["partial_tags_by_db"] = {}
+        if "partial_dbs_by_tag" not in partial_resources_dict:
+            partial_resources_dict["partial_dbs_by_tag"] = {}
+        if "partial_tags_by_tag" not in partial_resources_dict:
+            partial_resources_dict["partial_tags_by_tag"] = {}
+
+        new_tags_by_db = new_partial_resources.get("partial_tags_by_db", {})
+        for db_name, tags in new_tags_by_db.items():
+            existing = set(partial_resources_dict["partial_tags_by_db"].get(db_name, []))
+            existing.update(tags)
+            partial_resources_dict["partial_tags_by_db"][db_name] = list(existing)
+
+        new_dbs_by_tag = new_partial_resources.get("partial_dbs_by_tag", {})
+        for tag_name, db_list in new_dbs_by_tag.items():
+            existing = set(partial_resources_dict["partial_dbs_by_tag"].get(tag_name, []))
+            existing.update(db_list)
+            partial_resources_dict["partial_dbs_by_tag"][tag_name] = list(existing)
+
+        new_tags_by_tag = new_partial_resources.get("partial_tags_by_tag", {})
+        for tag_name, tags in new_tags_by_tag.items():
+            existing = set(partial_resources_dict["partial_tags_by_tag"].get(tag_name, []))
+            existing.update(tags)
+            partial_resources_dict["partial_tags_by_tag"][tag_name] = list(existing)
+
+    metadata = {
+        "view_id": "last_update",
+        "document_id": "last_update",
+        "last_update_dict": json.dumps(last_update_dict),
+        "partial_resources_dict": json.dumps(partial_resources_dict)
+    }
+
+    if filter_dict is not None:
+        metadata["filter_dict"] = json.dumps(filter_dict)
+
     return [Document(
         id="last_update",
         page_content="last_update",
-        metadata={"view_id": "last_update", "document_id": "last_update", "last_update_dict": json.dumps(last_update_dict)}
+        metadata=metadata
     )]
 
 @timed

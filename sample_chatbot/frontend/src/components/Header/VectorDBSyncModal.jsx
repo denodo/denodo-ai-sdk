@@ -10,7 +10,7 @@ import ListGroup from 'react-bootstrap/ListGroup';
 import axios from 'axios';
 import OverlayTrigger from 'react-bootstrap/OverlayTrigger';
 import Tooltip from 'react-bootstrap/Tooltip';
-import NotificationToast from './NotificationToast/NotificationToast'; 
+import NotificationToast from "../NotificationToast/NotificationToast";
 
 const formatTimestamp = (timestamp) => {
   if (!timestamp) return 'N/A';
@@ -27,7 +27,7 @@ const formatTimestamp = (timestamp) => {
   }
 };
 
-const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, onSyncUpdate }) => {
+const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, onResourcesUpdate }) => {
   // Common state
   const [activeTab, setActiveTab] = useState('status');
   const [isLoading, setIsLoading] = useState(false);
@@ -137,9 +137,14 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
         const successMsg = response.data.message || "Synchronization successful.";
         showToast(successMsg, 'success', 'Sync Completed');
 
-        if (response.data.syncedResources) {
-          onSyncUpdate(response.data.syncedResources);
-          setStatusData(response.data.syncedResources);
+        if (response.data) {
+          if (response.data.syncedResources) {
+            setStatusData(response.data.syncedResources);
+          }
+          
+          if (onResourcesUpdate) {
+            onResourcesUpdate(response.data);
+          }
         }
       }
 
@@ -179,9 +184,14 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
           const successMsg = response.data.message || "Deletion successful.";
           showToast(successMsg, 'success', 'Deletion Completed');
 
-          if (response.data && response.data.syncedResources) {
-            onSyncUpdate(response.data.syncedResources);
-            setStatusData(response.data.syncedResources);
+          if (response.data) {
+            if (response.data.syncedResources) {
+              setStatusData(response.data.syncedResources);
+            }
+
+            if (onResourcesUpdate) {
+              onResourcesUpdate(response.data);
+            }
           }
       }
 

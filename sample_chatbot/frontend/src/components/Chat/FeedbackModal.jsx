@@ -2,8 +2,10 @@ import React, { useState } from "react";
 import Modal from "react-bootstrap/Modal";
 import Button from "react-bootstrap/Button";
 import Form from "react-bootstrap/Form";
+import { actionTypes } from "../../reducers/chatReducer";
+import HelpTooltip from "../HelpTooltip";
 
-const FeedbackModal = ({ show, onClose, result, setResults, feedbackEnabled }) => {
+const FeedbackModal = ({ show, onClose, result, dispatch, resultIndex, feedbackEnabled }) => {
   const [feedbackValue, setFeedbackValue] = useState("");
   const [feedbackDetails, setFeedbackDetails] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -31,17 +33,10 @@ const FeedbackModal = ({ show, onClose, result, setResults, feedbackEnabled }) =
       const data = await response.json();
 
       if (response.ok) {
-        setResults((prevResults) =>
-          prevResults.map((item) =>
-            item.uuid === result.uuid
-              ? {
-                  ...item,
-                  feedback: feedbackValue,
-                  feedbackDetails: feedbackDetails,
-                }
-              : item
-          )
-        );
+        dispatch({
+            type: actionTypes.SET_CHAT_ITEM_FEEDBACK,
+            payload: { resultIndex, feedback: feedbackValue, feedbackDetails }
+        });
         onClose();
       } else {
         alert(`Error submitting feedback: ${data.message}`);
@@ -75,7 +70,10 @@ const FeedbackModal = ({ show, onClose, result, setResults, feedbackEnabled }) =
         </div>
         <Form>
           <Form.Group className="mb-3">
-            <Form.Label>Was this answer helpful?</Form.Label>
+            <Form.Label className="d-flex align-items-center gap-2">
+              Was this answer helpful?
+              <HelpTooltip text="The feedback submitted in this form is saved in the reports/ folder at the root level of the AI SDK." />
+            </Form.Label>
             <div>
               <Form.Check
                 inline
@@ -128,5 +126,3 @@ const FeedbackModal = ({ show, onClose, result, setResults, feedbackEnabled }) =
 };
 
 export default FeedbackModal;
-
-

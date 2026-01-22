@@ -85,7 +85,7 @@ async def process_analysis(
 
         # Check if schema is empty and exit early if so
         if not schema or not schema.strip():
-            error_message = "Unable to retrieve database schema. This may indicate a data catalog connection issue or no relevant tables found for your query. Please check the system logs for more details."
+            error_message = "Unable to retrieve database schema. This may indicate a Data Marketplace connection issue or no relevant tables found for your query. Please check the system logs for more details."
             total_duration = time.time() - start_time
             logger.info(f"Analysis exited early due to empty schema in {total_duration:.2f}s")
             return {

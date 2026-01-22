@@ -109,5 +109,3 @@ const RelatedQuestions = ({
 };
 
 export default RelatedQuestions;
-
-

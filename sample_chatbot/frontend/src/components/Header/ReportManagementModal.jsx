@@ -1,12 +1,12 @@
-import React from 'react';
-import Modal from 'react-bootstrap/Modal';
-import Button from 'react-bootstrap/Button';
-import Table from 'react-bootstrap/Table';
-import Badge from 'react-bootstrap/Badge';
-import Spinner from 'react-bootstrap/Spinner';
-import OverlayTrigger from 'react-bootstrap/OverlayTrigger';
-import Tooltip from 'react-bootstrap/Tooltip';
-import { useReport, REPORT_STATUS } from '../contexts/ReportContext';
+import React from "react";
+import Modal from "react-bootstrap/Modal";
+import Button from "react-bootstrap/Button";
+import Table from "react-bootstrap/Table";
+import Badge from "react-bootstrap/Badge";
+import Spinner from "react-bootstrap/Spinner";
+import OverlayTrigger from "react-bootstrap/OverlayTrigger";
+import Tooltip from "react-bootstrap/Tooltip";
+import { useReport, REPORT_STATUS } from "../../contexts/ReportContext";
 
 const ReportManagementModal = () => {
   const { reports, isModalOpen, setIsModalOpen, removeReport, clearAllReports } = useReport();

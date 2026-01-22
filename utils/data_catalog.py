@@ -18,21 +18,16 @@ import aiohttp
 import asyncio
 from utils.utils import timed, log_params
 
-DATA_CATALOG_URL = (
-    os.getenv("AI_SDK_DATA_CATALOG_URL") or
-    os.getenv('DATA_CATALOG_URL') or
-    'http://localhost:9090/denodo-data-catalog'
-).rstrip('/') + '/'
-
-DATA_CATALOG_VERIFY_SSL = os.getenv('DATA_CATALOG_VERIFY_SSL', '0') == '1'
-DATA_CATALOG_SERVER_ID = int(os.getenv('DATA_CATALOG_SERVER_ID', 1))
-DATA_CATALOG_METADATA_URL = f"{DATA_CATALOG_URL}public/api/askaquestion/data"
-DATA_CATALOG_EXECUTION_URL = f"{DATA_CATALOG_URL}public/api/askaquestion/execute"
-DATA_CATALOG_PERMISSIONS_URL = f"{DATA_CATALOG_URL}public/api/views/allowed-identifiers"
-DATA_CATALOG_INCREMENTAL_UPDATE_URL = f"{DATA_CATALOG_URL}public/api/ai-sdk/configuration"
+DATA_MARKETPLACE_URL = (os.getenv("AI_SDK_DATA_MARKETPLACE_URL") or 'http://localhost:9090/denodo-data-catalog').rstrip('/') + '/'
+DATA_MARKETPLACE_VERIFY_SSL = os.getenv('DATA_MARKETPLACE_VERIFY_SSL', '0') == '1'
+DATA_MARKETPLACE_SERVER_ID = int(os.getenv('DATA_MARKETPLACE_SERVER_ID', 1))
+DATA_MARKETPLACE_METADATA_URL = f"{DATA_MARKETPLACE_URL}public/api/askaquestion/data"
+DATA_MARKETPLACE_EXECUTION_URL = f"{DATA_MARKETPLACE_URL}public/api/askaquestion/execute"
+DATA_MARKETPLACE_PERMISSIONS_URL = f"{DATA_MARKETPLACE_URL}public/api/views/allowed-identifiers"
+DATA_MARKETPLACE_INCREMENTAL_UPDATE_URL = f"{DATA_MARKETPLACE_URL}public/api/ai-sdk/configuration"
 
 class DataCatalogAuthError(Exception):
-    """Custom exception for Data Catalog authentication failures."""
+    """Custom exception for Data Marketplace authentication failures."""
     pass
 
 @timed
@@ -45,8 +40,8 @@ def get_views_metadata_documents(
     table_descriptions=True,
     table_column_descriptions=True,
     filter_tables=None,
-    server_id=DATA_CATALOG_SERVER_ID,
-    verify_ssl=DATA_CATALOG_VERIFY_SSL,
+    server_id=DATA_MARKETPLACE_SERVER_ID,
+    verify_ssl=DATA_MARKETPLACE_VERIFY_SSL,
     last_update_timestamp_ms=None,
     view_prefix_filter='',
     view_suffix_filter='',
@@ -69,8 +64,8 @@ def get_views_metadata_documents(
         filter_tables: List of tables to exclude (default: None)
         tag_name: Name of the tag to query (mutually exclusive with database_name)
         server_id: Server identifier
-        verify_ssl: Whether to verify SSL certificates (default: DATA_CATALOG_VERIFY_SSL)
-        metadata_url: Data Catalog metadata URL (default: DATA_CATALOG_METADATA_URL)
+        verify_ssl: Whether to verify SSL certificates (default: DATA_MARKETPLACE_VERIFY_SSL)
+        metadata_url: Data Marketplace metadata URL (default: DATA_MARKETPLACE_METADATA_URL)
 
     Returns:
         Parsed metadata JSON response
@@ -132,7 +127,7 @@ def get_views_metadata_documents(
 
         # 1. Make request and raise any connection/HTTP errors
         response = requests.post(
-            f"{DATA_CATALOG_METADATA_URL}?serverId={server_id}",
+            f"{DATA_MARKETPLACE_METADATA_URL}?serverId={server_id}",
             json=data,
             headers=headers,
             verify=verify_ssl
@@ -236,8 +231,8 @@ def get_views_metadata_documents(
 
     except requests.HTTPError as e:
         error_response = json.loads(e.response.text)
-        error_message = str(error_response.get('message', 'Data Catalog did not return further details'))
-        logging.error("Data Catalog views metadata request failed: %s", error_message)
+        error_message = str(error_response.get('message', 'Data Marketplace did not return further details'))
+        logging.error("Data Marketplace views metadata request failed: %s", error_message)
         raise
 
     except requests.RequestException as e:
@@ -259,16 +254,16 @@ async def is_empty_result(json_response):
 
 @log_params
 @timed
-async def execute_vql(vql, auth, limit, execution_url=DATA_CATALOG_EXECUTION_URL,
-                server_id=DATA_CATALOG_SERVER_ID, verify_ssl=DATA_CATALOG_VERIFY_SSL):
+async def execute_vql(vql, auth, limit, execution_url=DATA_MARKETPLACE_EXECUTION_URL,
+                server_id=DATA_MARKETPLACE_SERVER_ID, verify_ssl=DATA_MARKETPLACE_VERIFY_SSL):
     """
-    Execute VQL against Data Catalog with support for OAuth token or Basic auth.
+    Execute VQL against Data Marketplace with support for OAuth token or Basic auth.
 
     Args:
         vql: VQL query to execute
         auth: Either (username, password) tuple for basic auth or OAuth token string
         limit: Maximum number of rows to return
-        execution_url: Data Catalog execution endpoint
+        execution_url: Data Marketplace execution endpoint
         server_id: Server identifier
         verify_ssl: Whether to verify SSL certificates
 
@@ -341,17 +336,17 @@ async def execute_vql(vql, auth, limit, execution_url=DATA_CATALOG_EXECUTION_URL
 @timed
 async def get_allowed_view_ids(
     auth,
-    server_id=DATA_CATALOG_SERVER_ID,
-    permissions_url=DATA_CATALOG_PERMISSIONS_URL,
-    verify_ssl=DATA_CATALOG_VERIFY_SSL
+    server_id=DATA_MARKETPLACE_SERVER_ID,
+    permissions_url=DATA_MARKETPLACE_PERMISSIONS_URL,
+    verify_ssl=DATA_MARKETPLACE_VERIFY_SSL
 ):
     """
     Retrieve allowed view IDs for all views accessible to the user.
 
     Args:
         auth: Either (username, password) tuple for basic auth or OAuth token string
-        server_id: The server ID (default is DATA_CATALOG_SERVER_ID)
-        permissions_url: The Data Catalog permissions URL
+        server_id: The server ID (default is DATA_MARKETPLACE_SERVER_ID)
+        permissions_url: The Data Marketplace permissions URL
         verify_ssl: Whether to verify SSL certificates
 
     Returns:
@@ -391,15 +386,15 @@ async def get_allowed_view_ids(
 
     except aiohttp.ClientResponseError as e:
         if e.status == 401:
-            msg = "Authentication failed: Invalid credentials for Data Catalog."
+            msg = "Authentication failed: Invalid credentials for Data Marketplace."
             logging.error(msg)
             raise DataCatalogAuthError(msg) from e
         else:
-            msg = f"Get allowed view IDs from Data Catalog failed: HTTP Error {e.status} - {e.message}"
+            msg = f"Get allowed view IDs from Data Marketplace failed: HTTP Error {e.status} - {e.message}"
             logging.error(msg)
             raise
     except (aiohttp.ClientError, ValueError) as e:
-        logging.error(f"Get allowed view IDs from Data Catalog failed: {str(e)}")
+        logging.error(f"Get allowed view IDs from Data Marketplace failed: {str(e)}")
         raise
 
 # This method calculates the authorization header for the Data Catalog REST API
@@ -542,17 +537,17 @@ def parse_execution_json(json_response):
 def activate_incremental(
     auth,
     enabled=True,
-    server_id=DATA_CATALOG_SERVER_ID,
-    verify_ssl=DATA_CATALOG_VERIFY_SSL
+    server_id=DATA_MARKETPLACE_SERVER_ID,
+    verify_ssl=DATA_MARKETPLACE_VERIFY_SSL
 ):
     """
-    Enable or disable incremental metadata updates for the Data Catalog.
+    Enable or disable incremental metadata updates for the Data Marketplace.
 
     Args:
         auth: Either (username, password) tuple for basic auth or OAuth token string
         enabled: Boolean flag to enable (True) or disable (False) incremental metadata updates
-        server_id: Server identifier (default is DATA_CATALOG_SERVER_ID)
-        incremental_update_url: The Data Catalog incremental update configuration URL
+        server_id: Server identifier (default is DATA_MARKETPLACE_SERVER_ID)
+        incremental_update_url: The Data Marketplace incremental update configuration URL
         verify_ssl: Whether to verify SSL certificates
 
     Returns:
@@ -576,7 +571,7 @@ def activate_incremental(
 
     try:
         response = requests.post(
-            f"{DATA_CATALOG_INCREMENTAL_UPDATE_URL}?serverId={server_id}",
+            f"{DATA_MARKETPLACE_INCREMENTAL_UPDATE_URL}?serverId={server_id}",
             json=data,
             headers=headers,
             verify=verify_ssl
@@ -588,7 +583,7 @@ def activate_incremental(
     except requests.HTTPError as e:
         try:
             error_response = json.loads(e.response.text)
-            error_message = str(error_response.get('message', 'Data Catalog did not return further details'))
+            error_message = str(error_response.get('message', 'Data Marketplace did not return further details'))
         except (json.JSONDecodeError, AttributeError):
             error_message = f"HTTP Error: {e.response.status_code} - {str(e)}"
         logging.error(f"Failed to configure incremental metadata updates: {error_message}")

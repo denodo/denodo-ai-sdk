@@ -77,8 +77,22 @@ class answerMetadataQuestionRequest(BaseModel):
         )
     custom_instructions: str = ''
     markdown_response: bool = True
-    vector_search_k: int = 5
-    vector_search_sample_data_k: int = 3
+    vector_search_k: int = Field(
+        default = 5,
+        description="Number of results to return from the similarity search in the vector store."
+    )
+    vector_search_sample_data_k: int = Field(
+        default = 3,
+        description="Number of similar sample data rows to return for the given question."
+    )
+    vector_search_total_limit: int = Field(
+        default = 20,
+        description="Maximum number of views to consider in total, including associations of the initial vector_search_k results."
+    )
+    vector_search_column_description_char_limit: int = Field(
+        default = 200,
+        description="Maximum characters of table or column descriptions used when filtering how many views to keep. Not applied during vector search or VQL generation (those use full descriptions). Refer to the docs for when this trimming is applied."
+    )
     disclaimer: bool = True
     verbose: bool = True
 
@@ -189,22 +203,26 @@ async def process_metadata_question(request_data: answerMetadataQuestionRequest,
         logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
 
-    vector_search_tables, _, timings = await sdk_ai_tools.get_relevant_tables(
+    vector_search_tables, _, timings, error_message = await sdk_ai_tools.get_relevant_tables(
         query=request_data.question,
         vector_store=vector_store,
         sample_data_vector_store=sample_data_vector_store,
         vdb_list=request_data.vdp_database_names,
         tag_list=request_data.vdp_tag_names,
         auth=auth,
-        k=request_data.vector_search_k,
+        vector_search_k=request_data.vector_search_k,
         use_views=request_data.use_views,
         expand_set_views=request_data.expand_set_views,
         vector_search_sample_data_k=request_data.vector_search_sample_data_k,
-        allow_external_associations=request_data.allow_external_associations
+        allow_external_associations=request_data.allow_external_associations,
+        vector_search_total_limit=request_data.vector_search_total_limit
     )
 
     if not vector_search_tables:
-        raise HTTPException(status_code=404, detail="The vector search result returned 0 views. This could be due to limited permissions or an empty vector store.")
+        raise HTTPException(status_code=404, detail = {
+            "error": error_message,
+            "traceback": ""
+        })
 
     # Combine custom instructions from environment and request
     base_instructions = os.getenv('CUSTOM_INSTRUCTIONS', '')
@@ -213,13 +231,27 @@ async def process_metadata_question(request_data: answerMetadataQuestionRequest,
     else:
         request_data.custom_instructions = base_instructions
 
+    if not request_data.verbose:
+        response = sdk_answer_question.process_metadata_category(
+            category_response='',
+            category_related_questions=[],
+            vector_search_tables=vector_search_tables,
+            timings=timings,
+            tokens={'input_tokens': 0, 'output_tokens': 0, 'total_tokens': 0},
+            disclaimer=request_data.disclaimer,
+        )
+        response['llm_provider'] = request_data.llm_provider
+        response['llm_model'] = request_data.llm_model
+        return JSONResponse(content=jsonable_encoder(response), media_type='application/json')
+
     with timing_context("llm_time", timings):
         _, category_response, category_related_questions, sql_category_tokens = await sdk_ai_tools.sql_category(
             query=request_data.question,
             vector_search_tables=vector_search_tables,
             llm=llm,
             mode="metadata",
-            custom_instructions=request_data.custom_instructions
+            custom_instructions=request_data.custom_instructions,
+            column_description_char_limit=request_data.vector_search_column_description_char_limit
         )
 
     response = sdk_answer_question.process_metadata_category(
@@ -230,7 +262,6 @@ async def process_metadata_question(request_data: answerMetadataQuestionRequest,
         tokens=sql_category_tokens,
         disclaimer=request_data.disclaimer,
     )
-
     response['llm_provider'] = request_data.llm_provider
     response['llm_model'] = request_data.llm_model
 

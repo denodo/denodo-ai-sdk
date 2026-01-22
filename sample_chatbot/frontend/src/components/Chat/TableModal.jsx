@@ -1,34 +1,36 @@
-import React, { useState, useMemo } from 'react';
-import Modal from 'react-bootstrap/Modal';
-import Button from 'react-bootstrap/Button';
-import Table from 'react-bootstrap/Table';
-import Pagination from 'react-bootstrap/Pagination';
+import React, { useState, useMemo } from "react";
+import Modal from "react-bootstrap/Modal";
+import Button from "react-bootstrap/Button";
+import Table from "react-bootstrap/Table";
+import Pagination from "react-bootstrap/Pagination";
 
 const TableModal = ({ show, llm_response_rows_limit, handleClose, executionResult }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 10;
 
   const tableData = useMemo(() => {
-    if (!executionResult || typeof executionResult === 'string' || Object.keys(executionResult).length === 0) {
+    if (
+      !executionResult ||
+      typeof executionResult === "string" ||
+      Object.keys(executionResult).length === 0
+    ) {
       return { headers: [], rows: [] };
     }
-    
+
     const rows = Object.values(executionResult);
     if (rows.length === 0 || !Array.isArray(rows[0])) {
       return { headers: [], rows: [] };
     }
-    
-    const headers = rows[0].map(item => item.columnName);
-    const dataRows = rows.map(row => 
-      row.map(item => item.value)
-    );
+
+    const headers = rows[0].map((item) => item.columnName);
+    const dataRows = rows.map((row) => row.map((item) => item.value));
 
     return { headers, rows: dataRows };
   }, [executionResult]);
 
   const totalRows = tableData.rows.length;
   const totalPages = Math.ceil(totalRows / rowsPerPage);
-  
+
   const paginatedRows = useMemo(() => {
     const startIndex = (currentPage - 1) * rowsPerPage;
     const endIndex = Math.min(startIndex + rowsPerPage, totalRows);
@@ -51,16 +53,14 @@ const TableModal = ({ show, llm_response_rows_limit, handleClose, executionResul
       startPage = Math.max(1, endPage - maxPageItems + 1);
     }
 
-    // Previous button
     items.push(
-      <Pagination.Prev 
-        key="prev" 
+      <Pagination.Prev
+        key="prev"
         onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
         disabled={currentPage === 1}
       />
     );
 
-    // First page
     if (startPage > 1) {
       items.push(
         <Pagination.Item key={1} onClick={() => handlePageChange(1)}>
@@ -72,11 +72,10 @@ const TableModal = ({ show, llm_response_rows_limit, handleClose, executionResul
       }
     }
 
-    // Page numbers
     for (let page = startPage; page <= endPage; page++) {
       items.push(
-        <Pagination.Item 
-          key={page} 
+        <Pagination.Item
+          key={page}
           active={page === currentPage}
           onClick={() => handlePageChange(page)}
         >
@@ -85,7 +84,6 @@ const TableModal = ({ show, llm_response_rows_limit, handleClose, executionResul
       );
     }
 
-    // Last page
     if (endPage < totalPages) {
       if (endPage < totalPages - 1) {
         items.push(<Pagination.Ellipsis key="ellipsis-2" disabled />);
@@ -97,10 +95,9 @@ const TableModal = ({ show, llm_response_rows_limit, handleClose, executionResul
       );
     }
 
-    // Next button
     items.push(
-      <Pagination.Next 
-        key="next" 
+      <Pagination.Next
+        key="next"
         onClick={() => handlePageChange(Math.min(totalPages, currentPage + 1))}
         disabled={currentPage === totalPages}
       />
@@ -114,12 +111,7 @@ const TableModal = ({ show, llm_response_rows_limit, handleClose, executionResul
   };
 
   return (
-    <Modal 
-      show={show} 
-      onHide={handleClose} 
-      size="lg" 
-      centered
-    >
+    <Modal show={show} onHide={handleClose} size="lg" centered>
       <Modal.Header closeButton data-bs-theme="light">
         <Modal.Title>Execution Result</Modal.Title>
       </Modal.Header>
@@ -127,9 +119,9 @@ const TableModal = ({ show, llm_response_rows_limit, handleClose, executionResul
         {totalRows > 0 ? (
           <>
             <div className="alert alert-info mb-3">
-              To avoid sending too many tokens to the LLM, it only has access to
-              the first {llm_response_rows_limit} rows. You can view the
-              complete execution result from Denodo here.
+              To avoid sending too many tokens to the LLM, it only has access to the first{" "}
+              {llm_response_rows_limit} rows. You can view the complete execution result from Denodo
+              here.
             </div>
             <div className="table-responsive">
               <Table className="custom-table" striped bordered hover variant="light">
@@ -153,7 +145,8 @@ const TableModal = ({ show, llm_response_rows_limit, handleClose, executionResul
             </div>
             {renderPagination()}
             <div className="mt-3 text-center">
-              Showing rows {(currentPage - 1) * rowsPerPage + 1}-{Math.min(currentPage * rowsPerPage, totalRows)} of {totalRows}
+              Showing rows {(currentPage - 1) * rowsPerPage + 1}-
+              {Math.min(currentPage * rowsPerPage, totalRows)} of {totalRows}
             </div>
           </>
         ) : (
@@ -170,3 +163,5 @@ const TableModal = ({ show, llm_response_rows_limit, handleClose, executionResul
 };
 
 export default TableModal;
+
+

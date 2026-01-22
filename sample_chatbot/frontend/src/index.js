@@ -14,7 +14,7 @@ root.render(
   <React.StrictMode>
     <ConfigProvider>
       <ReportProvider>
-        <App />
+          <App />
       </ReportProvider>
     </ConfigProvider>
   </React.StrictMode>

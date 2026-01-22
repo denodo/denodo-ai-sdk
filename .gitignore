@@ -1,6 +1,7 @@
 ai_sdk_vector_store/
 ai_sdk_sample_data/
 node_modules/
+unstructured_*/
 __pycache__/
 embeddings/
 uploads/
@@ -18,3 +19,4 @@ sdk_config.env
 *.pem
 *.crt
 *.key
+*.bak

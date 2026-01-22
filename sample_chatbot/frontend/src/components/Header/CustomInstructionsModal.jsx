@@ -4,6 +4,7 @@ import Button from 'react-bootstrap/Button';
 import Form from 'react-bootstrap/Form';
 import Spinner from 'react-bootstrap/Spinner';
 import axios from 'axios';
+import HelpTooltip from '../HelpTooltip'; 
 
 const CustomInstructionsModal = ({ show, handleClose }) => {
   const [customInstructions, setCustomInstructions] = useState('');
@@ -65,7 +66,10 @@ const CustomInstructionsModal = ({ show, handleClose }) => {
           </Form.Group>
           
           <Form.Group controlId="formUserDetails" className="mb-3">
-            <Form.Label>User Details</Form.Label>
+            <Form.Label className="d-flex align-items-center gap-2">
+              User Details
+              <HelpTooltip text="This information is sent to the chatbot LLM to personalize the conversation based on your user profile." />
+            </Form.Label>
             <Form.Control
               as="textarea"
               rows={3}
@@ -76,7 +80,10 @@ const CustomInstructionsModal = ({ show, handleClose }) => {
           </Form.Group>
           
           <Form.Group controlId="formCustomInstructions" className="mb-3">
-          <Form.Label>Custom Instructions</Form.Label>
+            <Form.Label className="d-flex align-items-center gap-2">
+              Custom Instructions
+              <HelpTooltip text="Passed to the AI SDK's answerQuestion endpoint for view search and VQL generation. These instructions are appended to any existing ones already defined in the AI SDK." />
+            </Form.Label>
             <Form.Control
               as="textarea"
               rows={5}

@@ -73,7 +73,7 @@ def load_demo_data(host, grpc_port, catalog_port, server_id, dc_user, dc_passwor
         with console.status("[bold blue]Synchronizing database...", spinner="dots"):
             catalog_url = f"http://{host}:{catalog_port}"
             if not sync_vdp(catalog_url, server_id, dc_user, dc_password):
-                console.print("[bold yellow]Warning:[/] Data Catalog synchronization failed.")
+                console.print("[bold yellow]Warning:[/] Data Marketplace synchronization failed.")
                 return False
             console.print("[bold green]✓[/] Database synchronized successfully!")
 

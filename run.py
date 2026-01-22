@@ -6,6 +6,7 @@ import argparse
 import threading
 from rich.panel import Panel
 from rich.console import Console
+from utils.runner_migration import run_migration_tool
 from utils.runner_demo import load_demo_data
 from utils.runner_display import print_header, PANEL_WIDTH
 from utils.runner_process import run_process, shutdown_gracefully, command_listener
@@ -16,14 +17,15 @@ console = Console()
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Run the AI SDK API and/or sample chatbot with configurable timeout.")
     parser.add_argument("mode", choices=["api", "sample_chatbot", "both"], help="Mode to run: api, sample_chatbot, or both")
+    parser.add_argument("--migrate", action="store_true", help="Run the migration tool before starting services")
     parser.add_argument("--timeout", type=int, default=30, help="Timeout in seconds (default: 30)")
     parser.add_argument("--load-demo", action="store_true", help="Load demo data before starting (only works with 'both' mode)")
     parser.add_argument("--host", default="localhost", help="GRPC host (default: localhost)")
     parser.add_argument("--grpc-port", type=int, default=9994, help="GRPC port (default: 9994)")
-    parser.add_argument("--dc-port", type=int, default=9090, help="Data Catalog port (default: 9090)")
+    parser.add_argument("--dm-port", "--dc-port", dest="dc_port", metavar="DM_PORT", type=int, default=9090, help="Data Marketplace port (default: 9090)")
     parser.add_argument("--server-id", type=int, default=1, help="Server ID (default: 1)")
-    parser.add_argument("--dc-user", default="admin", help="Data Catalog user (default: admin)")
-    parser.add_argument("--dc-password", default="admin", help="Data Catalog password (default: admin)")
+    parser.add_argument("--dm-user", "--dc-user", dest="dc_user", metavar="DM_USER", default="admin", help="Data Marketplace user (default: admin)")
+    parser.add_argument("--dm-password", "--dc-password", dest="dc_password", metavar="DM_PASSWORD", default="admin", help="Data Marketplace password (default: admin)")
     parser.add_argument("--no-logs", action="store_true", help="Output logs to console instead of files (interactive mode only)")
     parser.add_argument("--max-log-size", type=int, default=1, help="Maximum log file size in MB before rotation (default: 1)")
     parser.add_argument("--production", action="store_true", help="Run in production mode")
@@ -35,6 +37,11 @@ def parse_arguments():
 
 if __name__ == "__main__":
     args = parse_arguments()
+
+    if args.migrate:
+        run_migration_tool()
+        console.print("[dim]Continuing with startup...[/dim]\n")
+
     processes_to_run = []
     processes = []
     log_threads = []
@@ -45,12 +52,14 @@ if __name__ == "__main__":
     if not is_in_venv():
         console.print(Panel(
             "[bold yellow]WARNING: Not Running in Virtual Environment[/]\n"
-            "[yellow]You are not running this application inside a virtual environment.\n"
-            "This may cause dependency conflicts in the AI SDK that may cause it to not work properly.\n"
-            "It is strongly recommended to use a virtual environment.",
+            "[yellow]This application is not running inside a virtual environment.\n"
+            "This may cause dependency conflicts in the AI SDK.\n"
+            "If using the provided image of the AI SDK, you can ignore this warning, as all dependencies are included already.",
             border_style="yellow",
             width=PANEL_WIDTH
         ))
+
+    os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "true"
 
     # Set the tiktoken cache dir to be able to use the AI SDK in offline environments
     # The tiktoken dependency tries to download from the Internet the tokenizer model for the LLM if not

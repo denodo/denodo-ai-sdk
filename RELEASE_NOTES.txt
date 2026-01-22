@@ -1,3 +1,27 @@
+version 0.13 - 20260122
+------------------------
+
+- Added explanation to the feedback modal in the sample chatbot
+- Added explanation in the Profile tab explaining the difference between custom instructions and user details
+- Included more specific error messages for the vector search step in the SDK endpoints (Github Issue #5 - llnl fork)
+
+version 0.13-beta - 20260115
+-------------------------
+
+- Implemented tool calling in the chatbot to allow for better data exploration, understanding and multi-tasking
+- Made GOOGLE_APPLICATION_CREDENTIALS non-compulsory for embedded Google Vertex auth
+- Added possibility to change base URL in Bedrock LLM provider
+- Updated Data Catalog references to Data Marketplace
+- Included --migrate option in runner to allow for easy migration between AI SDK versions (python run.py both --migrate)
+- Aligned MCP tool responses with chatbot tool responses
+- Added disambiguation capabilities in answerQuestion endpoints
+- Added support for xhigh reasoning effort in OpenAI models by appending -xhigh to model name (i.e gpt-5.2-xhigh in LLM_MODEL)
+- Fixed error when user had access to over 65k views in PostgreSQL
+- Fixed bug which affected token counter
+- Changed color of DeepQuery report dropdown item in chatbot based on status of last generated report
+- Allow to filter by DBs and tags not specified during vectorization process in chatbot
+- Fixed bug when deleting views from the vectorDB
+
 version 0.12 - 20251126
 ------------------------
 

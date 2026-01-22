@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useRef } from "react";
-import "./Results.css";
+import React, { useEffect, useRef, useState } from "react";
+import "./Chat.css";
 import { useReport } from "../../contexts/ReportContext";
-import ResultItem from "./ResultItem";
+import ChatItem from "./ChatItem";
 import NotificationToast from "../NotificationToast/NotificationToast";
 
-const Results = ({
+const Chat = ({
   results,
-  setResults,
+  dispatch,
   setCurrentQuestion,
   setQuestionType,
 }) => {
@@ -37,7 +37,14 @@ const Results = ({
   };
 
   const handleReportGeneration = async (result, colorPalette = "red") => {
-    if (!result.deepquery_metadata) {
+    // Support for deep_query_metadata from toolCalls or top-level
+    let metadata = result.deepquery_metadata;
+    if (!metadata && result.toolCalls) {
+        const dqCall = result.toolCalls.find(t => t.toolName === 'deep_query' && t.artifact && t.artifact.deepquery_metadata);
+        if (dqCall) metadata = dqCall.artifact.deepquery_metadata;
+    }
+
+    if (!metadata) {
       console.error("No deepquery_metadata available for report generation");
       return;
     }
@@ -62,7 +69,7 @@ const Results = ({
     });
 
     try {
-      await generateReport(result.deepquery_metadata, result.question, colorPalette);
+      await generateReport(metadata, result.question, colorPalette);
 
       setToastConfig({
         show: true,
@@ -100,11 +107,11 @@ const Results = ({
       ref={resultsContainerRef}
     >
       {results.map((result, index) => (
-        <ResultItem
+        <ChatItem
           key={index}
           result={result}
           index={index}
-          setResults={setResults}
+          dispatch={dispatch}
           setCurrentQuestion={setCurrentQuestion}
           setQuestionType={setQuestionType}
           onGenerateReport={handleReportGeneration}
@@ -125,4 +132,4 @@ const Results = ({
   );
 };
 
-export default Results;
+export default Chat;

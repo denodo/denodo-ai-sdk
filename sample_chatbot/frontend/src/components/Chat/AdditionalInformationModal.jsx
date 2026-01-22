@@ -2,14 +2,77 @@ import React from "react";
 import Modal from "react-bootstrap/Modal";
 import Button from "react-bootstrap/Button";
 
-const ResultInfoModal = ({ show, onClose, result }) => {
+const AdditionalInformationModal = ({ show, onClose, result }) => {
   if (!result) return null;
 
-  const type = result.questionType?.toLowerCase();
-
   const renderContent = () => {
-    switch (type) {
-      case "data":
+    const artifact = result.modalArtifact || {};
+    const errorMessage =
+      result.error_message ||
+      artifact.error_message ||
+      (typeof artifact.error === "string" ? artifact.error : null) ||
+      (result.isError ? result.errorMessage || result.result : null);
+    const traceback = result.traceback || artifact.traceback || result.errorDetails;
+    const hasError = !!(errorMessage || traceback);
+
+    const renderErrorSection = () => {
+      if (!errorMessage && !traceback) return null;
+      return (
+        <div
+          style={{
+            marginBottom: "1rem",
+            borderRadius: "0.25rem",
+            padding: "0.5rem 0.75rem",
+            backgroundColor: "rgba(220,53,69,0.08)",
+            color: "#842029",
+            fontSize: "0.9rem",
+          }}
+        >
+          {errorMessage && (
+            <p style={{ marginBottom: traceback ? "0.25rem" : 0 }}>
+              <strong>Error:</strong> {errorMessage}
+            </p>
+          )}
+          {traceback && (
+            <div>
+              <strong>Traceback:</strong>
+              <pre
+                style={{
+                  marginTop: "0.25rem",
+                  maxHeight: "250px",
+                  overflow: "auto",
+                  whiteSpace: "pre-wrap",
+                  fontSize: "0.8rem",
+                }}
+              >
+                {traceback}
+              </pre>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    if (!result.modalTool) {
+      return (
+        <div>
+          {renderErrorSection()}
+          {!hasError && (
+            <p>
+              <strong>Chatbot LLM:</strong> {result.chatbot_llm || "N/A"}
+            </p>
+          )}
+        </div>
+      );
+    }
+
+    const modalTool = (result.modalTool || result.toolName || "").toLowerCase();
+
+    switch (modalTool) {
+      case "data_query":
+        if (errorMessage || traceback) {
+          return <div>{renderErrorSection()}</div>;
+        }
         return (
           <div>
             <p>
@@ -17,16 +80,15 @@ const ResultInfoModal = ({ show, onClose, result }) => {
             </p>
             <p>
               <strong>AI SDK LLM:</strong>{" "}
-              {result.llm_provider && result.llm_model 
-                ? `${result.llm_provider}/${result.llm_model}` 
+              {result.llm_provider && result.llm_model
+                ? `${result.llm_provider}/${result.llm_model}`
                 : "N/A"}
             </p>
             <p>
               <strong>AI-Generated SQL:</strong> {result.vql || "N/A"}
             </p>
             <p>
-              <strong>Query explanation:</strong>{" "}
-              {result.query_explanation || "N/A"}
+              <strong>Query explanation:</strong> {result.query_explanation || "N/A"}
             </p>
             <p>
               <strong>AI SDK Tokens:</strong> {result.tokens || "N/A"}
@@ -38,6 +100,9 @@ const ResultInfoModal = ({ show, onClose, result }) => {
           </div>
         );
       case "deep_query":
+        if (errorMessage || traceback) {
+          return <div>{renderErrorSection()}</div>;
+        }
         return (
           <div>
             <p>
@@ -69,13 +134,15 @@ const ResultInfoModal = ({ show, onClose, result }) => {
             )}
             {result.total_execution_time && (
               <p>
-                <strong>Execution time:</strong>{" "}
-                {result.total_execution_time}s
+                <strong>Execution time:</strong> {result.total_execution_time}s
               </p>
             )}
           </div>
         );
-      case "metadata":
+      case "metadata_query":
+        if (errorMessage || traceback) {
+          return <div>{renderErrorSection()}</div>;
+        }
         return (
           <div>
             <p>
@@ -83,7 +150,10 @@ const ResultInfoModal = ({ show, onClose, result }) => {
             </p>
           </div>
         );
-      case "kb":
+      case "knowledge_query":
+        if (errorMessage || traceback) {
+          return <div>{renderErrorSection()}</div>;
+        }
         return (
           <div>
             <p>
@@ -101,7 +171,7 @@ const ResultInfoModal = ({ show, onClose, result }) => {
               <strong>Source:</strong> AI
             </p>
             <p>
-              <strong>Model:</strong> {result.chatbot_llm || "N/A"}
+              <strong>Chatbot LLM:</strong> {result.chatbot_llm || "N/A"}
             </p>
           </div>
         );
@@ -123,6 +193,6 @@ const ResultInfoModal = ({ show, onClose, result }) => {
   );
 };
 
-export default ResultInfoModal;
+export default AdditionalInformationModal;
 
 

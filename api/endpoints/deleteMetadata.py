@@ -60,7 +60,7 @@ async def deleteMetadata(endpoint_request: deleteMetadataRequest = Depends(), au
     except DataCatalogAuthError as e:
         raise HTTPException(status_code=401, detail=f"Authentication failed during deleteMetadata: {str(e)}") from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Retrieving allowed view IDs from Denodo Data Catalog failed: {str(e)}") from e
+        raise HTTPException(status_code=500, detail=f"Retrieving allowed view IDs from Denodo Data Marketplace failed: {str(e)}") from e
 
     vdp_database_names = [db.strip() for db in endpoint_request.vdp_database_names.split(',') if db]
     vdp_tag_names = [tag.strip() for tag in endpoint_request.vdp_tag_names.split(',') if tag]

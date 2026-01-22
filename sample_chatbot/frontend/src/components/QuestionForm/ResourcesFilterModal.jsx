@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import Modal from "react-bootstrap/Modal";
 import Button from "react-bootstrap/Button";
 import Form from "react-bootstrap/Form";
@@ -7,6 +7,7 @@ const ResourcesFilterModal = ({
   show,
   handleClose,
   syncedResources,
+  partialResources,
   currentFilters,
   currentAllowExternalAssociations,
   onSave
@@ -18,9 +19,42 @@ const ResourcesFilterModal = ({
   const [allowExternalAssociations, setAllowExternalAssociations] = useState(
     currentAllowExternalAssociations
   );
-  const dbNames = Object.keys(syncedResources?.DATABASE || {});
-  const tagNames = Object.keys(syncedResources?.TAG || {});
-  const hasData = dbNames.length > 0 || tagNames.length > 0;
+
+  const { allDbNames, allTagNames, isDbPartial, isTagPartial } = useMemo(() => {
+    const syncedDbs = Object.keys(syncedResources?.DATABASE || {});
+    const syncedTags = Object.keys(syncedResources?.TAG || {});
+
+    const partialDbSet = new Set();
+    const partialTagSet = new Set();
+
+    const pDbsByTag = partialResources?.partial_dbs_by_tag || {};
+    Object.values(pDbsByTag).forEach((dbList) => {
+      dbList.forEach((db) => partialDbSet.add(db));
+    });
+
+    const pTagsByDb = partialResources?.partial_tags_by_db || {};
+    Object.values(pTagsByDb).forEach((tagList) => {
+      tagList.forEach((tag) => partialTagSet.add(tag));
+    });
+
+    const pTagsByTag = partialResources?.partial_tags_by_tag || {};
+    Object.values(pTagsByTag).forEach((tagList) => {
+      tagList.forEach((tag) => partialTagSet.add(tag));
+    });
+
+    const combinedDbs = Array.from(new Set([...syncedDbs, ...partialDbSet])).sort();
+    const combinedTags = Array.from(new Set([...syncedTags, ...partialTagSet])).sort();
+
+    return {
+      allDbNames: combinedDbs,
+      allTagNames: combinedTags,
+      isDbPartial: (name) => !syncedDbs.includes(name) && partialDbSet.has(name),
+      isTagPartial: (name) => !syncedTags.includes(name) && partialTagSet.has(name)
+    };
+  }, [syncedResources, partialResources]);
+
+  const hasData = allDbNames.length > 0 || allTagNames.length > 0;
+  const hasPartials = allDbNames.some(isDbPartial) || allTagNames.some(isTagPartial);
 
   useEffect(() => {
     setSelectedDatabases(currentFilters.databases || []);
@@ -62,28 +96,39 @@ const ResourcesFilterModal = ({
   };
 
   const allDbsSelected =
-    dbNames.length > 0 && selectedDatabases.length === dbNames.length;
+    allDbNames.length > 0 && selectedDatabases.length === allDbNames.length;
   const someDbsSelected = selectedDatabases.length > 0 && !allDbsSelected;
 
   const handleSelectAllDbs = () => {
     if (allDbsSelected) {
       setSelectedDatabases([]);
     } else {
-      setSelectedDatabases(dbNames);
+      setSelectedDatabases(allDbNames);
     }
   };
 
   const allTagsSelected =
-    tagNames.length > 0 && selectedTags.length === tagNames.length;
+    allTagNames.length > 0 && selectedTags.length === allTagNames.length;
   const someTagsSelected = selectedTags.length > 0 && !allTagsSelected;
 
   const handleSelectAllTags = () => {
     if (allTagsSelected) {
       setSelectedTags([]);
     } else {
-      setSelectedTags(tagNames);
+      setSelectedTags(allTagNames);
     }
   };
+
+  const renderLabel = (name, isPartial) => (
+    <span>
+      {name}
+      {isPartial && (
+        <span className="text-muted ms-1" style={{ fontSize: "0.85em", fontStyle: "italic" }}>
+          (partial)
+        </span>
+      )}
+    </span>
+  );
 
   return (
     <Modal show={show} onHide={handleClose} centered>
@@ -98,13 +143,20 @@ const ResourcesFilterModal = ({
           used.
         </p>
 
+        {hasPartials && (
+          <div className="alert alert-light border p-2 mb-3" style={{ fontSize: "0.9em" }}>
+            <strong>Note:</strong> Resources marked as (partial) have not been directly 
+            synchronized but were found associated with other synchronized resources.
+          </div>
+        )}
+
         {!hasData && (
           <p className="text-muted">
             No synchronized resources found to filter by.
           </p>
         )}
 
-        {dbNames.length > 0 && (
+        {allDbNames.length > 0 && (
           <>
             <h5>Databases</h5>
             <div
@@ -122,11 +174,11 @@ const ResourcesFilterModal = ({
                   className="fw-bold"
                 />
                 <hr className="my-1" />
-                {dbNames.map((dbName) => (
+                {allDbNames.map((dbName) => (
                   <Form.Check
                     key={dbName}
                     type="checkbox"
-                    label={dbName}
+                    label={renderLabel(dbName, isDbPartial(dbName))}
                     id={`db-check-${dbName}`}
                     checked={selectedDatabases.includes(dbName)}
                     onChange={() => handleDatabaseChange(dbName)}
@@ -137,7 +189,7 @@ const ResourcesFilterModal = ({
           </>
         )}
 
-        {tagNames.length > 0 && (
+        {allTagNames.length > 0 && (
           <>
             <h5 className="mt-3">Tags</h5>
             <div
@@ -155,11 +207,11 @@ const ResourcesFilterModal = ({
                   className="fw-bold"
                 />
                 <hr className="my-1" />
-                {tagNames.map((tagName) => (
+                {allTagNames.map((tagName) => (
                   <Form.Check
                     key={tagName}
                     type="checkbox"
-                    label={tagName}
+                    label={renderLabel(tagName, isTagPartial(tagName))}
                     id={`tag-check-${tagName}`}
                     checked={selectedTags.includes(tagName)}
                     onChange={() => handleTagChange(tagName)}
