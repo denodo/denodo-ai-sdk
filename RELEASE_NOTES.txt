@@ -1,3 +1,23 @@
+version 1.0 - 20260220
+------------------------
+
+- Added enhancement to pre-fill AI SDK/Chatbot LLM settings in chatbot UI modal
+- Integrated sample data generation errors in getMetadata endpoint output
+- Enhanced vectorization endpoints access control to only allow specified users to insert/delete data in the vector store
+- Improved migration script in run.py --migrate to account for duplicates/new/deprecated variables
+
+version 1.0-beta - 20260212
+------------------------
+
+- Changed default value of allow_external_associations to false in answerQuestion endpoint
+- Made ambiguity detection optional in the answerQuestion endpoints with check_ambiguity parameter
+- Updated default LLM models in sdk_config.env.example and chatbot_config.env.example
+- Fixed execution result pagination not resetting between different tool calls in chatbot UI
+- Included tool output in chatbot UI
+- Added support for new vector functions in VQL generation prompts
+- Included truncateVectors parameter in execute_vql
+- Improved Knowledge Base Manager to handle unstructured data in the Chatbot UI
+
 version 0.13 - 20260122
 ------------------------
 

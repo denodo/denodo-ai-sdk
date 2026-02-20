@@ -23,7 +23,7 @@ const formatTimestamp = (timestamp) => {
     return date.toLocaleString(undefined, options);
   } catch (error) {
     console.error('Error formatting timestamp:', error);
-    return 'Invalid Date';
+    return 'Invalid date';
   }
 };
 
@@ -31,7 +31,6 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
   // Common state
   const [activeTab, setActiveTab] = useState('status');
   const [isLoading, setIsLoading] = useState(false);
-  const [hasCredentials, setHasCredentials] = useState(true);
   const [statusData, setStatusData] = useState(syncedResources || {});
 
   // Toast State
@@ -61,17 +60,6 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
       if (!isLoading) {
         setStatusData(syncedResources || {});
       }
-
-      const checkConfig = async () => {
-        try {
-          const response = await axios.get('api/config');
-          setHasCredentials(response.data.hasAISDKCredentials);
-        } catch (error) {
-          console.error('Error fetching config:', error);
-          setHasCredentials(false);
-        }
-      };
-      checkConfig();
     }
   }, [show, syncedResources, isLoading]);
 
@@ -116,26 +104,50 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
                 showToast(
                     "You made an incremental request, but no updates have been made to the desired data since the last sync.",
                     "warning",
-                    "No Updates",
+                    "No updates",
                     10000
                 );
             } else {
                 showToast(
                     "The selected databases/tags were not found in the Data Marketplace.",
                     "danger",
-                    "Not Found"
+                    "Not found"
                 );
             }
         } else {
             showToast(
                 "The selected databases/tags were not found in the Data Marketplace.",
                 "danger",
-                "Not Found"
+                "Not found"
             );
         }
       } else {
-        const successMsg = response.data.message || "Synchronization successful.";
-        showToast(successMsg, 'success', 'Sync Completed');
+        const errors = response.data.dataUsageErrors || [];
+
+        if (errors.length > 0) {
+          const formatError = (e) => {
+            const msg = e.cause || 'Unknown error';
+
+            if (e.databaseName && e.viewName) {
+              const fieldInfo = e.fieldName ? `.${e.fieldName}` : '';
+              return `• [${e.databaseName}.${e.viewName}${fieldInfo}] ${msg}`;
+            }
+            return `• ${msg}`;
+          };
+
+          const errorList = errors.slice(0, 3).map(formatError).join('\n');
+          const moreErrors = errors.length > 3 ? `\n...and ${errors.length - 3} more.` : '';
+
+          showToast(
+            `Sync completed, but with ${errors.length} warning(s):\n${errorList}${moreErrors}`, 
+            'warning',
+            'Sync completed with warnings',
+            30000
+          );
+        } else {
+          const successMsg = response.data.message || "Synchronization successful.";
+          showToast(successMsg, 'success', 'Sync completed');
+        }
 
         if (response.data) {
           if (response.data.syncedResources) {
@@ -155,7 +167,7 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
       } else {
         errorMsg = error.response?.data?.message || errorMsg;
       }
-      showToast(errorMsg, 'danger', 'Sync Error');
+      showToast(errorMsg, 'danger', 'Sync error');
     } finally {
       setIsLoading(false);
     }
@@ -178,11 +190,11 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
           showToast(
             "No metadata found matching the specified criteria for deletion.", 
             'warning', 
-            'No Content'
+            'No content'
           );
       } else {
           const successMsg = response.data.message || "Deletion successful.";
-          showToast(successMsg, 'success', 'Deletion Completed');
+          showToast(successMsg, 'success', 'Deletion completed');
 
           if (response.data) {
             if (response.data.syncedResources) {
@@ -197,7 +209,7 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
 
     } catch (error) {
       const errorMsg = error.response?.data?.message || 'An error occurred during deletion.';
-      showToast(errorMsg, 'danger', 'Delete Error');
+      showToast(errorMsg, 'danger', 'Delete error');
     } finally {
       setIsLoading(false);
     }
@@ -313,14 +325,9 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
 
       <Modal show={show} onHide={handleModalClose} centered data-bs-theme="light">
         <Modal.Header closeButton>
-          <Modal.Title>Vector DB Management</Modal.Title>
+          <Modal.Title>Vector DB Manager</Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          {!hasCredentials ? (
-            <Alert variant="warning">
-              AI SDK credentials are not configured. Please set the AI_SDK_USERNAME and AI_SDK_PASSWORD environment variables to use this feature.
-            </Alert>
-          ) : (
             <Tabs 
               activeKey={activeTab} 
               onSelect={(k) => !isLoading && setActiveTab(k)}
@@ -455,7 +462,6 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
                 </Form>
               </Tab>
             </Tabs>
-          )}
         </Modal.Body>
         <Modal.Footer>
           {renderFooterButtons()}

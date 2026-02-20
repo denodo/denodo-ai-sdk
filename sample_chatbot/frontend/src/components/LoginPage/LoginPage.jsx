@@ -15,9 +15,9 @@ const LoginPage = ({ onSignIn, renderLogo }) => {
     setIsLoading(true);
 
     const savedUserDetails =
-      localStorage.getItem(`${username}_userDetails`) || "";
+      localStorage.getItem(`${username}_user_details`) || "";
     const savedCustomInstructions =
-      localStorage.getItem(`${username}_customInstructions`) || "";
+      localStorage.getItem(`${username}_custom_instructions`) || "";
 
     try {
       await onSignIn({
@@ -27,7 +27,7 @@ const LoginPage = ({ onSignIn, renderLogo }) => {
         user_details: savedUserDetails,
         custom_instructions: savedCustomInstructions,
       });
-      localStorage.setItem("currentLoggedInUser", username);
+      localStorage.setItem("current_user", username);
     } catch (error) {
       console.error("Login failed:", error);
     } finally {

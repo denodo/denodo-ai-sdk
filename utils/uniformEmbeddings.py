@@ -8,14 +8,14 @@ from langchain_classic.embeddings import CacheBackedEmbeddings
 
 class UniformEmbeddings:
     VALID_PROVIDERS = [
-        "OpenAI",
-        "Azure",
-        "Bedrock",
-        "Google",
-        "Ollama",
-        "Mistral",
-        "NVIDIA",
-        "GoogleAIStudio"
+        "openai",
+        "azure",
+        "bedrock",
+        "google",
+        "ollama",
+        "mistral",
+        "nvidia",
+        "googleaistudio",
     ]
 
     def __init__(self, provider_name, model_name):
@@ -49,7 +49,7 @@ class UniformEmbeddings:
             logging.info(f"- {self.provider_name.upper()}_API_VERSION (required)")
             logging.info(f"- {self.provider_name.upper()}_PROXY (optional)")
             self.setup_custom_azure()
-        elif self.provider_name.lower() not in list(map(str.lower, self.VALID_PROVIDERS)):
+        elif self.provider_name.lower() not in self.VALID_PROVIDERS:
             logging.warning(f"Provider '{self.provider_name}' not in standard list. Creating custom OpenAI-compatible provider.")
             logging.info("Expected environment variables for custom provider:")
             logging.info(f"- {self.provider_name.upper()}_API_KEY (required)")
@@ -78,7 +78,6 @@ class UniformEmbeddings:
             model=self.model_name,
             google_api_key=api_key
         )
-
 
     def setup_ollama(self):
         from langchain_community.embeddings import OllamaEmbeddings

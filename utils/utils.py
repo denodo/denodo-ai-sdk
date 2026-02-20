@@ -537,3 +537,50 @@ class RefreshableBotoSession:
         autorefresh_session = Session(botocore_session = session)
 
         return autorefresh_session
+
+def delete_documents_by_database_name(vector_store, database_names):
+    """
+    Delete all documents from a vector store that match the given database names.
+
+    This is used for deleting CSV source documents from a shared unstructured vector store,
+    where each CSV source is identified by its database_name in the document metadata.
+
+    Args:
+        vector_store: UniformVectorStore instance
+        database_names: List of database names to delete (e.g., ['denodo_community', 'sample_data'])
+
+    Returns:
+        Number of documents deleted
+    """
+    if not database_names:
+        return 0
+
+    K_BATCH_SIZE = 1000
+    total_deleted = 0
+    more_results_left = True
+
+    while more_results_left:
+        # Search for documents matching the database names
+        results = vector_store.search_batched(
+            vector=vector_store.search_vector,
+            k=K_BATCH_SIZE,
+            database_names=database_names
+        )
+
+        if not results:
+            break
+
+        # Collect document IDs to delete
+        document_ids_to_delete = set()
+        for doc in results:
+            doc_id = doc.metadata.get('document_id')
+            if doc_id:
+                document_ids_to_delete.add(doc_id)
+
+        if document_ids_to_delete:
+            vector_store.delete(ids=list(document_ids_to_delete))
+            total_deleted += len(document_ids_to_delete)
+
+        more_results_left = len(results) == K_BATCH_SIZE
+
+    return total_deleted

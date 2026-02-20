@@ -206,7 +206,7 @@ def update_feedback_in_report(
             found_in_this_file = False
 
             try:
-                with open(filepath, "r", newline="", encoding="utf-8") as file:
+                with open(filepath, newline="", encoding="utf-8") as file:
                     reader = csv.reader(file, delimiter=";")
                     try:
                         header = next(reader)

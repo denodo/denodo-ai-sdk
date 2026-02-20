@@ -4,9 +4,14 @@ import Button from "react-bootstrap/Button";
 import Table from "react-bootstrap/Table";
 import Pagination from "react-bootstrap/Pagination";
 
-const TableModal = ({ show, llm_response_rows_limit, handleClose, executionResult }) => {
+const TableModal = ({ show, llm_response_rows_limit, handleClose, handleResetData, executionResult }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 10;
+
+  const handleOnExited = () => {
+    setCurrentPage(1);
+    if (handleResetData) handleResetData();
+  };
 
   const tableData = useMemo(() => {
     if (
@@ -111,7 +116,13 @@ const TableModal = ({ show, llm_response_rows_limit, handleClose, executionResul
   };
 
   return (
-    <Modal show={show} onHide={handleClose} size="lg" centered>
+    <Modal 
+      show={show} 
+      onHide={handleClose} 
+      onExited={handleOnExited}
+      size="lg" 
+      centered
+    >
       <Modal.Header closeButton data-bs-theme="light">
         <Modal.Title>Execution Result</Modal.Title>
       </Modal.Header>

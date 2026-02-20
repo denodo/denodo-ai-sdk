@@ -29,7 +29,7 @@ def print_status(process_type, urls, version=None, root_path_prefix=""):
                 ("AI SDK version: ", "bold white"),
                 (f"{version or 'Unknown'}", "yellow")
             ),
-            title="[bold]API Status",
+            title="[bold]API status",
             border_style="red",
             width=PANEL_WIDTH
         )
@@ -38,7 +38,7 @@ def print_status(process_type, urls, version=None, root_path_prefix=""):
         for i, url in enumerate(urls):
             full_chatbot_url = url.rstrip('/') + root_path_prefix
             segments.extend([
-                ("Sample Chatbot ", "bold blue"),
+                ("Sample chatbot ", "bold blue"),
                 ("is running at: ", "bold white"),
                 (full_chatbot_url, "green")
             ])
@@ -47,7 +47,7 @@ def print_status(process_type, urls, version=None, root_path_prefix=""):
 
         panel = Panel(
             Text.assemble(*segments),
-            title="[bold]Chatbot Status",
+            title="[bold]Chatbot status",
             border_style="blue",
             width=PANEL_WIDTH
         )

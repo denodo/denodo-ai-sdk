@@ -1,0 +1,27 @@
+TEXT_VQL = """
+VQL supports the standard SQL text functions. It also supports the following ones:
+
+    - ASCII(string_expression)
+    - BASE64_TO_BASE10(string_expression)
+    - BASE64_TO_HEX(string_expression)
+    - CHAR_LENGTH(string_expression)
+    - CONCATLIST(string_column)
+    - DELETESPACES(string_expression)
+    - ENDWITH(string_expression, substring)
+    - HEX_TO_BASE64(string_expression)
+    - INITCAP(string_expression)
+    - INSTR(string_expression, substring, [start_position], [nth_occurrence])
+    - LEFT(string_expression, number_of_characters)
+    - LEFTPAD(string_expression, total_length, [pad_character])
+    - LEN(string_expression)
+    - PRINTF(format_string, ...)
+    - PROPERCASE(string_expression)
+    - REGEXP(string_expression, pattern)
+    - REGEXP_COUNT(string_expression, pattern)
+    - REMOVEACCENTS(string_expression)
+    - REPLACEMAP(string_expression, mapping_definition)
+    - RIGHT(string_expression, number_of_characters)
+    - RIGHTPAD(string_expression, total_length, [pad_character])
+    - SIMILARITY(string_expression_1, string_expression_2)
+    - SPLIT(string_expression, delimiter)
+    - STARTWITH(string_expression, substring)"""

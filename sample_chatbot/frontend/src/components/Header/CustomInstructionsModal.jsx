@@ -14,10 +14,10 @@ const CustomInstructionsModal = ({ show, handleClose }) => {
 
   useEffect(() => {
     if (show) {
-      const currentUser = localStorage.getItem('currentLoggedInUser');
+      const currentUser = localStorage.getItem('current_user');
       if (!currentUser) return;
-      const savedUserDetails = localStorage.getItem(`${currentUser}_userDetails`) || '';
-      const savedCustomInstructions = localStorage.getItem(`${currentUser}_customInstructions`) || '';
+      const savedUserDetails = localStorage.getItem(`${currentUser}_user_details`) || '';
+      const savedCustomInstructions = localStorage.getItem(`${currentUser}_custom_instructions`) || '';
       
       setUsername(currentUser);
       setUserDetails(savedUserDetails);
@@ -29,8 +29,8 @@ const CustomInstructionsModal = ({ show, handleClose }) => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      localStorage.setItem(`${username}_userDetails`, userDetails);
-      localStorage.setItem(`${username}_customInstructions`, customInstructions);
+      localStorage.setItem(`${username}_user_details`, userDetails);
+      localStorage.setItem(`${username}_custom_instructions`, customInstructions);
       const response = await axios.post('update_custom_instructions', {
         custom_instructions: customInstructions,
         user_details: userDetails

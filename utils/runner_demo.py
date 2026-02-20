@@ -53,7 +53,7 @@ def load_demo_data(host, grpc_port, catalog_port, server_id, dc_user, dc_passwor
                 cur.execute("METADATA ENCRYPTION PASSWORD 'denodo';")
                 cur.fetchall()
 
-                with open('sample_chatbot/sample_data/structured/samples_bank.vql', 'r', encoding='utf-8') as f:
+                with open('sample_chatbot/sample_data/structured/samples_bank.vql', encoding='utf-8') as f:
                     sql_statements = f.read().split(';')
                     for statement in sql_statements:
                         if statement.strip():

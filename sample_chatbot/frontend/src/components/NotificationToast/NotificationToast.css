@@ -17,6 +17,7 @@
 .custom-report-toast .toast-body {
   color: black !important;
   font-weight: 500;
+  white-space: pre-wrap;
 }
 
 .toast-icon-container {

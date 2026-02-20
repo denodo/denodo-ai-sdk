@@ -159,9 +159,6 @@ const AdditionalInformationModal = ({ show, onClose, result }) => {
             <p>
               <strong>Source:</strong> Knowledge Base
             </p>
-            <p>
-              <strong>Vector store:</strong> {result.data_sources || "N/A"}
-            </p>
           </div>
         );
       default:

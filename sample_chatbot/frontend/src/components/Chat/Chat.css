@@ -146,6 +146,9 @@ tr:nth-child(even) {
 .card-text {
   margin-bottom: 0.5rem;
 }
+.card-text h2 {
+  font-size: 1.5rem !important;
+}
 .card-body .card-text pre,
 .card-body .card-text table {
   max-width: 100%; 

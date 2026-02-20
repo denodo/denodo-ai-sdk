@@ -21,7 +21,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from utils.data_catalog import get_allowed_view_ids, DataCatalogAuthError
 from api.utils import state_manager
 from api.utils.sdk_utils import (
-    handle_endpoint_error, authenticate, delete_by_db_or_tag
+    handle_endpoint_error, authenticate, delete_by_db_or_tag,
+    check_metadata_user_permission
 )
 
 router = APIRouter()
@@ -54,6 +55,9 @@ async def deleteMetadata(endpoint_request: deleteMetadataRequest = Depends(), au
 
     This behavior ensures that only views that unambiguously match the deletion criteria are removed, while preserving any entries that may be linked to other synchronized sources.
     """
+    if not check_metadata_user_permission(auth):
+        raise HTTPException(status_code=403, detail="You do not have authorization to use the vectorization endpoints.")
+
     try:
         allowed_view_ids = await get_allowed_view_ids(auth=auth)
         allowed_view_ids = [str(view_id) for view_id in allowed_view_ids]

@@ -6,18 +6,18 @@ from utils.utils import RefreshableBotoSession, get_custom_headers_from_env
 
 class UniformLLM:
     VALID_PROVIDERS = [
-        "OpenAI",
-        "Azure",
-        "Bedrock",
-        "Google",
-        "GoogleAIStudio",
-        "Anthropic",
-        "NVIDIA",
-        "Groq",
-        "Ollama",
-        "Mistral",
-        "SambaNova",
-        "OpenRouter"
+        "openai",
+        "azure",
+        "bedrock",
+        "google",
+        "googleaistudio",
+        "anthropic",
+        "nvidia",
+        "groq",
+        "ollama",
+        "mistral",
+        "sambanova",
+        "openrouter",
         ]
 
     def __init__(self, provider_name, model_name, temperature = 0.0, max_tokens = 4096):
@@ -64,7 +64,7 @@ class UniformLLM:
             logging.info(f"- {self.provider_name.upper()}_API_VERSION (required)")
             logging.info(f"- {self.provider_name.upper()}_PROXY (optional)")
             self.setup_custom_azure()
-        elif self.provider_name.lower() not in list(map(str.lower, self.VALID_PROVIDERS)):
+        elif self.provider_name.lower() not in self.VALID_PROVIDERS:
             logging.warning(f"Provider '{self.provider_name}' not in standard list. Creating custom OpenAI-compatible provider.")
             logging.info("Expected environment variables for custom provider:")
             logging.info(f"- {self.provider_name.upper()}_API_KEY (required)")

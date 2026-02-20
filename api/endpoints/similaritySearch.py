@@ -14,31 +14,17 @@ import logging
 import traceback
 
 from pydantic import BaseModel
-from typing import List, Annotated
+from typing import List
 
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPAuthorizationCredentials, HTTPBearer
 
 from api.utils import state_manager
 from utils.data_catalog import get_allowed_view_ids, DataCatalogAuthError
-from api.utils.sdk_utils import filter_non_allowed_associations, handle_endpoint_error
+from api.utils.sdk_utils import filter_non_allowed_associations, handle_endpoint_error, authenticate
 
 router = APIRouter()
-security_basic = HTTPBasic(auto_error = False)
-security_bearer = HTTPBearer(auto_error = False)
-
-def authenticate(
-        basic_credentials: Annotated[HTTPBasicCredentials, Depends(security_basic)],
-        bearer_credentials: Annotated[HTTPAuthorizationCredentials, Depends(security_bearer)]
-        ):
-    if bearer_credentials is not None:
-        return bearer_credentials.credentials
-    elif basic_credentials is not None:
-        return (basic_credentials.username, basic_credentials.password)
-    else:
-        raise HTTPException(status_code=401, detail="Authentication required")
 
 class similaritySearchRequest(BaseModel):
     query: str

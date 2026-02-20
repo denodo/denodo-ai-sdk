@@ -49,7 +49,6 @@ class generateDeepQueryReportResponse(BaseModel):
     html_report: Optional[str] = None
     total_execution_time: float
 
-
 @router.post(
     "/generateDeepQueryReport",
     response_class=JSONResponse,
@@ -127,7 +126,3 @@ async def generate_deep_query_report_post(
         ),
         media_type="application/json",
     )
-
-
-
-

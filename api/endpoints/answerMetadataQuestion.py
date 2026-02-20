@@ -14,32 +14,18 @@ import logging
 import traceback
 
 from pydantic import BaseModel, Field
-from typing import Dict, Annotated, List
+from typing import Dict, List
 
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPAuthorizationCredentials, HTTPBearer
 
-from api.utils.sdk_utils import timing_context, handle_endpoint_error, generate_session_id
+from api.utils.sdk_utils import timing_context, handle_endpoint_error, generate_session_id, authenticate
 from api.utils import sdk_ai_tools
 from api.utils import sdk_answer_question
 from api.utils import state_manager
 
 router = APIRouter()
-security_basic = HTTPBasic(auto_error = False)
-security_bearer = HTTPBearer(auto_error = False)
-
-def authenticate(
-        basic_credentials: Annotated[HTTPBasicCredentials, Depends(security_basic)],
-        bearer_credentials: Annotated[HTTPAuthorizationCredentials, Depends(security_bearer)]
-        ):
-    if bearer_credentials is not None:
-        return bearer_credentials.credentials
-    elif basic_credentials is not None:
-        return (basic_credentials.username, basic_credentials.password)
-    else:
-        raise HTTPException(status_code=401, detail="Authentication required")
 
 class answerMetadataQuestionRequest(BaseModel):
     question: str
@@ -64,7 +50,7 @@ class answerMetadataQuestionRequest(BaseModel):
         description="A comma-separated list of tags to reduce the scope of the question to. If empty, all tags in the vector DB the user has permissions to will be considered."
     )
     allow_external_associations: bool = Field(
-        default = True,
+        default = False,
         description="If False, views from associations will NOT be considered if they don't belong to the VDBs/Tags specified in vdp_database_names and vdp_tag_names. If no VDBs/Tags specified, all views from associations will be considered."
     )
     use_views: str = Field(

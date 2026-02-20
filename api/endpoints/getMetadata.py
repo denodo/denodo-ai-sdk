@@ -23,7 +23,8 @@ from utils.data_catalog import activate_incremental
 from api.utils import state_manager
 from api.utils.sdk_utils import (
     handle_endpoint_error, authenticate, process_metadata_source,
-    format_metadata_response, delete_by_db_or_tag, get_by_db_or_tag
+    format_metadata_response, delete_by_db_or_tag, get_by_db_or_tag,
+    check_metadata_user_permission
 )
 
 router = APIRouter()
@@ -66,6 +67,7 @@ class getMetadataResponse(BaseModel):
     db_schema_text: List[str]
     vdb_list: List[str]
     tag_list: List[str]
+    data_usage_errors: List[Dict]
 
 @router.get(
         '/getMetadata',
@@ -89,6 +91,9 @@ def getMetadata(
     and activate tracking of changes. After that, you calling getMetadata with incremental set to True on the same set of databases/tags will only vectorize views
     that have been modified since the last sync.
     """
+    if not check_metadata_user_permission(auth):
+        raise HTTPException(status_code=403, detail="You do not have authorization to use the vectorization endpoints.")
+
     vdp_database_names = [db.strip() for db in endpoint_request.vdp_database_names.split(',') if db]
     vdp_tag_names = [tag.strip() for tag in endpoint_request.vdp_tag_names.split(',') if tag]
     tags_to_ignore = [tag.strip() for tag in endpoint_request.tags_to_ignore.split(',') if tag]
@@ -103,6 +108,7 @@ def getMetadata(
 
     all_db_schemas = []
     all_db_schema_texts = []
+    all_data_usage_errors = []
 
     vector_store = None
     sample_data_vector_store = None
@@ -159,7 +165,7 @@ def getMetadata(
     # Process tags
     for tag_name in vdp_tag_names:
         try:
-            db_schema, db_schema_text = process_metadata_source(
+            db_schema, db_schema_text, tag_errors = process_metadata_source(
                 source_type="TAG",
                 source_name=tag_name,
                 request=endpoint_request,
@@ -173,6 +179,10 @@ def getMetadata(
 
             all_db_schemas.append(db_schema)
             all_db_schema_texts.extend(db_schema_text)
+
+            if tag_errors:
+                all_data_usage_errors.extend(tag_errors)
+
         except ValueError as ve:
             logging.error(f"Error processing tag: {ve}")
             continue
@@ -180,7 +190,7 @@ def getMetadata(
     # Process databases
     for db_name in vdp_database_names:
         try:
-            db_schema, db_schema_text = process_metadata_source(
+            db_schema, db_schema_text, db_errors = process_metadata_source(
                 source_type="DATABASE",
                 source_name=db_name,
                 request=endpoint_request,
@@ -192,6 +202,10 @@ def getMetadata(
 
             all_db_schemas.append(db_schema)
             all_db_schema_texts.extend(db_schema_text)
+
+            if db_errors:
+                all_data_usage_errors.extend(db_errors)
+
         except ValueError as ve:
             logging.error(f"Error processing database: {ve}")
             continue
@@ -204,7 +218,11 @@ def getMetadata(
         all_db_schemas=all_db_schemas,
         all_db_schema_texts=all_db_schema_texts,
         vdb_database_names=vdp_database_names,
-        vdb_tag_names=vdp_tag_names
+        vdb_tag_names=vdp_tag_names,
+        all_data_usage_errors=all_data_usage_errors
     )
+
+    if all_data_usage_errors:
+        logging.warning(f"Found {len(all_data_usage_errors)} data usage errors during metadata extraction: {all_data_usage_errors}")
 
     return JSONResponse(content=jsonable_encoder(response), media_type="application/json")

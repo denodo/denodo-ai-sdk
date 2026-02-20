@@ -1,3 +1,4 @@
+
 """
  Copyright (c) 2025. DENODO Technologies.
  http://www.denodo.com
@@ -21,15 +22,15 @@ _llm_cache = {}
 _embedding_model_cache = {}
 _vector_store_cache = {}
 
-
 def get_embedding_model(provider_name, model_name):
     """
     Looks up an embedding model from the cache. If not found, creates and caches it.
+    Provider names are normalized to lowercase for consistent cache keys.
     """
     if not provider_name or not model_name:
         raise ValueError("Embeddings provider and model name must be specified.")
 
-    cache_key = (provider_name, model_name)
+    cache_key = (provider_name.lower(), model_name)
     if cache_key not in _embedding_model_cache:
         logging.info(f"Initializing new embedding model: {provider_name}/{model_name}")
         _embedding_model_cache[cache_key] = UniformEmbeddings(
@@ -41,11 +42,12 @@ def get_embedding_model(provider_name, model_name):
 def get_llm(provider_name, model_name, temperature = 0.0, max_tokens = 4096):
     """
     Looks up an LLM from the cache. If not found, creates and caches it.
+    Provider names are normalized to lowercase for consistent cache keys.
     """
     if not provider_name or not model_name:
         raise ValueError("LLM provider and model name must be specified.")
 
-    cache_key = (provider_name, model_name, temperature, max_tokens)
+    cache_key = (provider_name.lower(), model_name, temperature, max_tokens)
     if cache_key not in _llm_cache:
         logging.info(f"Initializing new LLM: {provider_name}/{model_name} (temp={temperature}, max_tokens={max_tokens})")
         _llm_cache[cache_key] = UniformLLM(
@@ -67,13 +69,14 @@ def get_vector_store(
     Looks up a Vector Store from the cache using a composite key that includes
     the provider, index name, and rate limit. This allows caching different
     configurations of the same vector store.
+    Provider names are normalized to lowercase for consistent cache keys.
     """
     if not provider:
         raise ValueError("Vector Store provider must be specified.")
 
     cache_key = (
-        provider,
-        embeddings_provider,
+        provider.lower(),
+        embeddings_provider.lower() if embeddings_provider else embeddings_provider,
         embeddings_model,
         index_name,
         rate_limit_rpm

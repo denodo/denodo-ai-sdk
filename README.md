@@ -2,7 +2,7 @@
 
 # Denodo AI SDK
 
-Denodo AI SDK helps you quickly build AI chatbots and agents that answer questions using your enterprise data, combining search + generative AI for accurate, context-aware results.
+Denodo AI SDK helps you quickly build AI chatbots and agents that answer questions using your enterprise data, combining similarity search + LLMs for accurate, context-aware results.
 
 It connects to the Denodo Platform, works with popular LLMs and vector stores, and ships with a ready-to-run sample chatbot and simple APIs to get started fast.
 

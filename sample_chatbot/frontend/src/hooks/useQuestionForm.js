@@ -19,7 +19,7 @@ const useQuestionForm = (currentQuestion, setCurrentQuestion, results, dispatch,
   const textInputRef = useRef(null);
 
   const isDeepQueryRunning =
-    config.enableDeepQuery && lastRequestId !== null && runningDeepQueries.includes(lastRequestId);
+    config.enable_deep_query && lastRequestId !== null && runningDeepQueries.includes(lastRequestId);
   const isAnyQueryRunning = isLoading || results.some((r) => r.isLoading);
   const filterCount = searchFilters.databases.length + searchFilters.tags.length;
 

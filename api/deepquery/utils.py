@@ -75,7 +75,6 @@ def filter_tool_calls_report_agent(tool_calls, default_rows=10):
 
     return filtered_calls
 
-
 def filter_tool_calls_visualization(tool_calls, default_rows=10):
     """
     Filter visualization tool calls (database_agent with generate_graph action).

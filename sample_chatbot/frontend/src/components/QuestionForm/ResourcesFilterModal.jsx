@@ -132,7 +132,7 @@ const ResourcesFilterModal = ({
 
   return (
     <Modal show={show} onHide={handleClose} centered>
-      <Modal.Header closeButton>
+      <Modal.Header closeButton data-bs-theme="light">
         <Modal.Title>Context Selection</Modal.Title>
       </Modal.Header>
       <Modal.Body>

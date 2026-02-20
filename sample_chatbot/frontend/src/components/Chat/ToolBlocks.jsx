@@ -23,11 +23,18 @@ const ToolBlocks = ({
   const [expandedTools, setExpandedTools] = useState({});
   const [paletteSelectorOpenId, setPaletteSelectorOpenId] = useState(null);
   const [selectedPalette, setSelectedPalette] = useState("");
-
+  const [copiedId, setCopiedId] = useState(null);
   const paletteOptions = ["red", "blue", "green", "black"];
 
   const toggleToolExpand = (toolCallId) => {
     setExpandedTools((prev) => ({ ...prev, [toolCallId]: !prev[toolCallId] }));
+  };
+
+  const handleCopy = (text, id) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    });
   };
 
   const renderTooltip = (props, content) => (
@@ -303,6 +310,15 @@ const ToolBlocks = ({
 
   const renderToolBox = (toolCall) => {
     const isExpanded = !!expandedTools[toolCall.toolCallId];
+    const artifact = toolCall.artifact || {};
+    const toolOutput = 
+      artifact.execution_result ||
+      artifact.answer ||
+      toolCall.contentToLLM;
+    const outputString = toolOutput 
+      ? (typeof toolOutput === 'object' ? JSON.stringify(toolOutput, null, 2) : String(toolOutput))
+      : "";
+
     return (
       <div
         key={toolCall.toolCallId}
@@ -318,7 +334,7 @@ const ToolBlocks = ({
           <div className="d-flex align-items-center" style={{ gap: "8px" }}>
             {renderToolIcons(toolCall)}
             <i
-              className="bi bi-chevron-down carousel-arrow-inner"
+              className={`bi bi-chevron-${isExpanded ? 'up' : 'down'} carousel-arrow-inner`}
               onClick={(e) => {
                 e.stopPropagation();
                 toggleToolExpand(toolCall.toolCallId);
@@ -328,16 +344,49 @@ const ToolBlocks = ({
           </div>
         </div>
         {isExpanded && (
-          <div className="mt-2">
-            {toolCall.args && (
-              <div className="args-container">
-                <div className="args-list">
-                  {Object.entries(toolCall.args).map(([k, v]) => (
-                    <React.Fragment key={k}>
-                      <span className="arg-key">{k}</span>
-                      <span className="arg-value">{String(v)}</span>
-                    </React.Fragment>
-                  ))}
+          <div className="mt-2 border-top pt-2">
+            <div className="mb-3">
+              <div className="small fw-bold mb-1 text-muted">Input</div>
+              {toolCall.args ? (
+                <div className="args-container">
+                  <div className="args-list">
+                    {Object.entries(toolCall.args).map(([k, v]) => (
+                      <React.Fragment key={k}>
+                        <span className="arg-key">{k}</span>
+                        <span className="arg-value">{String(v)}</span>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
+              ) : <div className="text-muted small">No input arguments</div>}
+            </div>
+
+            {(toolCall.status === "finished" || toolCall.status === "error") && (
+              <div>
+                <div className="small fw-bold mb-1 text-muted">Output</div>
+                <div className="args-container" style={{ maxHeight: '300px' }}>
+                  <div className="d-flex justify-content-between align-items-start mb-1">
+                    <span className="arg-key">result</span>
+                    {outputString && (
+                      <OverlayTrigger
+                        placement="top"
+                        overlay={(props) => (
+                          <Tooltip {...props}>{copiedId === toolCall.toolCallId ? "Copied!" : "Copy to clipboard"}</Tooltip>
+                        )}
+                      >
+                        <i 
+                          className={`bi bi-${copiedId === toolCall.toolCallId ? 'check-lg text-success' : 'copy'} cursor-pointer ms-2`}
+                          onClick={() => handleCopy(outputString, toolCall.toolCallId)}
+                          style={{ fontSize: '0.9rem' }}
+                        />
+                      </OverlayTrigger>
+                    )}
+                  </div>
+                  <div className="arg-value w-100">
+                    <pre className="mb-0" style={{ font: 'inherit', whiteSpace: 'pre-wrap' }}>
+                      {outputString || "No output data found"}
+                    </pre>
+                  </div>
                 </div>
               </div>
             )}

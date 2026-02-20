@@ -15,7 +15,7 @@ const ChatItemActions = ({
 }) => {
   const tooltipText = result && result.isError ? "View error details" : "AI";
 
-  const feedbackIcon = config.chatbotFeedback ? (
+  const feedbackIcon = config.chatbot_feedback ? (
     <OverlayTrigger
       placement="left"
       delay={{ show: 250, hide: 400 }}

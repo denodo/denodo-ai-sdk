@@ -13,31 +13,17 @@ import logging
 import traceback
 
 from pydantic import BaseModel, Field
-from typing import Annotated, Literal
+from typing import Literal
 
 from fastapi.responses import StreamingResponse
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPAuthorizationCredentials, HTTPBearer
 
 from api.utils import sdk_ai_tools
 from api.utils import sdk_answer_question
 from api.utils import state_manager
-from api.utils.sdk_utils import timing_context, handle_endpoint_error, generate_session_id
+from api.utils.sdk_utils import timing_context, handle_endpoint_error, generate_session_id, authenticate
 
 router = APIRouter()
-security_basic = HTTPBasic(auto_error = False)
-security_bearer = HTTPBearer(auto_error = False)
-
-def authenticate(
-        basic_credentials: Annotated[HTTPBasicCredentials, Depends(security_basic)],
-        bearer_credentials: Annotated[HTTPAuthorizationCredentials, Depends(security_bearer)]
-        ):
-    if bearer_credentials is not None:
-        return bearer_credentials.credentials
-    elif basic_credentials is not None:
-        return (basic_credentials.username, basic_credentials.password)
-    else:
-        raise HTTPException(status_code=401, detail="Authentication required")
 
 class streamAnswerQuestionRequest(BaseModel):
     question: str
@@ -62,7 +48,7 @@ class streamAnswerQuestionRequest(BaseModel):
         description="A comma-separated list of tags to reduce the scope of the question to. If empty, all tags in the vector DB the user has permissions to will be considered."
     )
     allow_external_associations: bool = Field(
-        default = True,
+        default = False,
         description="If False, views from associations will NOT be considered if they don't belong to the VDBs/Tags specified in vdp_database_names and vdp_tag_names. If no VDBs/Tags specified, all views from associations will be considered."
     )
     use_views: str = Field(
@@ -94,6 +80,10 @@ class streamAnswerQuestionRequest(BaseModel):
     mode: Literal["default", "data", "metadata"] = Field(default = "default")
     disclaimer: bool = True
     verbose: bool = True
+    check_ambiguity: bool = Field(
+        default = bool(int(os.getenv('CHECK_AMBIGUITY', '1'))),
+        description="If false, skip ambiguity detection."
+    )
     vql_execute_rows_limit: int = int(os.getenv('VQL_EXECUTE_ROWS_LIMIT', '100'))
     llm_response_rows_limit: int = int(os.getenv('LLM_RESPONSE_ROWS_LIMIT', '15'))
 
@@ -235,7 +225,8 @@ async def process_stream_question(request_data: streamAnswerQuestionRequest, aut
             mode=request_data.mode,
             custom_instructions=request_data.custom_instructions,
             session_id=session_id,
-            column_description_char_limit=request_data.vector_search_column_description_char_limit
+            column_description_char_limit=request_data.vector_search_column_description_char_limit,
+            check_ambiguity=request_data.check_ambiguity
         )
 
     ambiguity_message = sdk_answer_question.build_ambiguity_message(category_response)

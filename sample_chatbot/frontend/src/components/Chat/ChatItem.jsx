@@ -85,8 +85,12 @@ const ChatItem = ({
     setTableData(d);
     setShowTableModal(true);
   };
+
   const handleCloseTable = () => {
     setShowTableModal(false);
+  };
+
+  const handleResetTableData = () => {
     setTableData(null);
   };
 
@@ -101,7 +105,7 @@ const ChatItem = ({
   };
 
   const handleOpenFeedback = () => {
-    if (!config.chatbotFeedback) return;
+    if (!config.chatbot_feedback) return;
     setShowFeedbackModal(true);
   };
   const handleCloseFeedback = () => {
@@ -187,7 +191,7 @@ const ChatItem = ({
                 <ContextTablesAction
                     tables={result.combinedTablesUsed}
                     vql={result.combinedVqls}
-                    dataCatalogUrl={config.dataCatalogUrl}
+                    dataCatalogUrl={config.data_marketplace_url}
                     icons={
                         <ChatItemActions
                             result={result}
@@ -286,6 +290,7 @@ const ChatItem = ({
       <TableModal
         show={showTableModal}
         handleClose={handleCloseTable}
+        handleResetData={handleResetTableData}
         executionResult={tableData}
       />
       <ContextTablesModal
@@ -293,7 +298,7 @@ const ChatItem = ({
         onClose={handleCloseContext}
         tables={contextTables.tables}
         vql={contextTables.vql}
-        dataCatalogUrl={config.dataCatalogUrl}
+        dataCatalogUrl={config.data_marketplace_url}
       />
       <FeedbackModal
         show={showFeedbackModal}
@@ -301,7 +306,7 @@ const ChatItem = ({
         result={result}
         dispatch={dispatch}
         resultIndex={index}
-        feedbackEnabled={config.chatbotFeedback}
+        feedbackEnabled={config.chatbot_feedback}
       />
     </>
   );

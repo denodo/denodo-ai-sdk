@@ -14,32 +14,18 @@ import logging
 import traceback
 
 from pydantic import BaseModel, Field
-from typing import Dict, Annotated, List, Literal
+from typing import Dict, List, Literal
 
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPAuthorizationCredentials, HTTPBearer
 
-from api.utils.sdk_utils import timing_context, add_tokens, handle_endpoint_error, generate_session_id
+from api.utils.sdk_utils import timing_context, add_tokens, handle_endpoint_error, generate_session_id, authenticate
 from api.utils import sdk_ai_tools
 from api.utils import sdk_answer_question
 from api.utils import state_manager
 
 router = APIRouter()
-security_basic = HTTPBasic(auto_error = False)
-security_bearer = HTTPBearer(auto_error = False)
-
-def authenticate(
-        basic_credentials: Annotated[HTTPBasicCredentials, Depends(security_basic)],
-        bearer_credentials: Annotated[HTTPAuthorizationCredentials, Depends(security_bearer)]
-        ):
-    if bearer_credentials is not None:
-        return bearer_credentials.credentials
-    elif basic_credentials is not None:
-        return (basic_credentials.username, basic_credentials.password)
-    else:
-        raise HTTPException(status_code=401, detail="Authentication required")
 
 class answerQuestionUsingViewsRequest(BaseModel):
     question: str
@@ -77,6 +63,10 @@ class answerQuestionUsingViewsRequest(BaseModel):
     mode: Literal["default", "data", "metadata"] = Field(default = "default")
     disclaimer: bool = True
     verbose: bool = True
+    check_ambiguity: bool = Field(
+        default = bool(int(os.getenv('CHECK_AMBIGUITY', '1'))),
+        description="If false, skip ambiguity detection."
+    )
     vql_execute_rows_limit: int = int(os.getenv('VQL_EXECUTE_ROWS_LIMIT', '100'))
     llm_response_rows_limit: int = int(os.getenv('LLM_RESPONSE_ROWS_LIMIT', '15'))
 
@@ -154,7 +144,8 @@ async def answerQuestionUsingViews(endpoint_request: answerQuestionUsingViewsReq
             mode=endpoint_request.mode,
             custom_instructions=endpoint_request.custom_instructions,
             session_id=session_id,
-            column_description_char_limit=endpoint_request.vector_search_column_description_char_limit
+            column_description_char_limit=endpoint_request.vector_search_column_description_char_limit,
+            check_ambiguity=endpoint_request.check_ambiguity
         )
 
     ambiguity_message = sdk_answer_question.build_ambiguity_message(category_response)

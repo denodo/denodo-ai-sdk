@@ -1,4 +1,3 @@
-import os
 import re
 import json
 import logging
@@ -16,37 +15,51 @@ from utils import utils
 from utils import langfuse
 from utils.data_catalog import get_allowed_view_ids
 from api.utils import sdk_utils
+from api.prompts import category_detection
+from api.prompts import graph_generation
+from api.prompts import response
+from api.prompts import vql_fixer
+from api.prompts import vql_generation
+from api.prompts import vql_rules
 
-# LLM PROMPTS
-QUERY_TO_VQL_PROMPT = os.getenv("QUERY_TO_VQL")
-ANSWER_VIEW_PROMPT = os.getenv("ANSWER_VIEW")
-SQL_CATEGORY_PROMPT = os.getenv("SQL_CATEGORY")
-METADATA_CATEGORY_PROMPT = os.getenv("METADATA_CATEGORY")
-GENERATE_VISUALIZATION_PROMPT = os.getenv("GENERATE_VISUALIZATION")
-GENERATE_VISUALIZATION_PYTHON_TEMPLATE = os.getenv("GENERATE_VISUALIZATION_PYTHON_TEMPLATE")
-DIRECT_SQL_CATEGORY_PROMPT = os.getenv("DIRECT_SQL_CATEGORY")
-DIRECT_METADATA_CATEGORY_PROMPT = os.getenv("DIRECT_METADATA_CATEGORY")
-RELATED_QUESTIONS_PROMPT = os.getenv("RELATED_QUESTIONS")
+# VQL GENERATION
+QUERY_TO_VQL_PROMPT = vql_generation.query_to_vql.QUERY_TO_VQL
 
-# OTHER PROMPTS
-VQL_RESTRICTIONS_PROMPT = os.getenv("VQL_RESTRICTIONS")
-VQL_RULES_PROMPT = os.getenv("VQL_RULES")
-FIX_LIMIT_PROMPT = os.getenv("FIX_LIMIT")
-FIX_OFFSET_PROMPT = os.getenv("FIX_OFFSET")
-QUERY_FIXER_PROMPT = os.getenv("QUERY_FIXER")
-QUERY_REVIEWER_PROMPT = os.getenv("QUERY_REVIEWER")
+# RESPONSE
+ANSWER_VIEW_PROMPT = response.answer_view.ANSWER_VIEW
+RELATED_QUESTIONS_PROMPT = response.related_questions.RELATED_QUESTIONS
 
-# VQL sub-prompts
-DATES_VQL_PROMPT = os.getenv("DATES_VQL")
-ARITHMETIC_VQL_PROMPT = os.getenv("ARITHMETIC_VQL")
-SPATIAL_VQL_PROMPT = os.getenv("SPATIAL_VQL")
-AI_VQL_PROMPT = os.getenv("AI_VQL")
-JSON_VQL_PROMPT = os.getenv("JSON_VQL")
-XML_VQL_PROMPT = os.getenv("XML_VQL")
-TEXT_VQL_PROMPT = os.getenv("TEXT_VQL")
-AGGREGATE_VQL_PROMPT = os.getenv("AGGREGATE_VQL")
-CAST_VQL_PROMPT = os.getenv("CAST_VQL")
-WINDOW_VQL_PROMPT = os.getenv("WINDOW_VQL")
+# GRAPH GENERATION
+GENERATE_VISUALIZATION_PROMPT = graph_generation.generate_visualization.GENERATE_VISUALIZATION
+GENERATE_VISUALIZATION_PYTHON_TEMPLATE = graph_generation.generate_visualization_python_template.GENERATE_VISUALIZATION_PYTHON_TEMPLATE
+
+# CATEGORY DETECTION
+DIRECT_SQL_CATEGORY_PROMPT = category_detection.direct_sql_category.DIRECT_SQL_CATEGORY
+DIRECT_SQL_CATEGORY_NO_AMBIGUITY_PROMPT = category_detection.direct_sql_category_no_ambiguity.DIRECT_SQL_CATEGORY_NO_AMBIGUITY
+DIRECT_METADATA_CATEGORY_PROMPT = category_detection.direct_metadata_category.DIRECT_METADATA_CATEGORY
+SQL_CATEGORY_PROMPT = category_detection.sql_category.SQL_CATEGORY
+SQL_CATEGORY_NO_AMBIGUITY_PROMPT = category_detection.sql_category_no_ambiguity.SQL_CATEGORY_NO_AMBIGUITY
+METADATA_CATEGORY_PROMPT = category_detection.metadata_category.METADATA_CATEGORY
+
+# VQL FIXER
+FIX_LIMIT_PROMPT = vql_fixer.fix_limit.FIX_LIMIT
+FIX_OFFSET_PROMPT = vql_fixer.fix_offset.FIX_OFFSET
+QUERY_FIXER_PROMPT = vql_fixer.query_fixer.QUERY_FIXER
+QUERY_REVIEWER_PROMPT = vql_fixer.query_reviewer.QUERY_REVIEWER
+
+# VQL RULES
+VQL_RULES_PROMPT = vql_rules.vql_rules.VQL_RULES
+DATES_VQL_PROMPT = vql_rules.dates_vql.DATES_VQL
+ARITHMETIC_VQL_PROMPT = vql_rules.arithmetic_vql.ARITHMETIC_VQL
+SPATIAL_VQL_PROMPT = vql_rules.spatial_vql.SPATIAL_VQL
+LLM_VQL_PROMPT = vql_rules.llm_vql.LLM_VQL
+VECTOR_VQL_PROMPT = vql_rules.vector_vql.VECTOR_VQL
+JSON_VQL_PROMPT = vql_rules.json_vql.JSON_VQL
+XML_VQL_PROMPT = vql_rules.xml_vql.XML_VQL
+TEXT_VQL_PROMPT = vql_rules.text_vql.TEXT_VQL
+AGGREGATE_VQL_PROMPT = vql_rules.aggregate_vql.AGGREGATE_VQL
+CAST_VQL_PROMPT = vql_rules.cast_vql.CAST_VQL
+WINDOW_VQL_PROMPT = vql_rules.window_vql.WINDOW_VQL
 
 TODAYS_DATE = datetime.now().strftime("%Y-%m-%d")
 
@@ -105,7 +118,8 @@ async def query_to_vql(
         "dates": int("<dates>" in filter_params),
         "arithmetic": int("<arithmetic>" in filter_params),
         "spatial": int("<spatial>" in filter_params),
-        "ai": int("<ai>" in filter_params),
+        "llm": int("<llm>" in filter_params),
+        "vector": int("<vector>" in filter_params or "<ai>" in filter_params),
         "json": int("<json>" in filter_params),
         "xml": int("<xml>" in filter_params),
         "text": int("<text>" in filter_params),
@@ -115,18 +129,19 @@ async def query_to_vql(
     }
 
     vql_restrictions = sdk_utils.generate_vql_restrictions(
-        prompt_parts,
-        VQL_RULES_PROMPT,
-        DATES_VQL_PROMPT,
-        ARITHMETIC_VQL_PROMPT,
-        SPATIAL_VQL_PROMPT,
-        AI_VQL_PROMPT,
-        JSON_VQL_PROMPT,
-        XML_VQL_PROMPT,
-        TEXT_VQL_PROMPT,
-        AGGREGATE_VQL_PROMPT,
-        CAST_VQL_PROMPT,
-        WINDOW_VQL_PROMPT,
+        prompt_parts=prompt_parts,
+        vql_rules_prompt=VQL_RULES_PROMPT,
+        dates_vql_prompt=DATES_VQL_PROMPT,
+        arithmetic_vql_prompt=ARITHMETIC_VQL_PROMPT,
+        spatial_vql_prompt=SPATIAL_VQL_PROMPT,
+        llm_vql_prompt=LLM_VQL_PROMPT,
+        vector_vql_prompt=VECTOR_VQL_PROMPT,
+        json_vql_prompt=JSON_VQL_PROMPT,
+        xml_vql_prompt=XML_VQL_PROMPT,
+        text_vql_prompt=TEXT_VQL_PROMPT,
+        aggregate_vql_prompt=AGGREGATE_VQL_PROMPT,
+        cast_vql_prompt=CAST_VQL_PROMPT,
+        window_vql_prompt=WINDOW_VQL_PROMPT,
     )
     with get_usage_metadata_callback() as cb:
         response = await chain.ainvoke(
@@ -369,8 +384,15 @@ async def direct_metadata_category(query, vector_search_tables, llm, custom_inst
 
 @utils.log_params
 @utils.timed
-async def direct_sql_category(query, vector_search_tables, llm, custom_instructions = '', session_id = None, column_description_char_limit = None):
-    prompt = PromptTemplate.from_template(DIRECT_SQL_CATEGORY_PROMPT)
+async def direct_sql_category(
+    query, vector_search_tables, llm,
+    custom_instructions = '',
+    session_id = None,
+    column_description_char_limit = None,
+    check_ambiguity = True
+):
+    prompt_text = DIRECT_SQL_CATEGORY_PROMPT if check_ambiguity else DIRECT_SQL_CATEGORY_NO_AMBIGUITY_PROMPT
+    prompt = PromptTemplate.from_template(prompt_text)
     chain = prompt | llm.llm | StrOutputParser()
 
     with get_usage_metadata_callback() as cb:
@@ -385,7 +407,7 @@ async def direct_sql_category(query, vector_search_tables, llm, custom_instructi
         ))
 
     category = "SQL"
-    ambiguity_params = utils.custom_tag_parser(response, 'ambiguity', default = [])
+    ambiguity_params = utils.custom_tag_parser(response, 'ambiguity', default = []) if check_ambiguity else []
     if ambiguity_params:
         category_response = ambiguity_params[0]
     else:
@@ -397,8 +419,16 @@ async def direct_sql_category(query, vector_search_tables, llm, custom_instructi
 
 @utils.log_params
 @utils.timed
-async def sql_category(query, vector_search_tables, llm, mode = 'default', custom_instructions = '', session_id = None, column_description_char_limit = None):
-    prompt = PromptTemplate.from_template(SQL_CATEGORY_PROMPT)
+async def sql_category(
+    query, vector_search_tables, llm,
+    mode = 'default',
+    custom_instructions = '',
+    session_id = None,
+    column_description_char_limit = None,
+    check_ambiguity = True
+):
+    prompt_text = SQL_CATEGORY_PROMPT if check_ambiguity else SQL_CATEGORY_NO_AMBIGUITY_PROMPT
+    prompt = PromptTemplate.from_template(prompt_text)
     chain = prompt | llm.llm | StrOutputParser()
 
     if mode == 'metadata':
@@ -416,7 +446,8 @@ async def sql_category(query, vector_search_tables, llm, mode = 'default', custo
             llm=llm,
             custom_instructions=custom_instructions,
             session_id=session_id,
-            column_description_char_limit=column_description_char_limit
+            column_description_char_limit=column_description_char_limit,
+            check_ambiguity=check_ambiguity
         )
     else:
         # Create tasks for both operations to run in parallel
@@ -476,7 +507,7 @@ async def sql_category(query, vector_search_tables, llm, mode = 'default', custo
                 response = await sql_task
 
             category = utils.custom_tag_parser(response, 'cat', default = "OTHER")[0].strip()
-            ambiguity_params = utils.custom_tag_parser(response, 'ambiguity', default = [])
+            ambiguity_params = utils.custom_tag_parser(response, 'ambiguity', default = []) if check_ambiguity else []
             if ambiguity_params:
                 category_response = ambiguity_params[0]
             else:
@@ -611,7 +642,8 @@ async def query_reviewer(
             "dates": 1,
             "arithmetic": 1,
             "spatial": 1,
-            "ai": 1,
+            "llm": 1,
+            "vector": 1,
             "json": 1,
             "xml": 1,
             "text": 1,
@@ -623,7 +655,8 @@ async def query_reviewer(
         dates_vql_prompt=DATES_VQL_PROMPT,
         arithmetic_vql_prompt=ARITHMETIC_VQL_PROMPT,
         spatial_vql_prompt=SPATIAL_VQL_PROMPT,
-        ai_vql_prompt=AI_VQL_PROMPT,
+        llm_vql_prompt=LLM_VQL_PROMPT,
+        vector_vql_prompt=VECTOR_VQL_PROMPT,
         json_vql_prompt=JSON_VQL_PROMPT,
         xml_vql_prompt=XML_VQL_PROMPT,
         text_vql_prompt=TEXT_VQL_PROMPT,
@@ -681,7 +714,8 @@ def _get_prompt_and_parameters(question, vql_query, error_log, error_categories,
                 "dates": 1,
                 "arithmetic": 1,
                 "spatial": 1,
-                "ai": 1,
+                "llm": 1,
+                "vector": 1,
                 "json": 1,
                 "xml": 1,
                 "text": 1,
@@ -693,7 +727,8 @@ def _get_prompt_and_parameters(question, vql_query, error_log, error_categories,
             dates_vql_prompt=DATES_VQL_PROMPT,
             arithmetic_vql_prompt=ARITHMETIC_VQL_PROMPT,
             spatial_vql_prompt=SPATIAL_VQL_PROMPT,
-            ai_vql_prompt=AI_VQL_PROMPT,
+            llm_vql_prompt=LLM_VQL_PROMPT,
+            vector_vql_prompt=VECTOR_VQL_PROMPT,
             json_vql_prompt=JSON_VQL_PROMPT,
             xml_vql_prompt=XML_VQL_PROMPT,
             text_vql_prompt=TEXT_VQL_PROMPT,

@@ -10,16 +10,19 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_offline import FastAPIOffline as FastAPI
 
-from api.utils import sdk_config_loader, state_manager
-sdk_config_loader.load_config()
+from api.utils import state_manager
 
-from api.utils.sdk_utils import check_env_variables, test_data_catalog_connection
+from dotenv import load_dotenv
+load_dotenv('api/utils/sdk_config.env')
+
+from api.utils.sdk_utils import check_env_variables, test_data_catalog_connection # noqa: E402
 from api.endpoints import (
     deepQuery,
     getMetadata,
     deleteMetadata,
     similaritySearch,
     getVectorDBInfo,
+    getAISDKInfo,
     streamAnswerQuestion,
     streamAnswerQuestionUsingViews,
     answerQuestion,
@@ -28,9 +31,9 @@ from api.endpoints import (
     answerQuestionUsingViews,
     generateDeepQueryReport,
 )
-from utils.logging_utils import get_logging_config, transaction_id_var
-from utils.utils import normalize_root_path, generate_transaction_id
-from utils.version import AI_SDK_VERSION
+from utils.logging_utils import get_logging_config, transaction_id_var # noqa: E402
+from utils.utils import normalize_root_path, generate_transaction_id # noqa: E402
+from utils.version import AI_SDK_VERSION # noqa: E402
 
 required_vars = [
     "AI_SDK_DATA_MARKETPLACE_URL",
@@ -38,30 +41,7 @@ required_vars = [
     "LLM_MODEL",
     "EMBEDDINGS_PROVIDER",
     "EMBEDDINGS_MODEL",
-    "QUERY_TO_VQL",
-    "ANSWER_VIEW",
-    "SQL_CATEGORY",
-    "DIRECT_SQL_CATEGORY",
-    "METADATA_CATEGORY",
-    "DIRECT_METADATA_CATEGORY",
-    "GENERATE_VISUALIZATION",
-    "GENERATE_VISUALIZATION_PYTHON_TEMPLATE",
-    "DATES_VQL",
-    "ARITHMETIC_VQL",
-    "SPATIAL_VQL",
-    "AI_VQL",
-    "JSON_VQL",
-    "XML_VQL",
-    "TEXT_VQL",
-    "AGGREGATE_VQL",
-    "CAST_VQL",
-    "WINDOW_VQL",
-    "VQL_RULES",
-    "FIX_LIMIT",
-    "FIX_OFFSET",
-    "QUERY_FIXER",
-    "QUERY_REVIEWER",
-    "RELATED_QUESTIONS"
+    "VECTOR_STORE"
 ]
 
 log_config = get_logging_config()
@@ -99,6 +79,8 @@ AI_SDK_EMBEDDINGS_MODEL = os.getenv("EMBEDDINGS_MODEL")
 AI_SDK_VECTOR_STORE_PROVIDER = os.getenv("VECTOR_STORE")
 AI_SDK_DATA_MARKETPLACE_URL = os.getenv("AI_SDK_DATA_MARKETPLACE_URL")
 AI_SDK_DATA_MARKETPLACE_VERIFY_SSL = bool(int(os.getenv("DATA_MARKETPLACE_VERIFY_SSL", 0)))
+AI_SDK_CHECK_AMBIGUITY = bool(int(os.getenv("CHECK_AMBIGUITY", "1")))
+AI_SDK_ALLOWED_METADATA_USERS = os.getenv("AI_SDK_ALLOWED_METADATA_USERS")
 
 if THINKING_MODEL_AVAILABLE:
     AI_SDK_THINKING_LLM_TEMPERATURE = os.getenv("THINKING_LLM_TEMPERATURE")
@@ -138,6 +120,8 @@ def log_ai_sdk_parameters():
         "Data Marketplace URL": AI_SDK_DATA_MARKETPLACE_URL,
         "Data Marketplace Connection": test_data_catalog_connection(AI_SDK_DATA_MARKETPLACE_URL, AI_SDK_DATA_MARKETPLACE_VERIFY_SSL),
         "Data Marketplace Verify SSL": AI_SDK_DATA_MARKETPLACE_VERIFY_SSL,
+        "Check Ambiguity": AI_SDK_CHECK_AMBIGUITY,
+        "Allowed Metadata Users": AI_SDK_ALLOWED_METADATA_USERS if AI_SDK_ALLOWED_METADATA_USERS else "Not set.",
     }
 
     if THINKING_MODEL_AVAILABLE:
@@ -232,6 +216,7 @@ base_app.include_router(getMetadata.router)
 base_app.include_router(deleteMetadata.router)
 base_app.include_router(similaritySearch.router)
 base_app.include_router(getVectorDBInfo.router)
+base_app.include_router(getAISDKInfo.router)
 base_app.include_router(streamAnswerQuestion.router)
 base_app.include_router(streamAnswerQuestionUsingViews.router)
 base_app.include_router(answerQuestion.router)

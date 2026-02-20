@@ -422,7 +422,6 @@ def prepare_html(html_content, logo_data_uri=None):
 
     return str(body)
 
-
 def build_styled_html(html_content: str, color_palette: dict, title: str) -> str:
     """
     Build a complete styled HTML document with Denodo branding and color palette.

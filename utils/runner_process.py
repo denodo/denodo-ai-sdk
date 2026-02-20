@@ -137,7 +137,7 @@ def log_output(process, process_type, success_event, production=False, root_path
                     not data_catalog_warning_shown and
                     "Could not establish connection to Data Marketplace" in line):
                 console.print(Panel(
-                    "[bold yellow]WARNING: Data Marketplace Connection Failed[/]\n"
+                    "[bold yellow]WARNING: Data Marketplace connection failed[/]\n"
                     "[yellow]Could not establish connection to Data Marketplace. Please check your configuration.",
                     border_style="yellow",
                     width=PANEL_WIDTH

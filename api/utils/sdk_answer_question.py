@@ -16,7 +16,6 @@ AMBIGUITY_TYPE_LABELS = {
     "QUAL": "Qualitative ambiguity",
 }
 
-
 def build_ambiguity_message(category_response):
     ambiguous_inputs = custom_tag_parser(category_response, 'ambiguous_input', default = [])
     if not ambiguous_inputs:
@@ -77,7 +76,6 @@ async def process_sql_category(request, vector_search_tables, sql_gen_llm, chat_
             vector_search_tables=vector_search_tables,
             sample_data=sample_data
         )
-
 
     max_attempts = 2
     attempt = 0
@@ -199,7 +197,6 @@ def process_metadata_category(category_response, category_related_questions, dis
         'llm_time': timings.get('llm_time', 0),
         'total_execution_time': round(sum(timings.values()), 2) if timings else 0
     }
-
 
 def process_ambiguity_category(ambiguity_message, vector_search_tables, timings, tokens):
     normalized_tokens = {

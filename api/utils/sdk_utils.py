@@ -214,7 +214,8 @@ def generate_vql_restrictions(
     dates_vql_prompt,
     arithmetic_vql_prompt,
     spatial_vql_prompt = '',
-    ai_vql_prompt = '',
+    llm_vql_prompt = '',
+    vector_vql_prompt = '',
     json_vql_prompt = '',
     xml_vql_prompt = '',
     text_vql_prompt = '',
@@ -229,7 +230,8 @@ def generate_vql_restrictions(
         "dates": dates_vql_prompt,
         "arithmetic": arithmetic_vql_prompt,
         "spatial": spatial_vql_prompt,
-        "ai": ai_vql_prompt,
+        "llm": llm_vql_prompt,
+        "vector": vector_vql_prompt,
         "json": json_vql_prompt,
         "xml": xml_vql_prompt,
         "text": text_vql_prompt,
@@ -462,8 +464,8 @@ def dataframe_stats(df, unique_values_limit=20):
     return str(info)
 
 def authenticate(
-        basic_credentials: Annotated[HTTPBasicCredentials, Depends(security_basic)],
-        bearer_credentials: Annotated[HTTPAuthorizationCredentials, Depends(security_bearer)]
+        basic_credentials: Annotated[HTTPBasicCredentials | None, Depends(security_basic)],
+        bearer_credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_bearer)]
         ):
     if bearer_credentials is not None:
         return bearer_credentials.credentials
@@ -471,6 +473,23 @@ def authenticate(
         return (basic_credentials.username, basic_credentials.password)
     else:
         raise HTTPException(status_code=401, detail="Authentication required")
+
+def check_metadata_user_permission(auth):
+    """
+    Check if the authenticated user is allowed to use metadata endpoints
+    based on AI_SDK_ALLOWED_METADATA_USERS.
+    If the property is set, only listed Basic Auth users are allowed;
+    OAuth/Bearer users are denied since their identity cannot be verified against the list.
+    If the property is not set, all authenticated users are allowed.
+    """
+    allowed_users_raw = os.getenv("AI_SDK_ALLOWED_METADATA_USERS")
+    if not allowed_users_raw:
+        return True
+    if isinstance(auth, tuple):
+        username = auth[0]
+        allowed_users = [u.strip() for u in allowed_users_raw.split(",") if u.strip()]
+        return username in allowed_users
+    return False
 
 def process_metadata_source(
     source_type,
@@ -495,7 +514,7 @@ def process_metadata_source(
         sample_data_vector_store: Vector store for sample data
 
     Returns:
-        Tuple of (db_schema, db_schema_text)
+        Tuple of (db_schema, db_schema_text, data_usage_errors)
     """
 
     if vector_store and request.incremental:
@@ -531,7 +550,7 @@ def process_metadata_source(
         raise ValueError(f"Invalid source type: {source_type}")
 
     # Get metadata documents
-    result, delete_view_ids, detagged_view_ids = get_views_metadata_documents(**kwargs)
+    result, delete_view_ids, detagged_view_ids, data_usage_errors = get_views_metadata_documents(**kwargs)
 
     # Handle view deletions if needed
     if delete_view_ids and vector_store:
@@ -552,7 +571,7 @@ def process_metadata_source(
     # Validate response
     if not result:
         logging.info(f"Empty response from the Denodo Data Marketplace for {source_type.lower()} {source_name}")
-        return {}, []
+        return {}, [], data_usage_errors
 
     # Process schema
     if isinstance(result, dict):
@@ -613,22 +632,24 @@ def process_metadata_source(
                 sample_data=True
             )
 
-        return db_schema, db_schema_text
+        return db_schema, db_schema_text, data_usage_errors
 
     # If not a dict, return empty results
-    return {}, []
+    return {}, [], data_usage_errors
 
 def format_metadata_response(
     all_db_schemas,
     all_db_schema_texts,
     vdb_database_names,
-    vdb_tag_names
+    vdb_tag_names,
+    all_data_usage_errors
 ):
     return {
         'db_schema_json': all_db_schemas,
         'db_schema_text': all_db_schema_texts,
         'vdb_list': vdb_database_names,
-        'tag_list': vdb_tag_names
+        'tag_list': vdb_tag_names,
+        'data_usage_errors': all_data_usage_errors
     }
 
 def is_non_conflicting_doc(doc, databases_to_delete, tags_to_delete, last_update_dict):
@@ -702,7 +723,6 @@ def delete_by_db_or_tag(vector_store, sample_data_vector_store, vdp_database_nam
                 view_ids_to_delete.add(view_id)
             if doc_id:
                 document_ids_to_delete.add(doc_id)
-
 
         if document_ids_to_delete:
             vector_store.delete(ids=list(document_ids_to_delete))
@@ -922,7 +942,6 @@ def get_user_synced_resources(vector_store, allowed_view_ids_str):
             # Check if at least 1 view exists with this Tag AND in the user's permissions
             if vector_store.check_existence(allowed_view_ids_str, tag_names=[tag_name]):
                 filtered_last_update["TAG"][tag_name] = timestamp
-
 
     # Filter partial_tags_by_db
     p_tags_by_db = full_partial_resources.get("partial_tags_by_db", {})

@@ -11,37 +11,43 @@
 import os
 import logging
 import traceback
-from typing import Annotated
+
+from pydantic import BaseModel, Field
+from typing import Dict
 
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPAuthorizationCredentials, HTTPBearer
 
 from api.utils import state_manager
-from api.utils.sdk_utils import get_user_synced_resources, handle_endpoint_error
+from api.utils.sdk_utils import get_user_synced_resources, handle_endpoint_error, check_metadata_user_permission, authenticate
 from utils.data_catalog import get_allowed_view_ids, DataCatalogAuthError
 
 router = APIRouter()
-security_basic = HTTPBasic(auto_error=False)
-security_bearer = HTTPBearer(auto_error=False)
 
 
-def authenticate(
-        basic_credentials: Annotated[HTTPBasicCredentials, Depends(security_basic)],
-        bearer_credentials: Annotated[HTTPAuthorizationCredentials, Depends(security_bearer)]
-):
-    """Handles Basic and Bearer authentication."""
-    if bearer_credentials is not None:
-        return bearer_credentials.credentials
-    elif basic_credentials is not None:
-        return (basic_credentials.username, basic_credentials.password)
-    else:
-        raise HTTPException(status_code=401, detail="Authentication required")
+class VectorDBInfoResponse(BaseModel):
+    synced_resources: Dict = Field(
+        default_factory=dict,
+        alias="syncedResources",
+        description="Dictionary of fully synced resources (databases/tags) with their last sync dates and view counts."
+    )
+    partial_resources: Dict = Field(
+        default_factory=dict,
+        alias="partialResources",
+        description="Dictionary of partially synced resources (databases/tags) that have some but not all views synced."
+    )
+
+    # Allow both the snake_case field name and the camelCase alias to be used,
+    # so the response schema documents snake_case while the JSON output uses camelCase
+    # to match the existing API contract consumed by the frontend.
+    # NOTE: Will be deprecated in Pydantic v3.
+    model_config = {"populate_by_name": True}
 
 
 @router.get(
     '/getVectorDBInfo',
     response_class=JSONResponse,
+    response_model=VectorDBInfoResponse,
     tags=['Vector Store']
 )
 @handle_endpoint_error("getVectorDBInfo")
@@ -61,7 +67,12 @@ async def getVectorDBInfo(auth: str = Depends(authenticate)):
 
     if not allowed_view_ids_str:
         logging.info("getVectorDBInfo: User has no allowed view IDs.")
-        return JSONResponse(content={"syncedResources": {}, "partialResources": {}}, status_code=200)
+        user_sync_permissions = check_metadata_user_permission(auth)
+        return JSONResponse(content={
+            "syncedResources": {},
+            "partialResources": {},
+            "userSyncPermissions": user_sync_permissions
+        }, status_code=200)
 
     try:
         vector_store = state_manager.get_vector_store(
@@ -79,7 +90,12 @@ async def getVectorDBInfo(auth: str = Depends(authenticate)):
             vector_store=vector_store,
             allowed_view_ids_str=allowed_view_ids_str
         )
-        return JSONResponse(content={"syncedResources": filtered_synced_resources, "partialResources": filtered_partial_resources}, status_code=200)
+        user_sync_permissions = check_metadata_user_permission(auth)
+        return JSONResponse(content={
+            "syncedResources": filtered_synced_resources,
+            "partialResources": filtered_partial_resources,
+            "userSyncPermissions": user_sync_permissions
+        }, status_code=200)
 
     except Exception as e:
         logging.error(f"Error in getVectorDBInfo endpoint: {str(e)}")

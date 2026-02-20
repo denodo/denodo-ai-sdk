@@ -73,7 +73,7 @@ const QuestionForm = ({
     if (!isAuthenticated) {
       return "Please sign in to ask questions";
     }
-    if (config.enableDeepQuery) {
+    if (config.enable_deep_query) {
       return "Type your question here. Use @ to ask the LLM to use a specific tool(s), e.g. @data_query, @metadata_query, @deep_query.";
     }
     return "Type your question here. Use @ to ask the LLM to use a specific tool(s), e.g. @data_query, @metadata_query.";
@@ -81,7 +81,7 @@ const QuestionForm = ({
 
   const getPaddingRight = () => {
     if (isDeepQueryRunning) return "150px";
-    if (config.enableDeepQuery) return "190px";
+    if (config.enable_deep_query) return "190px";
     return "90px";
   };
 
@@ -181,7 +181,7 @@ const QuestionForm = ({
                     Cancel
                   </Button>
                 ) : (
-                  config.enableDeepQuery && (
+                  config.enable_deep_query && (
                     <Button
                       type="button"
                       size="sm"

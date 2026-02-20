@@ -86,6 +86,7 @@ def get_views_metadata_documents(
 
     delete_view_ids = []
     detagged_view_ids = []
+    data_usage_errors = []
 
     def prepare_request_data(limit, offset):
         data = {
@@ -157,6 +158,10 @@ def get_views_metadata_documents(
         if not isinstance(initial_response, list):
             views = initial_response.get('viewsDetails', initial_response)
             delete_view_ids.extend(initial_response.get('deletedViewIdentifiers', []))
+
+            if 'dataUsageErrors' in initial_response:
+                data_usage_errors.extend(initial_response['dataUsageErrors'])
+
             if incremental and data_mode == 'TAG':
                 detagged_view_ids.extend(initial_response.get('detaggedViewIdentifiers', []))
 
@@ -177,6 +182,10 @@ def get_views_metadata_documents(
                     data = prepare_request_data(offset=offset, limit=views_per_request)
                     page_response = make_request(data)
                     page_views = page_response.get('viewsDetails', page_response)
+
+                    if 'dataUsageErrors' in page_response:
+                        data_usage_errors.extend(page_response['dataUsageErrors'])
+
                     logging.info(f"Received response for request with offset {offset} and limit {views_per_request}.")
                     if not page_views:
                         break
@@ -227,7 +236,7 @@ def get_views_metadata_documents(
             view_suffix_filter=view_suffix_filter
         )
 
-        return processed_views, list(set(delete_view_ids)), list(set(detagged_view_ids))
+        return processed_views, list(set(delete_view_ids)), list(set(detagged_view_ids)), data_usage_errors
 
     except requests.HTTPError as e:
         error_response = json.loads(e.response.text)
@@ -254,7 +263,7 @@ async def is_empty_result(json_response):
 
 @log_params
 @timed
-async def execute_vql(vql, auth, limit, execution_url=DATA_MARKETPLACE_EXECUTION_URL,
+async def execute_vql(vql, auth, limit, truncate_vectors=True, execution_url=DATA_MARKETPLACE_EXECUTION_URL,
                 server_id=DATA_MARKETPLACE_SERVER_ID, verify_ssl=DATA_MARKETPLACE_VERIFY_SSL):
     """
     Execute VQL against Data Marketplace with support for OAuth token or Basic auth.
@@ -280,6 +289,7 @@ async def execute_vql(vql, auth, limit, execution_url=DATA_MARKETPLACE_EXECUTION
 
     data = {
         "vql": vql,
+        "truncateVectors": truncate_vectors,
         "limit": limit
     }
 

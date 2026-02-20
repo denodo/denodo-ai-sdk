@@ -53,7 +53,7 @@ class answerQuestionRequest(BaseModel):
         description="A comma-separated list of tags to reduce the scope of the question to. If empty, all tags in the vector DB the user has permissions to will be considered."
     )
     allow_external_associations: bool = Field(
-        default = True,
+        default = False,
         description="If False, views from associations will NOT be considered if they don't belong to the VDBs/Tags specified in vdp_database_names and vdp_tag_names. If no VDBs/Tags specified, all views from associations will be considered."
     )
     use_views: str = Field(
@@ -85,6 +85,10 @@ class answerQuestionRequest(BaseModel):
     mode: Literal["default", "data", "metadata"] = Field(default = "default")
     disclaimer: bool = True
     verbose: bool = True
+    check_ambiguity: bool = Field(
+        default = bool(int(os.getenv('CHECK_AMBIGUITY', '1'))),
+        description="If false, skip ambiguity detection."
+    )
     vql_execute_rows_limit: int = int(os.getenv('VQL_EXECUTE_ROWS_LIMIT', '100'))
     llm_response_rows_limit: int = int(os.getenv('LLM_RESPONSE_ROWS_LIMIT', '15'))
 
@@ -251,7 +255,8 @@ async def process_question(request_data: answerQuestionRequest, auth: str):
             mode=request_data.mode,
             custom_instructions=request_data.custom_instructions,
             session_id=session_id,
-            column_description_char_limit=request_data.vector_search_column_description_char_limit
+            column_description_char_limit=request_data.vector_search_column_description_char_limit,
+            check_ambiguity=request_data.check_ambiguity
         )
 
     ambiguity_message = sdk_answer_question.build_ambiguity_message(category_response)

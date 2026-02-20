@@ -9,7 +9,7 @@ const normalizeString = (value) =>
 
 const useToolSelector = (config) => {
   const availableTools = useMemo(
-    () => (Array.isArray(config?.chatbotTools) ? config.chatbotTools : []),
+    () => (Array.isArray(config?.chatbot_tools) ? config.chatbot_tools : []),
     [config]
   );
 
@@ -50,7 +50,7 @@ const useToolSelector = (config) => {
         const resolvedTool = token ? resolveToolFromToken(token) : null;
         if (resolvedTool) {
           toolName = resolvedTool.name;
-          toolPrettyName = resolvedTool.prettyName || resolvedTool.name;
+          toolPrettyName = resolvedTool.pretty_name || resolvedTool.name;
         }
 
         finalQuestion = questionText.replace(/^@\S+\s*/, "").trim();
@@ -60,7 +60,7 @@ const useToolSelector = (config) => {
       if (toolName && !toolPrettyName) {
         const matched = availableTools.find((tool) => tool.name === toolName);
         if (matched) {
-          toolPrettyName = matched.prettyName || matched.name;
+          toolPrettyName = matched.pretty_name || matched.name;
         } else {
           toolPrettyName = toolName;
         }

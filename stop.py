@@ -8,6 +8,7 @@
  Confidential Information and shall use it only in accordance with the terms
  of the license agreement you entered into with DENODO.
 """
+
 import argparse
 import psutil
 
@@ -49,7 +50,7 @@ def find_and_terminate_process(identifier: str, service_name: str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Stops the AI SDK API, the Sample Chatbot, or both.",
+        description="Stops the AI SDK API, the sample chatbot, or both.",
         formatter_class=argparse.RawTextHelpFormatter
     )
     parser.add_argument(
@@ -57,7 +58,7 @@ def main():
         choices=["api", "sample_chatbot", "both"],
         help="The service to stop:\n"
              "  api            - Stops only the AI SDK API.\n"
-             "  sample_chatbot - Stops only the Sample Chatbot.\n"
+             "  sample_chatbot - Stops only the sample chatbot.\n"
              "  both           - Stops both services."
     )
     args = parser.parse_args()
@@ -65,11 +66,11 @@ def main():
     if args.service == 'both':
         print("Attempting to stop both services...")
         find_and_terminate_process(PROCESS_IDENTIFIERS['api'], 'API')
-        find_and_terminate_process(PROCESS_IDENTIFIERS['sample_chatbot'], 'Sample Chatbot')
+        find_and_terminate_process(PROCESS_IDENTIFIERS['sample_chatbot'], 'sample chatbot')
     elif args.service == 'api':
         find_and_terminate_process(PROCESS_IDENTIFIERS['api'], 'API')
     elif args.service == 'sample_chatbot':
-        find_and_terminate_process(PROCESS_IDENTIFIERS['sample_chatbot'], 'Sample Chatbot')
+        find_and_terminate_process(PROCESS_IDENTIFIERS['sample_chatbot'], 'sample chatbot')
 
     console.print("[bold cyan]Stop script finished.")
 

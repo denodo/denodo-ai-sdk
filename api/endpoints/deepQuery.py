@@ -49,13 +49,34 @@ class deepQueryRequest(BaseModel):
     embeddings_provider: str = os.getenv('EMBEDDINGS_PROVIDER')
     embeddings_model: str = os.getenv('EMBEDDINGS_MODEL')
     vector_store_provider: str = os.getenv('VECTOR_STORE')
-    vdp_database_names: str = ''
-    vdp_tag_names: str = ''
-    allow_external_associations: bool = True
-    use_views: str = ''
-    expand_set_views: bool = True
-    vector_search_k: int = 5
-    vector_search_sample_data_k: int = 3
+    vdp_database_names: str = Field(
+        default = '',
+        description="A comma-separated list of databases to reduce the scope of the question to. If empty, all databases in the vector DB the user has permissions to will be considered."
+    )
+    vdp_tag_names: str = Field(
+        default = '',
+        description="A comma-separated list of tags to reduce the scope of the question to. If empty, all tags in the vector DB the user has permissions to will be considered."
+    )
+    allow_external_associations: bool = Field(
+        default = False,
+        description="If False, views from associations will NOT be considered if they don't belong to the VDBs/Tags specified in vdp_database_names and vdp_tag_names. If no VDBs/Tags specified, all views from associations will be considered."
+    )
+    use_views: str = Field(
+            default = '',
+            description="Please specify a view you want the LLM to take into consideration when answering the question. Expected format is views separated by commas: database.view_name, database.view_name2"
+        )
+    expand_set_views: bool = Field(
+            default = True,
+            description="If set to true, the LLM will search for relevant views in the vector store. If set to false, the LLM will not search in the vector store and will only access those specified in use_views"
+        )
+    vector_search_k: int = Field(
+        default = 5,
+        description="Number of results to return from the similarity search in the vector store."
+    )
+    vector_search_sample_data_k: int = Field(
+        default = 3,
+        description="Number of similar sample data rows to return for the given question."
+    )
 
 class deepQueryResponse(BaseModel):
     answer: str

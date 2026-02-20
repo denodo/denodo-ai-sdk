@@ -1,3 +1,14 @@
+"""
+ Copyright (c) 2025. DENODO Technologies.
+ http://www.denodo.com
+ All rights reserved.
+
+ This software is the confidential and proprietary information of DENODO
+ Technologies ("Confidential Information"). You shall not disclose such
+ Confidential Information and shall use it only in accordance with the terms
+ of the license agreement you entered into with DENODO.
+"""
+
 import os
 import sys
 import time
@@ -51,7 +62,7 @@ if __name__ == "__main__":
     # Check if running in a virtual environment
     if not is_in_venv():
         console.print(Panel(
-            "[bold yellow]WARNING: Not Running in Virtual Environment[/]\n"
+            "[bold yellow]WARNING: Not running in virtual environment[/]\n"
             "[yellow]This application is not running inside a virtual environment.\n"
             "This may cause dependency conflicts in the AI SDK.\n"
             "If using the provided image of the AI SDK, you can ignore this warning, as all dependencies are included already.",
@@ -102,11 +113,11 @@ if __name__ == "__main__":
                 if process_name == "api":
                     processes.append(("API", process))
                 elif process_name == "sample_chatbot":
-                    processes.append(("Chatbot", process))
+                    processes.append(("chatbot", process))
                 log_threads.append(log_thread)
             except TimeoutError:
                 # Display formatted error panel with debugging instructions
-                service_display_name = "AI SDK" if process_name == "api" else "Sample Chatbot"
+                service_display_name = "AI SDK" if process_name == "api" else "Sample chatbot"
                 log_file_path = f"logs/{process_name}.log"
                 debug_command = f"python -m {process_name}.main"
 

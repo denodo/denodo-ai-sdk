@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import PropTypes from 'prop-types';
 import Container from "react-bootstrap/Container";
 import Navbar from "react-bootstrap/Navbar";
 import Button from "react-bootstrap/Button";
@@ -10,6 +11,7 @@ import VectorDBSyncModal from './VectorDBSyncModal';
 import ChatbotSettingsModal from './ChatbotSettingsModal';
 import AISDKSettingsModal from './AISDKSettingsModal';
 import CustomInstructionsModal from './CustomInstructionsModal';
+import CSVManagerModal from './CSVManagerModal/CSVManagerModal';
 import { useReport } from '../../contexts/ReportContext';
 import './Header.css';
 
@@ -17,11 +19,14 @@ const Header = ({
   isAuthenticated, 
   setIsAuthenticated, 
   handleClearResults, 
-  showClearButton, 
-  onLoadCSV, 
+  onOpenCSVManager,
+  showCSVManager,
+  setShowCSVManager,
   renderLogo,
   syncedResources,
-  onResourcesUpdate
+  userSyncPermissions,
+  onResourcesUpdate,
+  onCSVSourcesChange
 }) => {
   const [showVectorDBSync, setShowVectorDBSync] = useState(false);
   const [showChatbotSettings, setShowChatbotSettings] = useState(false);
@@ -30,7 +35,7 @@ const Header = ({
   const [showToolsDropdown, setShowToolsDropdown] = useState(false);
   const [showAdminDropdown, setShowAdminDropdown] = useState(false);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
-  const [config, setConfig] = useState({ hasAISDKCredentials: false, unstructuredMode: false, userEditLLM: false, syncTimeout: undefined });
+  const [config, setConfig] = useState({ has_ai_sdk_credentials: false, unstructured_mode: false, user_edit_llm: false, sync_timeout: undefined });
   const { reports, setIsModalOpen } = useReport();
 
   // Hover-delay timers for dropdowns
@@ -178,7 +183,7 @@ const Header = ({
                   <NavDropdown
                     title="Tools"
                     id="tools-nav-dropdown"
-                    align={config.userEditLLM ? 'start' : 'end'} 
+                    align={config.user_edit_llm ? 'start' : 'end'} 
                     className="custom-nav-dropdown"
                     show={showToolsDropdown}
                     onMouseEnter={() => handleEnterWhich('tools')}
@@ -197,15 +202,15 @@ const Header = ({
                         </Badge>
                       )}
                     </NavDropdown.Item>
-                    {config.unstructuredMode && (
-                      <NavDropdown.Item onClick={onLoadCSV}>Load Unstructured CSV</NavDropdown.Item>
+                    {config.unstructured_mode && (
+                      <NavDropdown.Item onClick={onOpenCSVManager}>Knowledge Base Manager</NavDropdown.Item>
                     )}
-                    {config.hasAISDKCredentials && (
-                      <NavDropdown.Item onClick={() => setShowVectorDBSync(true)}>Vector DB Management</NavDropdown.Item>
+                    {config.allow_sync && (config.has_ai_sdk_credentials || userSyncPermissions) && (
+                      <NavDropdown.Item onClick={() => setShowVectorDBSync(true)}>Vector DB Manager</NavDropdown.Item>
                     )}
                   </NavDropdown>
 
-                  {config.userEditLLM && (
+                  {config.user_edit_llm && (
                     <NavDropdown
                       title="Administration"
                       id="admin-nav-dropdown"
@@ -242,7 +247,7 @@ const Header = ({
       </Navbar>
       <VectorDBSyncModal
         show={showVectorDBSync}
-        syncTimeout={config.syncTimeout}
+        syncTimeout={config.sync_timeout}
         handleClose={() => setShowVectorDBSync(false)}
         syncedResources={syncedResources} 
         onResourcesUpdate={onResourcesUpdate}
@@ -261,8 +266,30 @@ const Header = ({
         show={showProfile}
         handleClose={() => setShowProfile(false)}
       />
+      {showCSVManager !== undefined && (
+        <CSVManagerModal
+          show={showCSVManager}
+          handleClose={() => setShowCSVManager(false)}
+          onSourcesChange={onCSVSourcesChange}
+        />
+      )}
     </>
   );
+};
+
+Header.propTypes = {
+  isAuthenticated: PropTypes.bool.isRequired,
+  setIsAuthenticated: PropTypes.func.isRequired,
+  handleClearResults: PropTypes.func.isRequired,
+  showClearButton: PropTypes.bool,
+  onOpenCSVManager: PropTypes.func,
+  showCSVManager: PropTypes.bool,
+  setShowCSVManager: PropTypes.func,
+  renderLogo: PropTypes.func.isRequired,
+  syncedResources: PropTypes.object,
+  userSyncPermissions: PropTypes.bool,
+  onResourcesUpdate: PropTypes.func,
+  onCSVSourcesChange: PropTypes.func
 };
 
 export default Header;
