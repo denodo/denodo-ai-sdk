@@ -5,6 +5,31 @@ import logging
 
 from datetime import datetime
 
+# Upper bound for a single CSV field when reading reports (avoids multi‑GB allocations if a file is corrupt or hostile).
+# Kept separate from the per-chatbot report file size so a mis-set config cannot request unbounded memory.
+CSV_FIELD_HARD_CAP_BYTES = 100 * 1024 * 1024
+
+def _csv_field_limit_bytes_for_read(report_max_size_mb):
+    mb = max(1, int(report_max_size_mb or 1))
+    file_budget = mb * 1024 * 1024
+    return min(CSV_FIELD_HARD_CAP_BYTES, file_budget)
+
+def _apply_csv_field_limit(limit_bytes):
+    limit = int(limit_bytes)
+    while limit > 0:
+        try:
+            csv.field_size_limit(limit)
+            return
+        except OverflowError:
+            limit //= 10
+    for fallback in (2**31 - 1, 10**9, 50 * 1024 * 1024, 10 * 1024 * 1024, 1024 * 1024):
+        try:
+            csv.field_size_limit(fallback)
+            return
+        except (OverflowError, ValueError):
+            continue
+    logging.warning("Could not set csv.field_size_limit; feedback CSV reads may fail on moderately large cells.")
+
 def get_report_filename(report_max_size_mb, report_max_files, report_folder="reports", base_filename="user_report"):
     base_path = os.path.join(report_folder, base_filename)
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -42,10 +67,7 @@ def get_report_filename(report_max_size_mb, report_max_files, report_folder="rep
 
                     files_to_delete = sorted_files[:num_to_delete]
 
-                    logging.info(
-                        f"Report limit ({report_max_files}) reached. "
-                        f"Deleting {len(files_to_delete)} oldest report(s)."
-                    )
+                    logging.info(f"Report limit ({report_max_files}) reached. Deleting {len(files_to_delete)} oldest report(s).")
 
                     for f_path in files_to_delete:
                         try:
@@ -58,6 +80,7 @@ def get_report_filename(report_max_size_mb, report_max_files, report_folder="rep
         return f"{base_path}_{timestamp}.csv"
 
     return latest_file
+
 
 def write_to_report(
     report_lock,
@@ -179,6 +202,7 @@ def update_feedback_in_report(
     base_filename="user_report",
 ):
     with report_lock:
+        _apply_csv_field_limit(_csv_field_limit_bytes_for_read(report_max_size_mb))
         try:
             report_files = [
                 f
@@ -189,7 +213,11 @@ def update_feedback_in_report(
             logging.error(
                 f"Report directory '{report_folder}' not found during feedback update."
             )
-            return False
+            return {
+                "success": False,
+                "error": "report_directory_missing",
+                "message": "Feedback could not be saved because the report directory is missing on the server.",
+            }
 
         report_files.sort(
             key=lambda f: os.path.getmtime(os.path.join(report_folder, f))
@@ -232,14 +260,66 @@ def update_feedback_in_report(
                     break
 
             except FileNotFoundError:
-                logging.warning(
-                    f"Report file {filepath} disappeared during feedback update."
-                )
+                logging.warning(f"Report file {filepath} disappeared during feedback update.")
                 continue
-            except OSError as e:
+            except csv.Error as e:
+                basename = os.path.basename(filepath)
+                err_str = str(e)
+                if "field larger than field limit" in err_str:
+                    logging.error(
+                        f"""
+Failed to update feedback for question id {uuid} because the report row reached the system's memory limit (CSV field size cap).
+The user's feedback for question id {uuid} was: value={feedback_value!r}, details={feedback_details!r}.
+Please update it manually in the report file {filepath}
+"""
+                    )
+                    err_code = "report_csv_field_limit"
+                else:
+                    logging.error(
+                        f"""
+Failed to update feedback for question id {uuid} because reading the report CSV failed ({e}).
+The user's feedback for question id {uuid} was: value={feedback_value!r}, details={feedback_details!r}.
+Please update it manually in the report file {filepath}
+"""
+                    )
+                    err_code = "report_csv_parse_error"
+                msg = f"""
+Feedback could not be saved while reading the report ({basename}): {err_str}.
+Your feedback was: value={feedback_value!r}, details={feedback_details!r}.
+Please update the feedback columns manually in that CSV on the server.
+"""
+                return {
+                    "success": False,
+                    "error": err_code,
+                    "message": msg,
+                }
+            except MemoryError:
+                basename = os.path.basename(filepath)
                 logging.error(
-                    f"Error reading/writing report file {filepath} during feedback update: {e}"
+                    f"""
+Failed to update feedback for question id {uuid} because the report row exceeded the system's memory limit while loading the CSV.
+The user's feedback for question id {uuid} was: value={feedback_value!r}, details={feedback_details!r}.
+Please update it manually in the report file {filepath}
+"""
                 )
+                msg = f"""
+Feedback could not be saved because the report row is too large to process in memory ({basename}).
+Your feedback was: value={feedback_value!r}, details={feedback_details!r}.
+Please update the feedback columns manually in that CSV on the server.
+"""
+                return {
+                    "success": False,
+                    "error": "report_memory_limit",
+                    "message": msg,
+                }
+            except OSError as e:
+                logging.error(f"Error reading/writing report file {filepath} during feedback update: {e}")
                 continue
 
-        return updated
+        if not updated:
+            return {
+                "success": False,
+                "error": "uuid_not_found",
+                "message": "Failed to save feedback. No matching conversation was found in the report files.",
+            }
+        return {"success": True}

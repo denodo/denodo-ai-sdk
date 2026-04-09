@@ -10,11 +10,10 @@ from sample_chatbot.services.chat_service import ChatService
 
 chat_bp = Blueprint('chat', __name__)
 
-@chat_bp.route('/question', methods=['POST'])
+@chat_bp.route('/api/question', methods=['POST'])
 @login_required
 def question():
     """Process a user question and stream the response."""
-    config = get_config()
     data = request.get_json()
     query = data.get('query')
     tool_name = data.get('tool')
@@ -28,15 +27,12 @@ def question():
     if not query:
         return jsonify({"error": "Missing query parameter"}), 400
 
-    # Get the global LLM instance from the app context
-    llm = current_app.config.get('LLM')
-
+    config = get_config(user_obj.agent_id)
     chat_service = ChatService(config)
 
     return Response(
         chat_service.process_query_stream(
             user=user_obj,
-            llm=llm,
             query=query,
             tool_name=tool_name,
             vdp_databases=databases_str,
@@ -46,7 +42,7 @@ def question():
         mimetype='text/event-stream'
     )
 
-@chat_bp.route('/clear_history', methods=['POST'])
+@chat_bp.route('/api/clear_history', methods=['POST'])
 @login_required
 def clear_history():
     """Clear the chat history for the current user."""

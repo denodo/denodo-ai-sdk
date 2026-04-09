@@ -6,17 +6,20 @@ import logging
 import requests
 
 from flask import Blueprint, request, jsonify
-from flask_login import login_required
+from flask_login import login_required, current_user
 
 from sample_chatbot.config import get_config
 
 deepquery_bp = Blueprint('deepquery', __name__)
 
-@deepquery_bp.route('/generate_report', methods=['POST'])
+@deepquery_bp.route('/api/generate_report', methods=['POST'])
 @login_required
 def generate_report():
     """Generate an HTML report from DeepQuery metadata by calling the generateDeepQueryReport endpoint."""
-    config = get_config()
+
+    # Capture the actual user object, not the proxy
+    user_obj = current_user._get_current_object()
+    config = get_config(user_obj.agent_id)
 
     try:
         data = request.json

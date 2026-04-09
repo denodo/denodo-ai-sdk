@@ -1,5 +1,5 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
-import axios from 'axios';
+import api from '../api/client';
 
 // Create the context
 const ConfigContext = createContext();
@@ -11,10 +11,14 @@ export const ConfigProvider = ({ children }) => {
   });
   const [loading, setLoading] = useState(true);
 
+  const updateConfig = (newParams) => {
+    setConfig(prev => ({ ...prev, ...newParams }));
+  };
+
   useEffect(() => {
     const fetchConfig = async () => {
       try {
-        const response = await axios.get('api/config');
+        const response = await api.get("config");
         setConfig(response.data);
       } catch (error) {
         console.error('Error fetching config:', error);
@@ -28,7 +32,7 @@ export const ConfigProvider = ({ children }) => {
   }, []);
 
   return (
-    <ConfigContext.Provider value={{ config, loading }}>
+    <ConfigContext.Provider value={{ config, loading, updateConfig }}>
       {children}
     </ConfigContext.Provider>
   );

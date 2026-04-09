@@ -1,5 +1,5 @@
 import React, { createContext, useState, useContext, useCallback } from 'react';
-import axios from 'axios';
+import api from '../api/client';
 
 // Create the context
 const ReportContext = createContext();
@@ -48,7 +48,7 @@ export const ReportProvider = ({ children }) => {
       ));
       
       // Call the generate report endpoint
-      const response = await axios.post('generate_report', {
+      const response = await api.post("generate_report", {
         deepquery_metadata: deepqueryMetadata,
         color_palette: colorPalette
       });

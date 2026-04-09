@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from api.utils import state_manager
 from utils.data_catalog import get_allowed_view_ids, DataCatalogAuthError
 from api.utils.sdk_utils import filter_non_allowed_associations, handle_endpoint_error, authenticate
+from utils.utils import get_custom_request_headers
 
 router = APIRouter()
 
@@ -48,7 +49,11 @@ class similaritySearchResponse(BaseModel):
         response_model = similaritySearchResponse,
         tags = ['Vector Store'])
 @handle_endpoint_error("similaritySearch")
-async def similaritySearch(endpoint_request: similaritySearchRequest = Depends(), auth: str = Depends(authenticate)):
+async def similaritySearch(
+    endpoint_request: similaritySearchRequest = Depends(),
+    auth: str = Depends(authenticate),
+    custom_headers: dict = Depends(get_custom_request_headers)
+):
     """
     This endpoint performs a similarity search on the vector database specified in the request.
     The vector store MUST have been previously populated with the metadata of the views in the vector database
@@ -69,7 +74,7 @@ async def similaritySearch(endpoint_request: similaritySearchRequest = Depends()
         raise HTTPException(status_code=500, detail=f"Failed to get vector store from state manager: {e}") from e
 
     try:
-        valid_view_ids = await get_allowed_view_ids(auth=auth)
+        valid_view_ids = await get_allowed_view_ids(auth=auth, custom_headers=custom_headers)
         valid_view_ids = [str(view_id) for view_id in valid_view_ids]
     except DataCatalogAuthError as e:
         raise HTTPException(status_code=401, detail=f"Authentication failed during similaritySearch: {str(e)}") from e

@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import { actionTypes } from "../reducers/chatReducer";
+import { buildApiUrl } from "../api/client";
 
 const useSDK = (dispatch, onRequestComplete) => {
   const [isLoading, setLoading] = useState(false);
@@ -16,7 +17,7 @@ const useSDK = (dispatch, onRequestComplete) => {
     try {
       
       const isQuestion = url.includes('question');
-      const fetchUrl = isQuestion ? 'question' : url;
+      const fetchUrl = isQuestion ? buildApiUrl("question") : buildApiUrl(url);
       const method = isQuestion ? 'POST' : 'GET';
       
       const fetchOptions = {

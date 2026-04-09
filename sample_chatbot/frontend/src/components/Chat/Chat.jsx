@@ -3,6 +3,7 @@ import "./Chat.css";
 import { useReport } from "../../contexts/ReportContext";
 import ChatItem from "./ChatItem";
 import NotificationToast from "../NotificationToast/NotificationToast";
+import { actionTypes } from "../../reducers/chatReducer";
 
 const Chat = ({
   results,
@@ -23,7 +24,7 @@ const Chat = ({
   });
 
   const scrollToBottom = () => {
-    resultsEndRef.current.scrollIntoView({ behavior: "smooth" });
+    resultsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   useEffect(() => {
@@ -31,6 +32,15 @@ const Chat = ({
       scrollToBottom();
     }
   }, [results]);
+
+  useEffect(() => {
+    if (results.some(r => r.isExiting)) {
+      const timer = setTimeout(() => {
+        dispatch({ type: actionTypes.PURGE_EXITING_ITEMS });
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [results, dispatch]);
 
   const handleToastClose = () => {
     setToastConfig((prev) => ({ ...prev, show: false }));
@@ -107,17 +117,21 @@ const Chat = ({
       ref={resultsContainerRef}
     >
       {results.map((result, index) => (
-        <ChatItem
-          key={index}
-          result={result}
-          index={index}
-          dispatch={dispatch}
-          setCurrentQuestion={setCurrentQuestion}
-          setQuestionType={setQuestionType}
-          onGenerateReport={handleReportGeneration}
-          isGeneratingReport={!!reportGenerationStatus[result.uuid]}
-          resultsContainerRef={resultsContainerRef}
-        />
+        <div
+          key={result.uuid || `temp-${index}`}
+          className={`w-100 ${result.isExiting ? 'chat-item-exit' : ''}`}
+        >
+          <ChatItem
+            result={result}
+            index={index}
+            dispatch={dispatch}
+            setCurrentQuestion={setCurrentQuestion}
+            setQuestionType={setQuestionType}
+            onGenerateReport={handleReportGeneration}
+            isGeneratingReport={!!reportGenerationStatus[result.uuid]}
+            resultsContainerRef={resultsContainerRef}
+          />
+        </div>
       ))}
       <div ref={resultsEndRef} />
 

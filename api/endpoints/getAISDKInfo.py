@@ -11,7 +11,7 @@
 import os
 
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import Annotated, List, Optional
 
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, Depends
@@ -39,6 +39,12 @@ class AISDKInfoResponse(BaseModel):
     deepquery_execution_model: str = Field(
         description="Which LLM is used for DeepQuery execution: 'thinking' or 'base'."
     )
+    vql_execute_rows_limit: int = Field(
+        description="Maximum number of rows returned when executing a VQL query."
+    )
+    llm_response_rows_limit: int = Field(
+        description="Maximum number of VQL execution-result rows passed to the LLM for answer generation."
+    )
     valid_providers: List[str] = Field(description="List of supported LLM provider names.")
 
 
@@ -49,7 +55,7 @@ class AISDKInfoResponse(BaseModel):
     tags=['Configuration']
 )
 @handle_endpoint_error("getAISDKInfo")
-async def get_ai_sdk_info(auth: str = Depends(authenticate)):
+async def get_ai_sdk_info(auth: Annotated[str, Depends(authenticate)]):
     """
     Returns the current AI SDK LLM configuration, including base LLM,
     thinking LLM settings, and the list of valid providers.
@@ -76,11 +82,18 @@ async def get_ai_sdk_info(auth: str = Depends(authenticate)):
         }
 
     deepquery_execution_model = os.getenv("DEEPQUERY_EXECUTION_MODEL", "thinking")
+    vql_execute_rows_limit = int(os.getenv("VQL_EXECUTE_ROWS_LIMIT", "10000"))
+    llm_response_rows_limit = min(
+        int(os.getenv("LLM_RESPONSE_ROWS_LIMIT", "100")),
+        vql_execute_rows_limit
+    )
 
     return JSONResponse(content={
         "base_llm": base_llm,
         "thinking_llm": thinking_llm,
         "check_ambiguity": bool(int(os.getenv("CHECK_AMBIGUITY", "1"))),
         "deepquery_execution_model": deepquery_execution_model,
+        "vql_execute_rows_limit": vql_execute_rows_limit,
+        "llm_response_rows_limit": llm_response_rows_limit,
         "valid_providers": UniformLLM.get_providers(),
     }, status_code=200)

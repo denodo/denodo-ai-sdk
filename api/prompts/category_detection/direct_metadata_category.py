@@ -1,3 +1,11 @@
+DIRECT_METADATA_RESPONSE_MARKDOWN = """        - Always answer in markdown format.
+        - Structure your answer in a way that it's readable and visually easy to understand.
+        - Use bold, italics and tables in markdown when appropiate to better illustrate the response.
+        - You cannot use markdown headings, instead use titles in bold to separate sections, when needed."""
+
+DIRECT_METADATA_RESPONSE_PLAIN = """        - Answer in plain text only. Do not use markdown.
+        - Structure your answer clearly."""
+
 DIRECT_METADATA_CATEGORY = """
     <purpose>
     You are going to receive a request from a user and relevant schema (from database(s) in the Denodo Platform) to that request.
@@ -22,10 +30,7 @@ DIRECT_METADATA_CATEGORY = """
     </denodo>
 
     <instructions>
-        - Always answer in markdown format.
-        - Structure your answer in a way that it's readable and visually easy to understand.
-        - Use bold, italics and tables in markdown when appropiate to better illustrate the response.
-        - You cannot use markdown headings, instead use titles in bold to separate sections, when needed.
+{metadata_response_instructions}
         - Generate three related questions in plain text format (no markdown) that users can choose from based solely on the the schema provided. Ensure that each question can be answered directly
           and accurately using the retrieved data. Remember, the questions should be closely related to the provided data and the user's request and should not require external information.
         - Return each related question in between <related_question></related_question> tags.

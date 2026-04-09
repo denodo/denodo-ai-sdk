@@ -29,6 +29,7 @@ class ReportingAgent(Agent, ReportingToolsMixin):
         post_tool_prompt: str = ANALYSIS_POST_TOOL_PROMPT,
         max_loops: int = None,
         auth: str = None,
+        custom_headers: dict = None,
     ):
         """
         Initialize the ReportingAgent.
@@ -41,9 +42,11 @@ class ReportingAgent(Agent, ReportingToolsMixin):
             post_tool_prompt: Prompt to add after tool calls
             max_loops: Maximum number of execution loops
             auth: Authentication token for database access
+            custom_headers: Custom HTTP headers to be forwarded to the Data Marketplace
         """
-        # Store auth for tool calls
+        # Store auth and headers for tool calls
         self.auth = auth
+        self.custom_headers = custom_headers
 
         super().__init__(
             agent_name="ReportingAgent",

@@ -37,7 +37,7 @@ GENERATE_VISUALIZATION = """
         - Use fig.suptitle() for main titles if needed
     - Visualization should be clear and easy to understand.
     - Never hardcode values in the Python code, you must obtain everything from the 'data' dataFrame.
-    – When possible, remember to order the values in the axis accordingly. For example, if the axis represents time (e.g., months, quarters, years),
+    - When possible, remember to order the values in the axis accordingly. For example, if the axis represents time (e.g., months, quarters, years),
     ensure the values follow chronological order rather than alphabetical. Similarly, for categorical data like user segments or performance tiers,
     arrange them in a logical or meaningful sequence (e.g., 'Low', 'Medium', 'High') to improve interpretability and flow.
 

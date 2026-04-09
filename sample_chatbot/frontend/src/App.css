@@ -1,0 +1,165 @@
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.app-layout-container {
+  display: flex;
+  flex-direction: row;
+  height: 100vh;
+  width: 100vw;
+  background-color: #ffffff;
+  overflow: hidden;
+}
+
+.main-content-area {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  height: 100%;
+  position: relative;
+  min-width: 0;
+  background-color: #ffffff;
+  overflow: hidden;
+}
+
+.chat-scroll-area {
+  flex-grow: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;          
+  flex-direction: column;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  padding: 20px;
+  transition: flex-grow 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent; 
+}
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1; 
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8; 
+}
+
+.dm-bg-container {
+  background-color: #ffffff; 
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  overflow: hidden;
+}
+
+.dm-bg-container::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 250px;
+  pointer-events: none;
+  z-index: 0;
+  background-image: radial-gradient(ellipse 110% 150px at 50% 0%, #f4f6f8 99.5%, transparent 100%);
+  background-repeat: no-repeat;
+}
+
+.dm-bg-container::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.6;
+  background-image: url("data:image/svg+xml,%3Csvg width='38' height='38' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='4' height='4' fill='%23d4dadd'/%3E%3C/svg%3E");
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 80px, rgba(0,0,0,0) 350px);
+  mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 80px, rgba(0,0,0,0) 350px);
+}
+
+.dm-content {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  flex-grow: 1;
+  overflow: hidden;
+  box-shadow: inset 0px 0px 15px rgba(0, 0, 0, 0.03);
+}
+
+@keyframes fadeInSmooth {
+  from {
+    opacity: 0;
+    transform: translateY(15px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in-smooth {
+  animation: fadeInSmooth 0.4s ease-out forwards;
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both; 
+}
+
+.delay-1 {
+  animation-delay: 0.1s;
+}
+.delay-2 {
+  animation-delay: 0.4s;
+}
+.delay-3 {
+  animation-delay: 0.7s;
+}
+.delay-4 {
+  animation-delay: 1.0s; 
+}
+
+@keyframes fadeInUp {
+  0% {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.text-shine {
+  background: linear-gradient(
+    to right,
+    #112533 20%,
+    #ed342a 40%,
+    #ed342a 60%,
+    #112533 80%
+  );
+  background-size: 200% auto;
+  color: transparent;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: shine 4s linear infinite;
+  text-shadow: 0px 4px 20px rgba(237, 52, 42, 0.15);
+}
+
+@keyframes shine {
+  to {
+    background-position: 200% center;
+  }
+}

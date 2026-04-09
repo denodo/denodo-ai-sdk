@@ -63,7 +63,7 @@ class CSVService:
         except Exception:
             pass
 
-    def get_preview(self, file_path, delimiter=None, num_rows=5):
+    def get_preview(self, file_path, delimiter=None, num_rows=5, allow_temp=False):
         """
         Get a preview of a CSV file.
 
@@ -71,12 +71,13 @@ class CSVService:
             file_path: Path to CSV file
             delimiter: Delimiter to use (auto-detect if None)
             num_rows: Number of rows to preview
+            allow_temp: Whether to allow a server-created temporary file
 
         Returns:
             dict with success, delimiter, columns, rows, error
         """
         logger.debug(f"[CSVService] Getting preview for: {file_path}")
-        valid, error = validate_csv_path(file_path)
+        valid, error = validate_csv_path(file_path, allow_temp=allow_temp)
         if not valid:
             logger.warning(f"[CSVService] Invalid CSV path: {error}")
             return {"success": False, "error": error}
@@ -96,7 +97,7 @@ class CSVService:
             "error": preview.get("error")
         }
 
-    def generate_description(self, llm, file_path, delimiter=None):
+    def generate_description(self, llm, file_path, delimiter=None, allow_temp=False):
         """
         Generate a description for a CSV file using LLM.
 
@@ -104,12 +105,13 @@ class CSVService:
             llm: UniformLLM instance
             file_path: Path to CSV file
             delimiter: Delimiter to use (auto-detect if None)
+            allow_temp: Whether to allow a server-created temporary file
 
         Returns:
             dict with success, description, delimiter, error
         """
         logger.debug(f"[CSVService] Generating description for: {file_path}")
-        valid, error = validate_csv_path(file_path)
+        valid, error = validate_csv_path(file_path, allow_temp=allow_temp)
         if not valid:
             logger.warning(f"[CSVService] Invalid CSV path for description generation: {error}")
             return {"success": False, "error": error}

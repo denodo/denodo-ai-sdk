@@ -5,13 +5,13 @@ import Button from 'react-bootstrap/Button';
 import Spinner from 'react-bootstrap/Spinner';
 import Alert from 'react-bootstrap/Alert';
 import Table from 'react-bootstrap/Table';
-import axios from 'axios';
+import api from '../../../api/client';
 import { saveCSVConfigs } from './utils';
 import AddCSVForm from './AddCSVForm';
 import SourceRow from './SourceRow';
 import ScannedFileRow from './ScannedFileRow';
 
-const CSVManagerModal = ({ show, handleClose, onSourcesChange }) => {
+const CSVManagerModal = ({ show, handleClose, onSourcesChange, selectedChatbot }) => {
   const [sources, setSources] = useState([]);
   const [scannedFiles, setScannedFiles] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -31,19 +31,38 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange }) => {
   const [editingSource, setEditingSource] = useState(null);
   const [editingDescription, setEditingDescription] = useState('');
 
+  const syncActiveCsvsDict = useCallback((updatedSourcesList) => {
+    const username = localStorage.getItem('current_user');
+    if (!username) return;
+
+    const agentKey = selectedChatbot && !selectedChatbot.isGlobal ? selectedChatbot.id : 'global';
+    
+    const dictString = localStorage.getItem(`${username}_active_csvs_dict`);
+    let dict = {};
+    if (dictString) {
+      try { dict = JSON.parse(dictString); } catch (e) {}
+    }
+
+    dict[agentKey] = updatedSourcesList.filter(s => s.active).map(s => s.source_name);
+    localStorage.setItem(`${username}_active_csvs_dict`, JSON.stringify(dict));
+  }, [selectedChatbot]);
+
   // Fetch sources when modal opens
   const fetchSources = useCallback(async () => {
     if (!show) return;
     setIsLoading(true);
     setError(null);
     try {
-      const response = await axios.get('csv/list');
+      const response = await api.get("csv/list");
       if (response.data.success) {
-        setSources(response.data.sources || []);
+        const fetchedSources = response.data.sources || [];
+        setSources(fetchedSources);
+
         // Update localStorage
         const username = localStorage.getItem('current_user');
         if (username) {
-          saveCSVConfigs(username, response.data.sources || []);
+          saveCSVConfigs(username, fetchedSources);
+          syncActiveCsvsDict(fetchedSources);
         }
       }
     } catch (err) {
@@ -52,13 +71,13 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange }) => {
     } finally {
       setIsLoading(false);
     }
-  }, [show]);
+  }, [show, syncActiveCsvsDict]);
 
   // Fetch scanned files from sample_data/unstructured folder
   const fetchScannedFiles = useCallback(async () => {
     if (!show) return;
     try {
-      const response = await axios.get('csv/scan');
+      const response = await api.get("csv/scan");
       if (response.data.success) {
         // Filter out files that are already added as sources
         const sourceNames = new Set(sources.map((s) => s.source_name));
@@ -90,23 +109,21 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange }) => {
     }
 
     try {
-      const response = await axios.post('csv/activate', {
+      const response = await api.post("csv/activate", {
         source_name: sourceName,
         active: !currentActive
       });
       if (response.data.success) {
-        setSources((prev) =>
-          prev.map((s) =>
-            s.source_name === sourceName ? { ...s, active: !currentActive } : s
-          )
+        const updatedSources = sources.map((s) =>
+          s.source_name === sourceName ? { ...s, active: !currentActive } : s
         );
+        setSources(updatedSources);
+
         // Update localStorage
         const username = localStorage.getItem('current_user');
         if (username) {
-          const updatedSources = sources.map((s) =>
-            s.source_name === sourceName ? { ...s, active: !currentActive } : s
-          );
           saveCSVConfigs(username, updatedSources);
+          syncActiveCsvsDict(updatedSources);
         }
         if (onSourcesChange) onSourcesChange();
       }
@@ -124,16 +141,18 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange }) => {
       return;
     }
     try {
-      const response = await axios.delete(`csv/delete/${sourceName}`, {
+      const response = await api.delete(`csv/delete/${sourceName}`, {
         data: { delete_file: deleteFile }
       });
       if (response.data.success) {
-        setSources((prev) => prev.filter((s) => s.source_name !== sourceName));
+        const updatedSources = sources.filter((s) => s.source_name !== sourceName);
+        setSources(updatedSources);
+
         // Update localStorage
         const username = localStorage.getItem('current_user');
         if (username) {
-          const updatedSources = sources.filter((s) => s.source_name !== sourceName);
           saveCSVConfigs(username, updatedSources);
+          syncActiveCsvsDict(updatedSources);
         }
         if (onSourcesChange) onSourcesChange();
       }
@@ -149,7 +168,7 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange }) => {
       return;
     }
     try {
-      const response = await axios.post('csv/update_description', {
+      const response = await api.post("csv/update_description", {
         source_name: sourceName,
         description: editingDescription.trim()
       });
@@ -200,7 +219,7 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange }) => {
 
     // Auto-preview the scanned file by path
     try {
-      const response = await axios.post('csv/preview', {
+      const response = await api.post("csv/preview", {
         path: scannedFile.path
       });
       if (response.data.success) {
@@ -223,7 +242,7 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange }) => {
       let response;
       if (newCSV.path) {
         // Path-based (scanned file)
-        response = await axios.post('csv/generate_description', {
+        response = await api.post("csv/generate_description", {
           path: newCSV.path,
           delimiter: newCSV.delimiter
         });
@@ -232,7 +251,7 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange }) => {
         const formData = new FormData();
         formData.append('file', newCSV.file);
         formData.append('delimiter', newCSV.delimiter);
-        response = await axios.post('csv/generate_description', formData, {
+        response = await api.post("csv/generate_description", formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
       }
@@ -265,7 +284,7 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange }) => {
       let response;
       if (newCSV.path) {
         // Path-based (scanned file)
-        response = await axios.post('csv/add', {
+        response = await api.post("csv/add", {
           path: newCSV.path,
           source_name: newCSV.sourceName,
           description: newCSV.description,
@@ -281,7 +300,7 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange }) => {
         formData.append('delimiter', newCSV.delimiter);
         formData.append('auto_detect_delimiter', 'false');
         formData.append('auto_generate_description', 'false');
-        response = await axios.post('csv/add', formData, {
+        response = await api.post("csv/add", formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
       }
@@ -320,7 +339,7 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange }) => {
       try {
         const formData = new FormData();
         formData.append('file', file);
-        const response = await axios.post('csv/preview', formData, {
+        const response = await api.post("csv/preview", formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
         if (response.data.success) {
@@ -465,7 +484,8 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange }) => {
 CSVManagerModal.propTypes = {
   show: PropTypes.bool.isRequired,
   handleClose: PropTypes.func.isRequired,
-  onSourcesChange: PropTypes.func
+  onSourcesChange: PropTypes.func,
+  selectedChatbot: PropTypes.object
 };
 
 export default CSVManagerModal;

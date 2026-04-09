@@ -6,6 +6,36 @@ console = Console()
 
 PANEL_WIDTH = 60
 
+
+def _build_chatbot_segments(urls, root_path_prefix="", imported_agent_names=None):
+    imported_agent_names = imported_agent_names or []
+    segments = []
+
+    for i, url in enumerate(urls):
+        full_chatbot_url = url.rstrip('/') + root_path_prefix
+        segments.extend([
+            ("Sample chatbot ", "bold blue"),
+            ("is running at: ", "bold white"),
+            (full_chatbot_url, "green")
+        ])
+        if i < len(urls) - 1:
+            segments.append(("\n", ""))
+
+    if imported_agent_names:
+        segments.extend([
+            ("\n\n", ""),
+            ("Imported custom agents:\n", "bold white")
+        ])
+        for index, agent_name in enumerate(imported_agent_names):
+            segments.extend([
+                ("[OK] ", "green"),
+                (agent_name, "white")
+            ])
+            if index < len(imported_agent_names) - 1:
+                segments.append(("\n", ""))
+
+    return segments
+
 def print_header():
     console.print(Panel(
         Text("Denodo AI SDK", style="bold white", justify="center"),
@@ -14,9 +44,10 @@ def print_header():
         width=PANEL_WIDTH
     ))
 
-def print_status(process_type, urls, version=None, root_path_prefix=""):
+def print_status(process_type, urls, version=None, root_path_prefix="", imported_agent_names=None):
     server_url = urls[0]
     full_url = server_url.rstrip('/') + root_path_prefix
+    imported_agent_names = imported_agent_names or []
 
     if process_type == "api":
         panel = Panel(
@@ -34,19 +65,8 @@ def print_status(process_type, urls, version=None, root_path_prefix=""):
             width=PANEL_WIDTH
         )
     else:
-        segments = []
-        for i, url in enumerate(urls):
-            full_chatbot_url = url.rstrip('/') + root_path_prefix
-            segments.extend([
-                ("Sample chatbot ", "bold blue"),
-                ("is running at: ", "bold white"),
-                (full_chatbot_url, "green")
-            ])
-            if i < len(urls) - 1:
-                segments.append(("\n", ""))
-
         panel = Panel(
-            Text.assemble(*segments),
+            Text.assemble(*_build_chatbot_segments(urls, root_path_prefix, imported_agent_names)),
             title="[bold]Chatbot status",
             border_style="blue",
             width=PANEL_WIDTH

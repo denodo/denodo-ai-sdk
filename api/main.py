@@ -10,13 +10,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_offline import FastAPIOffline as FastAPI
 
-from api.utils import state_manager
-
 from dotenv import load_dotenv
+
 load_dotenv('api/utils/sdk_config.env')
 
+from api.utils import state_manager  # noqa: E402
 from api.utils.sdk_utils import check_env_variables, test_data_catalog_connection # noqa: E402
-from api.endpoints import (
+from api.endpoints import (  # noqa: E402
     deepQuery,
     getMetadata,
     deleteMetadata,
@@ -32,7 +32,7 @@ from api.endpoints import (
     generateDeepQueryReport,
 )
 from utils.logging_utils import get_logging_config, transaction_id_var # noqa: E402
-from utils.utils import normalize_root_path, generate_transaction_id # noqa: E402
+from utils.utils import normalize_root_path, format_comma_separated_list, generate_transaction_id # noqa: E402
 from utils.version import AI_SDK_VERSION # noqa: E402
 
 required_vars = [
@@ -81,6 +81,7 @@ AI_SDK_DATA_MARKETPLACE_URL = os.getenv("AI_SDK_DATA_MARKETPLACE_URL")
 AI_SDK_DATA_MARKETPLACE_VERIFY_SSL = bool(int(os.getenv("DATA_MARKETPLACE_VERIFY_SSL", 0)))
 AI_SDK_CHECK_AMBIGUITY = bool(int(os.getenv("CHECK_AMBIGUITY", "1")))
 AI_SDK_ALLOWED_METADATA_USERS = os.getenv("AI_SDK_ALLOWED_METADATA_USERS")
+AI_SDK_FORWARD_CUSTOM_HEADERS = os.getenv("FORWARD_CUSTOM_HEADERS")
 
 if THINKING_MODEL_AVAILABLE:
     AI_SDK_THINKING_LLM_TEMPERATURE = os.getenv("THINKING_LLM_TEMPERATURE")
@@ -122,6 +123,7 @@ def log_ai_sdk_parameters():
         "Data Marketplace Verify SSL": AI_SDK_DATA_MARKETPLACE_VERIFY_SSL,
         "Check Ambiguity": AI_SDK_CHECK_AMBIGUITY,
         "Allowed Metadata Users": AI_SDK_ALLOWED_METADATA_USERS if AI_SDK_ALLOWED_METADATA_USERS else "Not set.",
+        "Forwarded Custom Headers": format_comma_separated_list(AI_SDK_FORWARD_CUSTOM_HEADERS) if AI_SDK_FORWARD_CUSTOM_HEADERS else "None"
     }
 
     if THINKING_MODEL_AVAILABLE:
@@ -148,7 +150,6 @@ async def lifespan(app: FastAPI):
     """
     Handles startup and shutdown events for the application.
     """
-    # On startup, initialize all default resources
     state_manager.initialize_default_resources()
     yield
     logging.info("AI SDK has shut down.")
@@ -168,7 +169,7 @@ base_app = FastAPI(
     version = AI_SDK_VERSION,
     openapi_tags = tags,
     root_path = AI_SDK_ROOT_PATH,
-    favicon_url = "/favicon.ico",
+    favicon_url = "/favicon.svg",
     lifespan = lifespan,
 )
 
@@ -200,9 +201,9 @@ reports_dir = "api/reports"
 os.makedirs(reports_dir, exist_ok=True)
 base_app.mount("/reports", StaticFiles(directory=reports_dir), name="reports")
 
-@base_app.get("/favicon.ico", include_in_schema=False)
+@base_app.get("/favicon.svg", include_in_schema=False)
 async def favicon():
-    return FileResponse("api/static/favicon.ico")
+    return FileResponse("api/static/favicon.svg")
 
 @base_app.get("/health", tags=["Health Check"])
 async def health_check():
@@ -260,7 +261,7 @@ if AI_SDK_MCP_MODE == "remote":
         version=AI_SDK_VERSION,
         openapi_tags=tags,
         root_path=AI_SDK_ROOT_PATH,
-        favicon_url="/favicon.ico",
+        favicon_url="/favicon.svg",
         routes=[
             *mcp_app.routes,
             *base_app.routes,

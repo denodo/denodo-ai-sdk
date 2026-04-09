@@ -33,7 +33,8 @@ async def process_analysis(
     execution_model="thinking",
     vdp_database_names: str = '',
     vdp_tag_names: str = '',
-    allow_external_associations: bool = True
+    allow_external_associations: bool = True,
+    custom_headers: dict = None
 ):
     """
     Perform analysis on the database and return answer with metadata for future report generation.
@@ -109,6 +110,7 @@ async def process_analysis(
             llm=executing_llm,
             system_prompt=analysis_agent_system_prompt,
             auth=auth,
+            custom_headers=custom_headers,
             start_llm=planning_llm,
             max_loops=max_analysis_loops,
             max_concurrent_tool_calls=max_concurrent_tool_calls,
@@ -193,7 +195,8 @@ async def generate_report_from_deepquery_metadata(
     color_palette="red",
     max_reporting_loops=None,
     include_failed_tool_calls_appendix=False,
-    auth=None
+    auth=None,
+    custom_headers: dict = None
 ):
     """
     Generate an HTML report from deepquery metadata.
@@ -243,6 +246,7 @@ async def generate_report_from_deepquery_metadata(
             cohorts=cohorts,
             system_prompt=reporting_agent_system_prompt,
             auth=auth,
+            custom_headers=custom_headers,
             max_loops=max_reporting_loops
         )
 

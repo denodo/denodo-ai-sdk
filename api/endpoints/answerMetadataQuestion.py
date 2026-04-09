@@ -20,10 +20,11 @@ from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from api.utils.sdk_utils import timing_context, handle_endpoint_error, generate_session_id, authenticate
-from api.utils import sdk_ai_tools
-from api.utils import sdk_answer_question
+from api.utils.sdk_utils import timing_context, handle_endpoint_error, authenticate
+from api.utils import ai_tools
+from api.utils import answer_question
 from api.utils import state_manager
+from utils.utils import get_custom_request_headers
 
 router = APIRouter()
 
@@ -80,7 +81,10 @@ class answerMetadataQuestionRequest(BaseModel):
         description="Maximum characters of table or column descriptions used when filtering how many views to keep. Not applied during vector search or VQL generation (those use full descriptions). Refer to the docs for when this trimming is applied."
     )
     disclaimer: bool = True
-    verbose: bool = True
+    verbose: bool = Field(
+        default = True,
+        description="If true, the LLM will receive the vector search output of the schema of the relevant views and return a natural language response in the answer key. If set to false, it will return the vector search output of the schema of the relevant views. Setting to false is the recommended option when using the endpoint as a tool."
+    )
 
 class answerMetadataQuestionResponse(BaseModel):
     answer: str
@@ -88,6 +92,7 @@ class answerMetadataQuestionResponse(BaseModel):
     query_explanation: str
     tokens: Dict
     execution_result: Dict
+    related_tables: List[Dict] = Field(default_factory=list)
     related_questions: List[str]
     tables_used: List[str]
     raw_graph: str
@@ -107,7 +112,8 @@ class answerMetadataQuestionResponse(BaseModel):
 @handle_endpoint_error("answerMetadataQuestion")
 async def answer_metadata_question_get(
     request: answerMetadataQuestionRequest = Query(),
-    auth: str = Depends(authenticate)
+    auth: str = Depends(authenticate),
+    custom_headers: dict = Depends(get_custom_request_headers)
 ):
     '''This endpoint processes a natural language question and tries to answer it using the metadata in Denodo.
     It will do this by:
@@ -127,7 +133,7 @@ async def answer_metadata_question_get(
     - CUSTOM_INSTRUCTIONS
 
     You can also override the LLM temperature and max_tokens via API parameters for fine-tuning the model behavior.'''
-    return await process_metadata_question(request, auth)
+    return await process_metadata_question(request, auth, custom_headers)
 
 @router.post(
         '/answerMetadataQuestion',
@@ -137,7 +143,8 @@ async def answer_metadata_question_get(
 @handle_endpoint_error("answerMetadataQuestion")
 async def answer_metadata_question_post(
     endpoint_request: answerMetadataQuestionRequest,
-    auth: str = Depends(authenticate)
+    auth: str = Depends(authenticate),
+    custom_headers: dict = Depends(get_custom_request_headers)
 ):
     '''This endpoint processes a natural language question and tries to answer it using the metadata in Denodo.
     It will do this by:
@@ -157,13 +164,10 @@ async def answer_metadata_question_post(
     - CUSTOM_INSTRUCTIONS
 
     You can also override the LLM temperature and max_tokens via API parameters for fine-tuning the model behavior.'''
-    return await process_metadata_question(endpoint_request, auth)
+    return await process_metadata_question(endpoint_request, auth, custom_headers)
 
-async def process_metadata_question(request_data: answerMetadataQuestionRequest, auth: str):
+async def process_metadata_question(request_data: answerMetadataQuestionRequest, auth: str, custom_headers: dict = None):
     """Main function to process the metadata question and return the answer"""
-
-    # Generate session ID for Langfuse debugging purposes
-    session_id = generate_session_id(request_data.question)
 
     try:
         llm = state_manager.get_llm(
@@ -189,13 +193,14 @@ async def process_metadata_question(request_data: answerMetadataQuestionRequest,
         logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
 
-    vector_search_tables, _, timings, error_message = await sdk_ai_tools.get_relevant_tables(
+    vector_search_tables, _, timings, error_message = await ai_tools.get_relevant_tables(
         query=request_data.question,
         vector_store=vector_store,
         sample_data_vector_store=sample_data_vector_store,
         vdb_list=request_data.vdp_database_names,
         tag_list=request_data.vdp_tag_names,
         auth=auth,
+        custom_headers=custom_headers,
         vector_search_k=request_data.vector_search_k,
         use_views=request_data.use_views,
         expand_set_views=request_data.expand_set_views,
@@ -218,7 +223,7 @@ async def process_metadata_question(request_data: answerMetadataQuestionRequest,
         request_data.custom_instructions = base_instructions
 
     if not request_data.verbose:
-        response = sdk_answer_question.process_metadata_category(
+        response = answer_question.process_metadata_category(
             category_response='',
             category_related_questions=[],
             vector_search_tables=vector_search_tables,
@@ -231,16 +236,17 @@ async def process_metadata_question(request_data: answerMetadataQuestionRequest,
         return JSONResponse(content=jsonable_encoder(response), media_type='application/json')
 
     with timing_context("llm_time", timings):
-        _, category_response, category_related_questions, sql_category_tokens = await sdk_ai_tools.sql_category(
+        _, category_response, category_related_questions, sql_category_tokens = await ai_tools.sql_category(
             query=request_data.question,
             vector_search_tables=vector_search_tables,
             llm=llm,
             mode="metadata",
             custom_instructions=request_data.custom_instructions,
-            column_description_char_limit=request_data.vector_search_column_description_char_limit
+            column_description_char_limit=request_data.vector_search_column_description_char_limit,
+            markdown_response=request_data.markdown_response,
         )
 
-    response = sdk_answer_question.process_metadata_category(
+    response = answer_question.process_metadata_category(
         category_response=category_response,
         category_related_questions=category_related_questions,
         vector_search_tables=vector_search_tables,

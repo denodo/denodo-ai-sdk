@@ -1,0 +1,57 @@
+.custom-light-tooltip {
+  pointer-events: auto !important;
+}
+
+.custom-light-tooltip .tooltip-inner {
+  background-color: #ffffff !important;
+  color: #112533 !important;
+  border: 1px solid #ced4da !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+  border-radius: 0.5rem !important;
+  padding: 10px 12px !important;
+  max-width: 280px !important;
+  text-align: left !important;
+}
+
+.custom-light-tooltip.bs-tooltip-end .tooltip-arrow::before,
+.custom-light-tooltip.bs-tooltip-auto[data-popper-placement^=right] .tooltip-arrow::before {
+  border-right-color: #ced4da !important;
+}
+.custom-light-tooltip.bs-tooltip-start .tooltip-arrow::before,
+.custom-light-tooltip.bs-tooltip-auto[data-popper-placement^=left] .tooltip-arrow::before {
+  border-left-color: #ced4da !important;
+}
+.custom-light-tooltip.bs-tooltip-top .tooltip-arrow::before,
+.custom-light-tooltip.bs-tooltip-auto[data-popper-placement^=top] .tooltip-arrow::before {
+  border-top-color: #ced4da !important;
+}
+.custom-light-tooltip.bs-tooltip-bottom .tooltip-arrow::before,
+.custom-light-tooltip.bs-tooltip-auto[data-popper-placement^=bottom] .tooltip-arrow::before {
+  border-bottom-color: #ced4da !important;
+}
+
+.custom-tooltip-scroll-content {
+  max-height: 150px;
+  overflow-y: auto;
+  font-size: 0.85rem;
+  font-weight: 500;
+  line-height: 1.4;
+  padding-right: 6px; 
+  
+  scrollbar-width: thin;
+  scrollbar-color: #adb5bd transparent;
+}
+
+.custom-tooltip-scroll-content::-webkit-scrollbar {
+  width: 5px;
+}
+.custom-tooltip-scroll-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-tooltip-scroll-content::-webkit-scrollbar-thumb {
+  background-color: #ced4da;
+  border-radius: 4px;
+}
+.custom-tooltip-scroll-content::-webkit-scrollbar-thumb:hover {
+  background-color: #adb5bd;
+}

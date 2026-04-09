@@ -25,6 +25,7 @@ from sample_chatbot.utils.helpers import (
     setup_user_details,
     check_env_variables,
     setup_directories,
+    get_config_value,
 )
 
 __all__ = [
@@ -44,4 +45,5 @@ __all__ = [
     'setup_user_details',
     'check_env_variables',
     'setup_directories',
+    'get_config_value'
 ]

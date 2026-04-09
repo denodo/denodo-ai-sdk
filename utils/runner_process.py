@@ -8,6 +8,8 @@ from rich.panel import Panel
 from rich.console import Console
 from dotenv import dotenv_values
 from utils.utils import normalize_root_path
+from utils.version import AI_SDK_VERSION
+from utils.yaml.validate_and_parse import load_and_validate_agents
 from utils.runner_display import print_status, PANEL_WIDTH
 
 console = Console()
@@ -60,6 +62,13 @@ def run_process(process_type, args):
         root_path_value = chatbot_vars.get("CHATBOT_ROOT_PATH") or os.getenv("CHATBOT_ROOT_PATH")
         ROOT_PATH = normalize_root_path(root_path_value or "")
 
+    imported_agent_names = []
+    if process_type == "sample_chatbot":
+        imported_agent_names = [
+            agent_config.get("name") or agent_config.get("id", "Unnamed agent")
+            for agent_config in load_and_validate_agents()
+        ]
+
     success_event = threading.Event()
 
     with console.status(f"[bold blue]Starting {process_type}...", spinner="dots"):
@@ -107,7 +116,7 @@ def run_process(process_type, args):
 
     log_thread = threading.Thread(
         target=log_output,
-        args=(process, process_type, success_event, args.production, ROOT_PATH, no_logs)
+        args=(process, process_type, success_event, args.production, ROOT_PATH, no_logs, imported_agent_names)
     )
 
     if args.background:
@@ -122,10 +131,12 @@ def run_process(process_type, args):
 
     return process, log_thread
 
-def log_output(process, process_type, success_event, production=False, root_path_prefix="", print_to_console=False):
+def log_output(process, process_type, success_event, production=False, root_path_prefix="", print_to_console=False,
+               imported_agent_names=None):
     urls = []
-    version = None
+    version = AI_SDK_VERSION if process_type == "api" else None
     data_catalog_warning_shown = False
+    imported_agent_names = imported_agent_names or []
 
     try:
         for line in process.stdout:
@@ -145,11 +156,6 @@ def log_output(process, process_type, success_event, production=False, root_path
                 data_catalog_warning_shown = True
 
             if process_type == "api":
-                if "AI SDK Version" in line:
-                    version_match = re.search(r"Version:\s(.*)", line)
-                    if version_match:
-                        version = version_match.group(1)
-
                 if "Uvicorn running on" in line or "Listening at:" in line:
                     match = re.search(r"(https?://[\w.:]+)", line)
                     if match:
@@ -167,7 +173,12 @@ def log_output(process, process_type, success_event, production=False, root_path
                     if match:
                         urls.append(match.group(1))
                         if not success_event.is_set():
-                            print_status("sample_chatbot", urls, root_path_prefix=root_path_prefix)
+                            print_status(
+                                "sample_chatbot",
+                                urls,
+                                root_path_prefix=root_path_prefix,
+                                imported_agent_names=imported_agent_names
+                            )
                             success_event.set()
 
     except ValueError as e:

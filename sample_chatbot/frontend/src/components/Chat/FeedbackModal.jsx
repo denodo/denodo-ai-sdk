@@ -3,7 +3,8 @@ import Modal from "react-bootstrap/Modal";
 import Button from "react-bootstrap/Button";
 import Form from "react-bootstrap/Form";
 import { actionTypes } from "../../reducers/chatReducer";
-import HelpTooltip from "../HelpTooltip";
+import { buildApiUrl } from "../../api/client";
+import CustomTooltip from "../CustomTooltip/CustomTooltip";
 
 const FeedbackModal = ({ show, onClose, result, dispatch, resultIndex, feedbackEnabled }) => {
   const [feedbackValue, setFeedbackValue] = useState("");
@@ -18,7 +19,7 @@ const FeedbackModal = ({ show, onClose, result, dispatch, resultIndex, feedbackE
     setSubmitting(true);
 
     try {
-      const response = await fetch("submit_feedback", {
+      const response = await fetch(buildApiUrl("submit_feedback"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -30,7 +31,14 @@ const FeedbackModal = ({ show, onClose, result, dispatch, resultIndex, feedbackE
         }),
       });
 
-      const data = await response.json();
+      let data = {};
+      try {
+        data = await response.json();
+      } catch {
+        data = {
+          message: `The server returned an invalid response (HTTP ${response.status}).`,
+        };
+      }
 
       if (response.ok) {
         dispatch({
@@ -39,11 +47,17 @@ const FeedbackModal = ({ show, onClose, result, dispatch, resultIndex, feedbackE
         });
         onClose();
       } else {
-        alert(`Error submitting feedback: ${data.message}`);
+        const detail =
+          data.message ||
+          `Feedback could not be saved (HTTP ${response.status}).`;
+        alert(detail);
       }
     } catch (error) {
       console.error("Error submitting feedback:", error);
-      alert("An error occurred while submitting feedback.");
+      const detail =
+        error?.message ||
+        "Unable to reach the server. Check your connection and try again.";
+      alert(`Error submitting feedback: ${detail}`);
     } finally {
       setSubmitting(false);
     }
@@ -70,9 +84,19 @@ const FeedbackModal = ({ show, onClose, result, dispatch, resultIndex, feedbackE
         </div>
         <Form>
           <Form.Group className="mb-3">
-            <Form.Label className="d-flex align-items-center gap-2">
+            <Form.Label className="d-flex align-items-center">
               Was this answer helpful?
-              <HelpTooltip text="The feedback submitted in this form is saved in the reports/ folder at the root level of the AI SDK." />
+              <CustomTooltip 
+                id="tooltip-feedback-info" 
+                content="The feedback submitted in this form is saved in the reports/ folder at the root level of the AI SDK."
+              >
+                <i 
+                  className="bi bi-info-circle ms-2" 
+                  style={{ cursor: 'help', fontSize: '0.85rem', color: '#adb5bd', transition: 'color 0.2s' }}
+                  onMouseEnter={(e) => e.target.style.color = '#112533'}
+                  onMouseLeave={(e) => e.target.style.color = '#adb5bd'}
+                ></i>
+              </CustomTooltip>
             </Form.Label>
             <div>
               <Form.Check

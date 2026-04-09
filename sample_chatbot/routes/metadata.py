@@ -56,7 +56,7 @@ def _get_sync_credentials(config):
         return config.ai_sdk_username, config.ai_sdk_password
     return current_user.id, current_user.password
 
-@metadata_bp.route("/delete_metadata", methods=["DELETE"])
+@metadata_bp.route("/api/delete_metadata", methods=["DELETE"])
 @login_required
 def delete_metadata():
     """Delete metadata from the AI SDK."""
@@ -119,7 +119,7 @@ def delete_metadata():
         logging.error(f"Error calling deleteMetadata endpoint: {str(e)}")
         return jsonify({"success": False, "message": f"Failed to connect to AI SDK: {str(e)}"}), 500
 
-@metadata_bp.route("/sync_vdbs", methods=["POST"])
+@metadata_bp.route("/api/sync_vdbs", methods=["POST"])
 @login_required
 def sync_vdbs():
     """Synchronize VDBs with the AI SDK."""

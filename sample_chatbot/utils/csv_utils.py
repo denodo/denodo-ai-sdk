@@ -15,6 +15,27 @@ from utils.utils import custom_tag_parser
 from langchain_community.document_loaders.csv_loader import CSVLoader
 from sample_chatbot.engine.prompts import GENERATE_CSV_DESCRIPTION
 
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SAMPLE_CHATBOT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ALLOWED_CSV_ROOTS = (
+    os.path.join(REPO_ROOT, "uploads"),
+    os.path.join(SAMPLE_CHATBOT_ROOT, "sample_data", "unstructured"),
+)
+
+
+def _is_allowed_csv_path(csv_file_path):
+    resolved_path = os.path.realpath(csv_file_path)
+
+    for allowed_root in ALLOWED_CSV_ROOTS:
+        resolved_root = os.path.realpath(allowed_root)
+        try:
+            if os.path.commonpath([resolved_path, resolved_root]) == resolved_root:
+                return True
+        except ValueError:
+            continue
+
+    return False
+
 def detect_csv_delimiter(csv_file_path, sample_size=8192):
     """
     Detect the delimiter of a CSV file using Python's csv.Sniffer.
@@ -142,12 +163,13 @@ def generate_csv_description(llm, csv_file_path, delimiter=';', num_rows=5, sess
         logging.error(f"[csv_utils] Error generating CSV description for {csv_file_path}: {e}")
         return f"CSV file with columns: {', '.join(preview.get('columns', []))}"
 
-def validate_csv_path(csv_file_path):
+def validate_csv_path(csv_file_path, allow_temp=False):
     """
     Validate that the CSV file exists and is readable.
 
     Args:
         csv_file_path: Path to the CSV file
+        allow_temp: Whether to allow server-created temporary CSV files
 
     Returns:
         Tuple of (valid: bool, error_message: str or None)
@@ -160,6 +182,8 @@ def validate_csv_path(csv_file_path):
         return False, f"Path is not a file: {csv_file_path}"
     if not csv_file_path.lower().endswith('.csv'):
         return False, "File must have .csv extension"
+    if not allow_temp and not _is_allowed_csv_path(csv_file_path):
+        return False, "CSV path must be inside uploads/ or sample_chatbot/sample_data/unstructured/"
     try:
         with open(csv_file_path, encoding='utf-8') as f:
             f.read(1)

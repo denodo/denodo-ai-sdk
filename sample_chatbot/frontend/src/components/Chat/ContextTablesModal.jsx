@@ -2,6 +2,8 @@ import React, { useMemo } from "react";
 import Modal from "react-bootstrap/Modal";
 import Button from "react-bootstrap/Button";
 
+const assetBaseUrl = import.meta.env.BASE_URL;
+
 const ContextTablesModal = ({ show, onClose, tables, vql, dataCatalogUrl }) => {
   const { usedTables, unusedTables } = useMemo(() => {
     if (!tables || tables.length === 0) {
@@ -57,7 +59,7 @@ const ContextTablesModal = ({ show, onClose, tables, vql, dataCatalogUrl }) => {
             className="me-2 mb-2 d-inline-flex align-items-center"
           >
             <img
-              src="view.svg"
+              src={`${assetBaseUrl}denodo_view.svg`}
               alt="View"
               width="16"
               height="16"

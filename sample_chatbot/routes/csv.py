@@ -22,7 +22,7 @@ def get_csv_service():
     """Get CSV service instance."""
     return CSVService(current_app.config.get('UPLOAD_FOLDER', 'uploads'))
 
-@csv_bp.route('/csv/list', methods=['GET'])
+@csv_bp.route('/api/csv/list', methods=['GET'])
 @login_required
 def list_csv_sources():
     """List all CSV sources for the current user."""
@@ -35,7 +35,7 @@ def list_csv_sources():
         "active_sources": current_user.active_csv_sources
     }), 200
 
-@csv_bp.route('/csv/add', methods=['POST'])
+@csv_bp.route('/api/csv/add', methods=['POST'])
 @login_required
 def add_csv_source():
     """
@@ -45,8 +45,14 @@ def add_csv_source():
                      'auto_detect_delimiter', 'auto_generate_description'
     For path reference: JSON with 'path', 'description', optional 'delimiter', 'source_name'
     """
+
+    # Capture the actual user object, not the proxy
+    user_obj = current_user._get_current_object()
+
+    llm = user_obj.get_chatbot_llm()
+
     csv_service = get_csv_service()
-    llm = current_app.config.get('LLM')
+
 
     # Check if this is a file upload or path reference
     if 'file' in request.files:
@@ -132,7 +138,7 @@ def add_csv_source():
         logger.error(f"[CSV] Failed to add source '{source_name}': {result.get('error')}")
         return jsonify(result), 400
 
-@csv_bp.route('/csv/delete/<source_name>', methods=['DELETE'])
+@csv_bp.route('/api/csv/delete/<source_name>', methods=['DELETE'])
 @login_required
 def delete_csv_source(source_name):
     """Delete a CSV source."""
@@ -149,7 +155,7 @@ def delete_csv_source(source_name):
         logger.warning(f"[CSV] Failed to delete source '{source_name}': {result.get('error')}")
         return jsonify(result), 404
 
-@csv_bp.route('/csv/activate', methods=['POST'])
+@csv_bp.route('/api/csv/activate', methods=['POST'])
 @login_required
 def activate_csv_sources():
     """Activate or deactivate a single CSV source."""
@@ -176,7 +182,7 @@ def activate_csv_sources():
         logger.warning(f"[CSV] Failed to {action[:-3]}e source '{source_name}': {result.get('error')}")
         return jsonify(result), 404
 
-@csv_bp.route('/csv/update_description', methods=['POST'])
+@csv_bp.route('/api/csv/update_description', methods=['POST'])
 @login_required
 def update_csv_description():
     """Update the description of a CSV source."""
@@ -200,7 +206,7 @@ def update_csv_description():
         logger.warning(f"[CSV] Failed to update description for '{source_name}': {result.get('error')}")
         return jsonify(result), 404
 
-@csv_bp.route('/csv/restore', methods=['POST'])
+@csv_bp.route('/api/csv/restore', methods=['POST'])
 @login_required
 def restore_csv_sources():
     """
@@ -225,7 +231,7 @@ def restore_csv_sources():
         "active_sources": current_user.active_csv_sources
     }), 200
 
-@csv_bp.route('/csv/preview', methods=['POST'])
+@csv_bp.route('/api/csv/preview', methods=['POST'])
 @login_required
 def preview_csv():
     """Get a preview of a CSV file (for UI display before adding)."""
@@ -248,7 +254,7 @@ def preview_csv():
         logger.debug(f"[CSV] User '{current_user.id}' previewing file at path: {file_path}")
 
     try:
-        result = csv_service.get_preview(file_path, num_rows=5)
+        result = csv_service.get_preview(file_path, num_rows=5, allow_temp=is_temp)
         if result.get("success"):
             logger.debug(f"[CSV] Preview successful: {len(result.get('columns', []))} columns, {len(result.get('rows', []))} rows")
         else:
@@ -258,12 +264,17 @@ def preview_csv():
         if is_temp:
             csv_service.cleanup_temp_file(file_path)
 
-@csv_bp.route('/csv/generate_description', methods=['POST'])
+@csv_bp.route('/api/csv/generate_description', methods=['POST'])
 @login_required
 def generate_csv_description_endpoint():
     """Generate a description for a CSV file using the LLM."""
+
+    # Capture the actual user object, not the proxy
+    user_obj = current_user._get_current_object()
+
+    llm = user_obj.get_chatbot_llm()
+
     csv_service = get_csv_service()
-    llm = current_app.config.get('LLM')
 
     # Handle both file upload and path
     if 'file' in request.files:
@@ -284,7 +295,7 @@ def generate_csv_description_endpoint():
         logger.info(f"[CSV] User '{current_user.id}' generating description for file: {file_path}")
 
     try:
-        result = csv_service.generate_description(llm, file_path, delimiter)
+        result = csv_service.generate_description(llm, file_path, delimiter, allow_temp=is_temp)
         if result.get("success"):
             logger.info(f"[CSV] Description generated successfully for user '{current_user.id}'")
             logger.debug(f"[CSV] Generated description: {result.get('description', '')[:100]}...")
@@ -295,7 +306,7 @@ def generate_csv_description_endpoint():
         if is_temp:
             csv_service.cleanup_temp_file(file_path)
 
-@csv_bp.route('/csv/scan', methods=['GET'])
+@csv_bp.route('/api/csv/scan', methods=['GET'])
 @login_required
 def scan_csv_folder():
     """

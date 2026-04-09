@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from langchain_core.documents.base import Document
 
 from utils.data_catalog import get_views_metadata_documents
+from utils.schema_catalog import SchemaCatalog
 from utils.utils import schema_summary, prepare_schema, flatten_list, prepare_sample_data_schema, calculate_tokens, current_endpoint
 
 security_basic = HTTPBasic(auto_error=False)
@@ -44,40 +45,7 @@ def timing_context(name, timings):
         timings[key] = round(value, 2)
 
 def readable_tables(relevant_tables, column_description_char_limit = None):
-    readable_output = ""
-    include_descriptions = column_description_char_limit is not None and column_description_char_limit > 0
-
-    def truncate(text):
-        if column_description_char_limit and len(text) > column_description_char_limit:
-            return f"{text[:column_description_char_limit]}..."
-        return text
-
-    for table in relevant_tables:
-        table_schema = table['view_json']['schema']
-        table_name = table['view_json']['tableName']
-        table_description = table['view_json'].get('description', '')
-
-        readable_output += "<table>\n"
-        readable_output += f"Table: {table_name}\n"
-
-        if include_descriptions and table_description:
-            readable_output += f"Table description: {truncate(table_description)}\n"
-
-        readable_output += "Table columns:\n"
-        for column in table_schema:
-            column_name = column.get('columnName', '').replace('"', '').replace("'", "")
-            column_description = column.get('description', '')
-            if include_descriptions:
-                if column_description:
-                    readable_output += f"   - {column_name}. Description: {truncate(column_description)}\n"
-                else:
-                    readable_output += f"   - {column_name}\n"
-            else:
-                readable_output += f"   - {column_name}\n"
-
-        readable_output += "</table>\n"
-
-    return readable_output
+    return SchemaCatalog.from_vector_search_tables(relevant_tables).render_selector_schema(column_description_char_limit)
 
 def match_nested_parentheses(text):
     def find_closing_paren(s, start):
@@ -500,7 +468,8 @@ def process_metadata_source(
     sample_data_vector_store,
     tagged_views=None,
     incremental=True,
-    tags_to_ignore=None
+    tags_to_ignore=None,
+    custom_headers=None
 ):
     """
     Process metadata from a source (tag or database).
@@ -512,6 +481,7 @@ def process_metadata_source(
         auth: Authentication credentials
         vector_store: Vector store for metadata
         sample_data_vector_store: Vector store for sample data
+        custom_headers: Custom headers to forward to the Data Marketplace
 
     Returns:
         Tuple of (db_schema, db_schema_text, data_usage_errors)
@@ -533,7 +503,8 @@ def process_metadata_source(
         "view_prefix_filter": request.view_prefix_filter,
         "view_suffix_filter": request.view_suffix_filter,
         "incremental": incremental,
-        "views_per_request": request.views_per_request
+        "views_per_request": request.views_per_request,
+        "custom_headers": custom_headers
     }
 
     if tags_to_ignore:

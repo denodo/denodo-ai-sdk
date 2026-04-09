@@ -8,5 +8,5 @@ When working with similarity search a limit must always be imposed for N. Defaul
     - EMBED_AI(<search query:text> [, <embedding model:text>]):vector. Embeds a given text to obtain it's vector representation.
     - VECTOR_COSINE_DISTANCE(<vector1:vector>, <vector2:vector>):float. Calculates the distance between two vectors using cosine distance.
     - VECTOR_L1_DISTANCE(<vector1:vector>, <vector2:vector>):float. Calculates the distance between two vectors using L1 distance.
-    - VECTOR_L2_DISTANCE(<vector1:vector>, <vector2:vector>):float.Calculates the distance between two vectors using L2 distance.
+    - VECTOR_L2_DISTANCE(<vector1:vector>, <vector2:vector>):float. Calculates the distance between two vectors using L2 distance.
     """

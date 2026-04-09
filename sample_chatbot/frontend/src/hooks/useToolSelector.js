@@ -8,10 +8,15 @@ const normalizeString = (value) =>
     .replace(/@/g, "");
 
 const useToolSelector = (config) => {
-  const availableTools = useMemo(
-    () => (Array.isArray(config?.chatbot_tools) ? config.chatbot_tools : []),
-    [config]
-  );
+  const availableTools = useMemo(() => {
+    const tools = Array.isArray(config?.chatbot_tools) ? config.chatbot_tools : [];
+    
+    return tools.filter(tool => {
+      if (tool.name === 'deep_query' && !config?.enable_deep_query) return false;
+      if (tool.name === 'kb' && !config?.unstructured_mode) return false;
+      return true;
+    });
+  }, [config]);
 
   const resolveToolFromToken = useCallback(
     (rawToken) => {
@@ -48,15 +53,14 @@ const useToolSelector = (config) => {
         const match = trimmedStart.match(/^@(\S*)/);
         const token = match ? match[1] : "";
         const resolvedTool = token ? resolveToolFromToken(token) : null;
+        
         if (resolvedTool) {
           toolName = resolvedTool.name;
           toolPrettyName = resolvedTool.pretty_name || resolvedTool.name;
+          finalQuestion = questionText.replace(/^@\S+\s*/, "").trim();
         }
-
-        finalQuestion = questionText.replace(/^@\S+\s*/, "").trim();
       }
 
-      // If the tool was forced (e.g. DeepQuery button), try to resolve a pretty name
       if (toolName && !toolPrettyName) {
         const matched = availableTools.find((tool) => tool.name === toolName);
         if (matched) {
@@ -77,5 +81,3 @@ const useToolSelector = (config) => {
 };
 
 export default useToolSelector;
-
-

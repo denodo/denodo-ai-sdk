@@ -16,13 +16,14 @@ import traceback
 
 from pydantic import BaseModel, Field
 from api.utils import state_manager
-from api.utils import sdk_ai_tools
+from api.utils import ai_tools
 from typing import Optional, Dict, Any
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from api.deepquery.main import process_analysis
 from fastapi import APIRouter, Depends, HTTPException
 from api.utils.sdk_utils import handle_endpoint_error, authenticate
+from utils.utils import get_custom_request_headers
 
 router = APIRouter()
 
@@ -92,7 +93,8 @@ class deepQueryResponse(BaseModel):
 @handle_endpoint_error("deepQuery")
 async def deep_query_post(
     endpoint_request: deepQueryRequest,
-    auth: str = Depends(authenticate)
+    auth: str = Depends(authenticate),
+    custom_headers: dict = Depends(get_custom_request_headers)
 ):
     """Process a a complex analysis question using deepQuery. This endpoint returns the analysis answer along with metadata that can be used for report generation
     in a separate endpoint call to generateDeepQueryReport.
@@ -140,13 +142,14 @@ async def deep_query_post(
         logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
 
-    vector_search_tables, sample_data, timings, error_message = await sdk_ai_tools.get_relevant_tables(
+    vector_search_tables, sample_data, timings, error_message = await ai_tools.get_relevant_tables(
         query=endpoint_request.question,
         vector_store=vector_store,
         sample_data_vector_store=sample_data_vector_store,
         vdb_list=endpoint_request.vdp_database_names,
         tag_list=endpoint_request.vdp_tag_names,
         auth=auth,
+        custom_headers=custom_headers,
         vector_search_k=endpoint_request.vector_search_k,
         use_views=endpoint_request.use_views,
         expand_set_views=endpoint_request.expand_set_views,
@@ -155,7 +158,7 @@ async def deep_query_post(
     )
 
     # Format schema text using the same function as answerQuestion.py
-    formatted_schema = sdk_ai_tools.format_schema_text(
+    formatted_schema = ai_tools.format_schema_text(
         vector_search_tables=vector_search_tables,
         filtered_tables=[],
         sample_data=sample_data,
@@ -190,7 +193,8 @@ async def deep_query_post(
         execution_model=endpoint_request.execution_model,
         vdp_database_names=endpoint_request.vdp_database_names,
         vdp_tag_names=endpoint_request.vdp_tag_names,
-        allow_external_associations=endpoint_request.allow_external_associations
+        allow_external_associations=endpoint_request.allow_external_associations,
+        custom_headers=custom_headers
     )
 
     total_time = time.time() - start_time

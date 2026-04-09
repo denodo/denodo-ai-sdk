@@ -10,6 +10,8 @@ import remarkGfm from "remark-gfm";
 import { CSVLink } from "react-csv";
 import "./ToolBlocks.css";
 
+const assetBaseUrl = import.meta.env.BASE_URL;
+
 const ToolBlocks = ({
   blocks,
   result,
@@ -61,6 +63,7 @@ const ToolBlocks = ({
   const renderToolIcons = (toolCall) => {
     if (toolCall.status !== "finished" && toolCall.status !== "error") return null;
     const artifact = toolCall.artifact || {};
+    const fullExecutionResult = artifact.execution_result?.full;
     const icons = [];
 
     const handleToolClick = (extra = {}) => {
@@ -84,7 +87,7 @@ const ToolBlocks = ({
           container={resultsContainerRef?.current}
         >
           <img
-            src="favicon.ico"
+            src={`${assetBaseUrl}tools/data_query/denodo_icon_black.svg`}
             alt="Denodo Icon"
             width="20"
             height="20"
@@ -102,7 +105,7 @@ const ToolBlocks = ({
           />
         </OverlayTrigger>
       );
-      if (artifact.execution_result) {
+      if (fullExecutionResult) {
         icons.push(
           <OverlayTrigger
             key="table"
@@ -111,14 +114,20 @@ const ToolBlocks = ({
             overlay={(props) => renderTooltip(props, "View execution result")}
             container={resultsContainerRef?.current}
           >
-            <img
-              src="table.png"
-              alt="View execution result"
-              width="20"
-              height="20"
-              className="ms-2 cursor-pointer"
-              onClick={() => onOpenTable(artifact.execution_result)}
-            />
+            <button
+              type="button"
+              className="ms-2 p-0 border-0 bg-transparent"
+              onClick={() => onOpenTable(fullExecutionResult)}
+              aria-label="View execution result"
+            >
+              <img
+                src={`${assetBaseUrl}tools/data_query/table.png`}
+                alt="View execution result"
+                width="20"
+                height="20"
+                className="cursor-pointer"
+              />
+            </button>
           </OverlayTrigger>
         );
         icons.push(
@@ -130,12 +139,12 @@ const ToolBlocks = ({
             container={resultsContainerRef?.current}
           >
             <CSVLink
-              data={parseApiResponseToCsv(artifact.execution_result)}
+              data={parseApiResponseToCsv(fullExecutionResult)}
               filename={"denodo_data.csv"}
               className="csv-link"
               target="_blank"
             >
-              <img src="export.png" alt="Export CSV" width="20" height="20" className="ms-2" />
+              <img src={`${assetBaseUrl}tools/data_query/csv_export.png`} alt="Export CSV" width="20" height="20" className="ms-2" />
             </CSVLink>
           </OverlayTrigger>
         );
@@ -154,7 +163,7 @@ const ToolBlocks = ({
             container={resultsContainerRef?.current}
           >
             <img
-              src="graph.png"
+              src={`${assetBaseUrl}tools/data_query/graph.png`}
               alt="View Graph"
               width="20"
               height="20"
@@ -176,7 +185,7 @@ const ToolBlocks = ({
           container={resultsContainerRef?.current}
         >
           <img
-            src="favicon.ico"
+            src={`${assetBaseUrl}tools/metadata_query/denodo_icon_black.svg`}
             alt="Denodo Icon"
             width="20"
             height="20"
@@ -197,7 +206,7 @@ const ToolBlocks = ({
           container={resultsContainerRef?.current}
         >
           <img
-            src="favicon.ico"
+            src={`${assetBaseUrl}tools/deep_query/denodo_icon_black.svg`}
             alt="Denodo Icon"
             width="20"
             height="20"
@@ -228,7 +237,7 @@ const ToolBlocks = ({
               container={resultsContainerRef?.current}
             >
               <img
-                src="pdf.svg"
+                src={`${assetBaseUrl}tools/deep_query/deepquery_pdf.svg`}
                 alt="Generate PDF Report"
                 width="20"
                 height="20"
@@ -286,7 +295,7 @@ const ToolBlocks = ({
           container={resultsContainerRef?.current}
         >
           <img
-            src="book.png"
+            src={`${assetBaseUrl}tools/knowledge_query/book.png`}
             alt="Knowledge Base"
             width="20"
             height="20"
@@ -310,11 +319,7 @@ const ToolBlocks = ({
 
   const renderToolBox = (toolCall) => {
     const isExpanded = !!expandedTools[toolCall.toolCallId];
-    const artifact = toolCall.artifact || {};
-    const toolOutput = 
-      artifact.execution_result ||
-      artifact.answer ||
-      toolCall.contentToLLM;
+    const toolOutput = toolCall.contentToLLM;
     const outputString = toolOutput 
       ? (typeof toolOutput === 'object' ? JSON.stringify(toolOutput, null, 2) : String(toolOutput))
       : "";

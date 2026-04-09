@@ -24,6 +24,7 @@ from api.utils.sdk_utils import (
     handle_endpoint_error, authenticate, delete_by_db_or_tag,
     check_metadata_user_permission
 )
+from utils.utils import get_custom_request_headers
 
 router = APIRouter()
 
@@ -45,7 +46,11 @@ class deleteMetadataResponse(BaseModel):
     tags=['Vector Store']
 )
 @handle_endpoint_error("deleteMetadata")
-async def deleteMetadata(endpoint_request: deleteMetadataRequest = Depends(), auth: str = Depends(authenticate)):
+async def deleteMetadata(
+    endpoint_request: deleteMetadataRequest = Depends(),
+    auth: str = Depends(authenticate),
+    custom_headers: dict = Depends(get_custom_request_headers)
+):
     """
     Deletes views from the vector store based on database names or tag names.
 
@@ -59,7 +64,7 @@ async def deleteMetadata(endpoint_request: deleteMetadataRequest = Depends(), au
         raise HTTPException(status_code=403, detail="You do not have authorization to use the vectorization endpoints.")
 
     try:
-        allowed_view_ids = await get_allowed_view_ids(auth=auth)
+        allowed_view_ids = await get_allowed_view_ids(auth=auth, custom_headers=custom_headers)
         allowed_view_ids = [str(view_id) for view_id in allowed_view_ids]
     except DataCatalogAuthError as e:
         raise HTTPException(status_code=401, detail=f"Authentication failed during deleteMetadata: {str(e)}") from e

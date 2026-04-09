@@ -1,9 +1,9 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useConfig } from "../contexts/ConfigContext";
 import { actionTypes } from "../reducers/chatReducer";
 import useToolSelector from "./useToolSelector";
 
-const useQuestionForm = (currentQuestion, setCurrentQuestion, results, dispatch, sdk, isAuthenticated) => {
+const useQuestionForm = (currentQuestion, setCurrentQuestion, results, dispatch, sdk, isAuthenticated, selectedChatbot) => {
   const { config } = useConfig();
   const { isLoading, processQuestion, cancelDeepQuery, runningDeepQueries } = sdk;
 
@@ -17,6 +17,14 @@ const useQuestionForm = (currentQuestion, setCurrentQuestion, results, dispatch,
   const [lastToolRequest, setLastToolRequest] = useState(null);
 
   const textInputRef = useRef(null);
+
+  useEffect(() => {
+    setSearchFilters({
+      databases: [],
+      tags: [],
+    });
+    setAllowExternalAssociations(true);
+  }, [selectedChatbot]);
 
   const isDeepQueryRunning =
     config.enable_deep_query && lastRequestId !== null && runningDeepQueries.includes(lastRequestId);
@@ -78,26 +86,21 @@ const useQuestionForm = (currentQuestion, setCurrentQuestion, results, dispatch,
     setCurrentQuestion("");
   };
 
-  const handleSubmit = (event) => {
-    event.preventDefault();
-    submitQuestion(currentQuestion);
+  const handleSubmit = (event, forceType = null) => {
+    if (event && event.preventDefault) event.preventDefault();
+    submitQuestion(currentQuestion, forceType);
   };
 
-  const handleDeepQuerySubmit = (event) => {
-    event.preventDefault();
-    submitQuestion(currentQuestion, "deep_query");
-  };
-
-  const handleKeyDown = (event) => {
+  const handleKeyDown = (event, forceType = null) => {
     if (event.key === "Enter" && !event.shiftKey) {
       if (!isAnyQueryRunning) {
         event.preventDefault();
-        handleSubmit(event);
+        handleSubmit(event, forceType);
       }
     }
   };
 
-  const handleSendClick = (event) => {
+  const handleSendClick = (event, forceType = null) => {
     if (!isAuthenticated || isAnyQueryRunning) return;
     
     if (!currentQuestion.trim()) {
@@ -105,18 +108,7 @@ const useQuestionForm = (currentQuestion, setCurrentQuestion, results, dispatch,
       return;
     }
     
-    handleSubmit(event);
-  };
-
-  const handleDeepQueryClick = (event) => {
-    if (!isAuthenticated || isAnyQueryRunning) return;
-    
-    if (!currentQuestion.trim()) {
-      textInputRef.current?.focus();
-      return;
-    }
-    
-    handleDeepQuerySubmit(event);
+    handleSubmit(event, forceType);
   };
 
   const handleCancelDeepQuery = () => {
@@ -139,10 +131,8 @@ const useQuestionForm = (currentQuestion, setCurrentQuestion, results, dispatch,
     handleQuestionChange,
     handleFilterSave,
     handleSubmit,
-    handleDeepQuerySubmit,
     handleKeyDown,
     handleSendClick,
-    handleDeepQueryClick,
     handleCancelDeepQuery,
     lastToolRequest,
     config

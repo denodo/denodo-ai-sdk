@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import PropTypes from "prop-types";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import Card from "react-bootstrap/Card";
@@ -80,7 +81,7 @@ const ChatItem = ({
   };
 
   const handleOpenTable = (data) => {
-    const d = data || result.execution_result;
+    const d = data || result.execution_result?.full;
     if (!d) return;
     setTableData(d);
     setShowTableModal(true);
@@ -239,7 +240,7 @@ const ChatItem = ({
         <div className="w-70 d-flex justify-content-end">
           <Card
             style={{
-              backgroundColor: "transparent",
+              backgroundColor: "#ffffff",
               borderRadius: "1.25em",
               color: "#112533",
               boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
@@ -261,11 +262,11 @@ const ChatItem = ({
               result.isLoading ? "card-loading-pulse" : ""
             }`}
             style={{
-              backgroundColor: "transparent",
+              backgroundColor: "#ffffff",
               color: "#112533",
               borderRadius: "1.25em",
               boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
-              borderColor: result.isError ? "#dc3545" : undefined, // Add red border on error
+              borderColor: result.isError ? "#dc3545" : undefined,
               borderWidth: result.isError ? "2px" : undefined
             }}
             data-result-index={index}
@@ -313,3 +314,18 @@ const ChatItem = ({
 };
 
 export default ChatItem;
+
+ChatItem.propTypes = {
+  result: PropTypes.shape({
+    execution_result: PropTypes.shape({
+      full: PropTypes.object,
+    }),
+  }).isRequired,
+  index: PropTypes.number,
+  dispatch: PropTypes.func,
+  setCurrentQuestion: PropTypes.func,
+  setQuestionType: PropTypes.func,
+  onGenerateReport: PropTypes.func,
+  isGeneratingReport: PropTypes.bool,
+  resultsContainerRef: PropTypes.object,
+};

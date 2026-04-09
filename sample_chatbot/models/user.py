@@ -16,6 +16,7 @@ from sample_chatbot.engine import ChatbotEngine
 from sample_chatbot.utils.helpers import setup_user_details
 from sample_chatbot.utils.csv_utils import csv_to_documents, validate_csv_path, get_safe_source_name
 
+
 class User(UserMixin):
     """
     User model for Flask-Login integration.
@@ -49,9 +50,10 @@ class User(UserMixin):
         self._unstructured_index_name = f"unstructured_{safe_username}_chatbot"
 
         # Chatbot
+        self.agent_id = config.id
         self.chatbot = None
-        self.denodo_tables = None # Preview of some of the views the user has access to
-        self.custom_instructions = ""
+        self.denodo_tables = None  # Preview of some of the views the user has access to
+        self.custom_instructions = config.custom_instructions
         self.user_details = ""
         self.thread_id = None
 
@@ -64,9 +66,10 @@ class User(UserMixin):
         self.chatbot_llm_preferences = {}
         self.ai_sdk_base_llm_preferences = {}
         self.ai_sdk_thinking_llm_preferences = {}
+        self.use_base_llm_for_execution = config.use_base_llm_for_execution
 
         # General AI SDK preferences
-        self.check_ambiguity = True
+        self.check_ambiguity = config.check_ambiguity
 
         # Cached AI SDK configuration (populated at login from /getAISDKInfo)
         self.ai_sdk_info = None
@@ -99,7 +102,8 @@ class User(UserMixin):
             UniformVectorStore instance
         """
         if self.unstructured_vector_store is None:
-            logging.info(f"[User] Creating unstructured vector store for user '{self.id}': {self._unstructured_index_name}")
+            logging.info(
+                f"[User] Creating unstructured vector store for user '{self.id}': {self._unstructured_index_name}")
             embeddings = UniformEmbeddings(
                 self._config.embeddings_provider,
                 self._config.embeddings_model
@@ -326,7 +330,8 @@ class User(UserMixin):
                 # Validate path still exists
                 path_valid, error = validate_csv_path(path)
                 if not path_valid:
-                    logging.warning(f"[User] Source '{source_name}' documents exist in vector store, but CSV file not found at path: {error}")
+                    logging.warning(
+                        f"[User] Source '{source_name}' documents exist in vector store, but CSV file not found at path: {error}")
 
                 csv_metadata = {
                     "source_name": source_name,
@@ -352,7 +357,8 @@ class User(UserMixin):
 
                 if path_valid:
                     # File exists but not vectorized - skip it, will appear as "scanned"
-                    logging.info(f"[User] Source '{source_name}' file exists but not vectorized, skipping (will appear as scanned)")
+                    logging.info(
+                        f"[User] Source '{source_name}' file exists but not vectorized, skipping (will appear as scanned)")
                     skipped.append({
                         "source_name": source_name,
                         "reason": "File exists but not vectorized",
@@ -392,67 +398,137 @@ class User(UserMixin):
         else:
             self.unstructured_vector_store_description = ""
 
-    def set_custom_instructions(self):
+    def set_custom_instructions(self, user_details='', custom_instructions=''):
         """Update custom instructions with user details."""
-        self.custom_instructions = self.custom_instructions + "\n" + setup_user_details(
-            self.user_details, username=self.id
-        )
+        self.custom_instructions = (
+                self._config.custom_instructions + "\n" + custom_instructions + "\n" + setup_user_details(
+                user_details, username=self.id
+            )).strip()
+        self.user_details = user_details
         # Reset the chatbot to create a new one with updated context
         self.chatbot = None
 
-    def get_or_create_chatbot(self, llm):
+    def update_llm_preferences(self, llm_settings):
+        """Updates LLM preferences from a dictionary containing the configurations."""
+        def validate_temperature(temp):
+            if temp is not None and temp != '':
+                temp_float = float(temp)
+                if not (0.0 <= temp_float <= 2.0):
+                    raise ValueError("Temperature must be between 0.0 and 2.0")
+                return temp_float
+            return None
+
+        def validate_max_tokens(tokens):
+            if tokens is not None and tokens != '':
+                tokens_int = int(tokens)
+                if not (1024 <= tokens_int <= 20000):
+                    raise ValueError("Max tokens must be between 1024 and 20000")
+                return tokens_int
+            return None
+
+        def parse_and_validate(llm_data):
+            if not llm_data or not any(llm_data.values()):
+                return None
+            prefs = {
+                'provider': llm_data.get('provider') or None,
+                'model': llm_data.get('model') or None,
+                'temperature': validate_temperature(llm_data.get('temperature')),
+                'max_tokens': validate_max_tokens(llm_data.get('max_tokens'))
+            }
+            # Remove None values
+            return {k: v for k, v in prefs.items() if v is not None}
+
+        # Update if valid data is provided
+        chatbot_prefs = parse_and_validate(llm_settings.get('chatbot_llm'))
+        if chatbot_prefs is not None:
+            self.chatbot_llm_preferences = chatbot_prefs
+
+        base_prefs = parse_and_validate(llm_settings.get('ai_sdk_base_llm'))
+        if base_prefs is not None:
+            self.ai_sdk_base_llm_preferences = base_prefs
+
+        thinking_prefs = parse_and_validate(llm_settings.get('ai_sdk_thinking_llm'))
+        if thinking_prefs is not None:
+            self.ai_sdk_thinking_llm_preferences = thinking_prefs
+
+        # Update check_ambiguity preference
+        check_ambiguity = llm_settings.get('check_ambiguity')
+        if check_ambiguity is not None:
+           self.check_ambiguity = bool(check_ambiguity)
+
+        # Update use_base_llm_for_execution preference
+        use_base_llm_for_execution = llm_settings.get('use_base_llm_for_execution')
+        if use_base_llm_for_execution is not None:
+            self.use_base_llm_for_execution = bool(use_base_llm_for_execution)
+
+
+    def get_or_create_chatbot(self):
         """
         Get existing chatbot or create a new one.
-
-        Args:
-            llm: Default UniformLLM instance to use if no user preferences
 
         Returns:
             ChatbotEngine instance
         """
         if not self.chatbot:
             # Use user's chatbot LLM preferences or fall back to global defaults
-            chatbot_llm = self._get_chatbot_llm(llm)
+            chatbot_llm = self.get_chatbot_llm()
 
             # Prepare LLM parameters for AI SDK tools
-            ai_sdk_llm_params = {}
+            base_prefs = self.ai_sdk_base_llm_preferences or {}
+            base_provider = base_prefs.get('provider') or getattr(self._config, 'ai_sdk_base_llm_provider', None)
+            base_model = base_prefs.get('model') or getattr(self._config, 'ai_sdk_base_llm_model', None)
+            base_temp = base_prefs.get('temperature') if base_prefs.get('temperature') is not None else getattr(
+                self._config, 'ai_sdk_base_llm_temperature', None)
+            base_tokens = base_prefs.get('max_tokens') or getattr(self._config, 'ai_sdk_base_llm_max_tokens', None)
 
-            if self.ai_sdk_base_llm_preferences:
-                if self.ai_sdk_base_llm_preferences.get('provider'):
-                    ai_sdk_llm_params['llm_provider'] = self.ai_sdk_base_llm_preferences['provider']
-                if self.ai_sdk_base_llm_preferences.get('model'):
-                    ai_sdk_llm_params['llm_model'] = self.ai_sdk_base_llm_preferences['model']
-                if self.ai_sdk_base_llm_preferences.get('temperature') is not None:
-                    ai_sdk_llm_params['llm_temperature'] = self.ai_sdk_base_llm_preferences['temperature']
-                if self.ai_sdk_base_llm_preferences.get('max_tokens'):
-                    ai_sdk_llm_params['llm_max_tokens'] = self.ai_sdk_base_llm_preferences['max_tokens']
+            ai_sdk_llm_params = {}
+            if base_provider:
+                ai_sdk_llm_params['llm_provider'] = base_provider
+            if base_model:
+                ai_sdk_llm_params['llm_model'] = base_model
+            if base_temp is not None:
+                ai_sdk_llm_params['llm_temperature'] = base_temp
+            if base_tokens:
+                ai_sdk_llm_params['llm_max_tokens'] = base_tokens
+
+            thinking_prefs = self.ai_sdk_thinking_llm_preferences or {}
+            thinking_provider = thinking_prefs.get('provider') or getattr(self._config, 'ai_sdk_thinking_llm_provider',
+                                                                          None)
+            thinking_model = thinking_prefs.get('model') or getattr(self._config, 'ai_sdk_thinking_llm_model', None)
+            thinking_temp = thinking_prefs.get('temperature') if thinking_prefs.get(
+                'temperature') is not None else getattr(self._config, 'ai_sdk_thinking_llm_temperature', None)
+            thinking_tokens = thinking_prefs.get('max_tokens') or getattr(self._config,
+                                                                          'ai_sdk_thinking_llm_max_tokens', None)
 
             thinking_llm_params = {}
-            if self.ai_sdk_thinking_llm_preferences:
-                if self.ai_sdk_thinking_llm_preferences.get('provider'):
-                    thinking_llm_params['thinking_llm_provider'] = self.ai_sdk_thinking_llm_preferences['provider']
-                if self.ai_sdk_thinking_llm_preferences.get('model'):
-                    thinking_llm_params['thinking_llm_model'] = self.ai_sdk_thinking_llm_preferences['model']
-                if self.ai_sdk_thinking_llm_preferences.get('temperature') is not None:
-                    thinking_llm_params['thinking_llm_temperature'] = self.ai_sdk_thinking_llm_preferences['temperature']
-                if self.ai_sdk_thinking_llm_preferences.get('max_tokens'):
-                    thinking_llm_params['thinking_llm_max_tokens'] = self.ai_sdk_thinking_llm_preferences['max_tokens']
+            if thinking_provider:
+                thinking_llm_params['thinking_llm_provider'] = thinking_provider
+            if thinking_model:
+                thinking_llm_params['thinking_llm_model'] = thinking_model
+            if thinking_temp is not None:
+                thinking_llm_params['thinking_llm_temperature'] = thinking_temp
+            if thinking_tokens:
+                thinking_llm_params['thinking_llm_max_tokens'] = thinking_tokens
+
 
             ai_sdk_params = {
                 **ai_sdk_llm_params,
                 **thinking_llm_params,
                 'check_ambiguity': self.check_ambiguity,
+                'execution_model': 'base' if self._config.use_base_llm_for_execution else 'thinking'
             }
+
+            data_query_limit_max = self.ai_sdk_info['vql_execute_rows_limit']
+            ai_sdk_params['vql_execute_rows_limit'] = data_query_limit_max
 
             self.chatbot = ChatbotEngine(
                 llm=chatbot_llm,
-                llm_response_rows_limit=self._config.llm_response_rows_limit,
                 system_prompt=self._config.system_prompt,
                 api_host=self._config.ai_sdk_host,
                 username=self.id,
                 password=self.password,
-                vector_store_provider=self._config.vector_store_provider,
-                vector_store=self.unstructured_vector_store,
+                vector_store_provider= self._config.vector_store_provider if self._config.unstructured_mode else None,
+                vector_store=self.unstructured_vector_store if self._config.unstructured_mode else None,
                 denodo_tables=self.denodo_tables,
                 user_details=self.user_details,
                 enable_deepquery=self._config.deepquery_enabled,
@@ -461,13 +537,14 @@ class User(UserMixin):
                 thread_id=self.thread_id,
                 verify_ssl=self._config.ai_sdk_verify_ssl,
                 ai_sdk_params=ai_sdk_params,
+                data_query_limit_max=data_query_limit_max,
                 auto_graph=self._config.auto_graph,
                 kb_description=self.unstructured_vector_store_description,
                 active_csv_sources=self.active_csv_sources,
             )
         return self.chatbot
 
-    def _get_chatbot_llm(self, default_llm):
+    def get_chatbot_llm(self):
         """Get LLM instance for chatbot based on user preferences or global defaults."""
         if self.chatbot_llm_preferences:
             provider = self.chatbot_llm_preferences.get('provider', self._config.llm_provider)
@@ -482,5 +559,24 @@ class User(UserMixin):
                 max_tokens=max_tokens
             )
         else:
-            # Use global LLM instance
-            return default_llm
+            # Use chatbot configuration LLM instance
+            return self._config.llm
+
+    def set_agent_config(self, config):
+
+        self._config = config
+
+        # Chatbot
+        self.agent_id = config.id
+        self.chatbot = None
+        self.denodo_tables = None  # Preview of some of the views the user has access to
+        self.custom_instructions = config.custom_instructions
+        self.user_details = ""
+        self.thread_id = None
+
+        self.chatbot_llm_preferences = {}
+        self.ai_sdk_base_llm_preferences = {}
+        self.ai_sdk_thinking_llm_preferences = {}
+
+        self.check_ambiguity = config.check_ambiguity
+        self.use_base_llm_for_execution = config.use_base_llm_for_execution

@@ -1,11 +1,14 @@
 import React, { useState } from "react";
+import PropTypes from "prop-types";
 import Form from "react-bootstrap/Form";
 import Button from "react-bootstrap/Button";
 import Spinner from "react-bootstrap/Spinner";
 import Navbar from "react-bootstrap/Navbar";
 import "./LoginPage.css";
 
-const LoginPage = ({ onSignIn, renderLogo }) => {
+const assetBaseUrl = import.meta.env.BASE_URL;
+
+const LoginPage = ({ onSignIn, renderLogo, showBrandAsk = true }) => {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -39,7 +42,7 @@ const LoginPage = ({ onSignIn, renderLogo }) => {
     <div
       className="login-container d-flex justify-content-center align-items-center vh-100"
       style={{
-        backgroundImage: `url(${process.env.PUBLIC_URL}/header_background.png)`,
+        backgroundImage: `url(${assetBaseUrl}header/header_background.png)`,
       }}
     >
       <div className="login-box p-4 rounded">
@@ -48,7 +51,9 @@ const LoginPage = ({ onSignIn, renderLogo }) => {
           className="flex-grow-1 text-nowrap d-flex align-items-baseline justify-content-center"
         >
           {renderLogo()}
-          <span className="brand-ask ms-2">ASK A QUESTION</span>
+          {showBrandAsk && (
+            <span className="brand-ask ms-2">ASK A QUESTION</span>
+          )}
         </Navbar.Brand>
         <Form onSubmit={handleSubmit}>
           <Form.Group className="mb-3">
@@ -98,6 +103,12 @@ const LoginPage = ({ onSignIn, renderLogo }) => {
       </div>
     </div>
   );
+};
+
+LoginPage.propTypes = {
+  onSignIn: PropTypes.func.isRequired,
+  renderLogo: PropTypes.func.isRequired,
+  showBrandAsk: PropTypes.bool,
 };
 
 export default LoginPage;

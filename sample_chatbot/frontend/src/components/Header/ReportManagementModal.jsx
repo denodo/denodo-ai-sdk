@@ -76,7 +76,7 @@ const ReportManagementModal = () => {
       <Modal.Body>
         {reports.length === 0 ? (
           <div className="text-center py-4">
-            <p>No reports generated yet. Use the DeepQuery button to generate a report.</p>
+            <p>No reports generated yet. Use DeepQuery to generate a report.</p>
           </div>
         ) : (
           <>

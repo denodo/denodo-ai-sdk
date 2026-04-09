@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useRef } from "react";
 import PropTypes from 'prop-types';
 import Container from "react-bootstrap/Container";
 import Navbar from "react-bootstrap/Navbar";
@@ -6,14 +6,16 @@ import Button from "react-bootstrap/Button";
 import Badge from "react-bootstrap/Badge";
 import Nav from 'react-bootstrap/Nav';
 import NavDropdown from 'react-bootstrap/NavDropdown';
-import axios from "axios";
 import VectorDBSyncModal from './VectorDBSyncModal';
-import ChatbotSettingsModal from './ChatbotSettingsModal';
-import AISDKSettingsModal from './AISDKSettingsModal';
-import CustomInstructionsModal from './CustomInstructionsModal';
+import SettingsModal from './SettingsModal';
+import ProfileModal from './ProfileModal';
 import CSVManagerModal from './CSVManagerModal/CSVManagerModal';
 import { useReport } from '../../contexts/ReportContext';
+import { useConfig } from '../../contexts/ConfigContext';
+import api from "../../api/client";
 import './Header.css';
+
+const assetBaseUrl = import.meta.env.BASE_URL;
 
 const Header = ({ 
   isAuthenticated, 
@@ -23,19 +25,25 @@ const Header = ({
   showCSVManager,
   setShowCSVManager,
   renderLogo,
+  showBrandAsk = true,
   syncedResources,
   userSyncPermissions,
   onResourcesUpdate,
-  onCSVSourcesChange
+  onCSVSourcesChange,
+  toggleSidebar,
+  isSidebarOpen,
+  selectedChatbot,
+  globalEnabled = false,
+  onSettingsApplied,
+  isSwitchingAgent
 }) => {
   const [showVectorDBSync, setShowVectorDBSync] = useState(false);
-  const [showChatbotSettings, setShowChatbotSettings] = useState(false);
-  const [showAISDKSettings, setShowAISDKSettings] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showToolsDropdown, setShowToolsDropdown] = useState(false);
   const [showAdminDropdown, setShowAdminDropdown] = useState(false);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
-  const [config, setConfig] = useState({ has_ai_sdk_credentials: false, unstructured_mode: false, user_edit_llm: false, sync_timeout: undefined });
+  const { config } = useConfig();
   const { reports, setIsModalOpen } = useReport();
 
   // Hover-delay timers for dropdowns
@@ -43,6 +51,24 @@ const Header = ({
   const adminTimerRef = useRef(null);
   const userTimerRef = useRef(null);
   const HOVER_DELAY_MS = 100;
+
+  const isWelcomeScreen = !selectedChatbot;
+  const isGlobalChat = selectedChatbot && selectedChatbot.isGlobal;
+  const isSpecializedChat = selectedChatbot && !selectedChatbot.isGlobal;
+
+  const canShowAdvancedOptions = (globalEnabled && (isWelcomeScreen || isGlobalChat)) || isSpecializedChat;
+
+  const showDeepQuery = canShowAdvancedOptions && config.enable_deep_query;
+  const showKnowledgeBase = canShowAdvancedOptions && config.unstructured_mode; 
+
+  const showVectorDBManager = config.allow_sync && (globalEnabled && (isWelcomeScreen || isGlobalChat)) && (config.has_ai_sdk_credentials || userSyncPermissions);
+
+  const hasToolsItems = showDeepQuery || showKnowledgeBase || showVectorDBManager;
+  const showToolsMenu = hasToolsItems;
+
+  const canEditLLM = canShowAdvancedOptions && config.user_edit_llm;
+  const canAddCustomInstructions = canShowAdvancedOptions && config.can_add_custom_instructions;
+  const showAdminMenu = !isWelcomeScreen && (canEditLLM || canAddCustomInstructions);
 
   const clearTimer = (ref) => {
     if (ref.current) {
@@ -61,7 +87,7 @@ const Header = ({
   };
 
   const handleEnterWhich = (which) => {
-    // Cancel all timers and immediately show the hovered dropdown, closing others
+    if (isSwitchingAgent) return;
     clearTimer(toolsTimerRef);
     clearTimer(adminTimerRef);
     clearTimer(userTimerRef);
@@ -81,7 +107,7 @@ const Header = ({
   };
 
   const handleLeaveWhich = (which) => {
-    // Start a short timer to close only the hovered dropdown
+    if (isSwitchingAgent) return;
     if (which === 'tools') {
       clearTimer(toolsTimerRef);
       toolsTimerRef.current = setTimeout(() => setShowToolsDropdown(false), HOVER_DELAY_MS);
@@ -95,34 +121,17 @@ const Header = ({
   };
 
   const handleToggleWhich = (which, isOpen) => {
-    // Click toggles should replace the open dropdown immediately
+    if (isSwitchingAgent) return;
     closeAllNow();
-    if (!isOpen) return; // if clicking to close, we already closed
+    if (!isOpen) return;
     if (which === 'tools') setShowToolsDropdown(true);
     else if (which === 'admin') setShowAdminDropdown(true);
     else setShowUserDropdown(true);
   };
 
-
-  useEffect(() => {
-    // Fetch configuration when component mounts
-    const fetchConfig = async () => {
-      try {
-        const response = await axios.get('api/config');
-        setConfig(response.data);
-      } catch (error) {
-        console.error('Error fetching config:', error);
-      }
-    };
-
-    if (isAuthenticated) {
-      fetchConfig();
-    }
-  }, [isAuthenticated]);
-
   const handleLogout = async () => {
     try {
-      await axios.post("logout");
+      await api.post("logout");
       handleClearResults();
       setIsAuthenticated(false);
     } catch (error) {
@@ -152,65 +161,98 @@ const Header = ({
 
   const badgeProps = getBadgeProps();
 
+  const agentName = selectedChatbot ? (selectedChatbot.isGlobal ? 'General Chat' : selectedChatbot.name) : 'General Chat';
+  const settingsTitle = agentName.length > 20 ? 'Custom Agent Settings' : `${agentName} Settings`;
+
   return (
     <>
-      <div
-        className="background-header background-header--default"
-        style={{ backgroundImage: `url(${process.env.PUBLIC_URL}/header_background.png)` }}
-      />
-      <Navbar className="navbar-transparent" data-bs-theme="dark" fixed="top">
-        <Container fluid className="d-flex justify-content-between align-items-center">
-          <Navbar.Brand href="#home" className="flex-grow-1 text-nowrap d-flex align-items-baseline brand-spacing">
-            {renderLogo()}
-            <span className="brand-ask ms-2">ASK A QUESTION</span>
-          </Navbar.Brand>
-          {isAuthenticated && (
-            <div className="position-absolute start-50 translate-middle-x">
-              <Button
-                variant="light"
-                bsPrefix="btn"
-                size="sm"
-                onClick={handleClearResults}
-                style={{ backgroundColor: '#2D3E4B', borderColor: '#2D3E4B', color: 'white' }}
-              >
-                Clear results
-              </Button>
-            </div>
-          )}
-          <div>
-            {isAuthenticated && (
-                <Nav className="align-items-center">
-                  <NavDropdown
-                    title="Tools"
-                    id="tools-nav-dropdown"
-                    align={config.user_edit_llm ? 'start' : 'end'} 
-                    className="custom-nav-dropdown"
-                    show={showToolsDropdown}
-                    onMouseEnter={() => handleEnterWhich('tools')}
-                    onMouseLeave={() => handleLeaveWhich('tools')}
-                    onToggle={(isOpen) => handleToggleWhich('tools', isOpen)}
-                  >
-                    <NavDropdown.Item onClick={() => setIsModalOpen(true)}>
-                      DeepQuery Reports
-                      {reports.length > 0 && (
-                        <Badge 
-                          bg={badgeProps.bg} 
-                          text={badgeProps.text} 
-                          className="ms-2"
-                        >
-                          {reports.length}
-                        </Badge>
-                      )}
-                    </NavDropdown.Item>
-                    {config.unstructured_mode && (
-                      <NavDropdown.Item onClick={onOpenCSVManager}>Knowledge Base Manager</NavDropdown.Item>
-                    )}
-                    {config.allow_sync && (config.has_ai_sdk_credentials || userSyncPermissions) && (
-                      <NavDropdown.Item onClick={() => setShowVectorDBSync(true)}>Vector DB Manager</NavDropdown.Item>
-                    )}
-                  </NavDropdown>
+      <div 
+        style={{
+          backgroundImage: `url(${assetBaseUrl}header/header_background.png)`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+          width: '100%',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.08)'
+        }}
+      >
+        <Navbar className="navbar-transparent position-relative" data-bs-theme="dark" style={{ height: '76px' }}>
+          <Container fluid className="d-flex justify-content-between align-items-center">
+            <div className="d-flex align-items-center flex-grow-1">
+              {isAuthenticated && (
+                <Button
+                  variant="link"
+                  onClick={toggleSidebar}
+                  className="text-light p-0 me-3 d-flex align-items-center justify-content-center"
+                  style={{
+                    textDecoration: 'none',
+                    border: 'none',
+                    visibility: isSidebarOpen ? 'hidden' : 'visible',
+                    pointerEvents: isSidebarOpen ? 'none' : 'auto',
+                    opacity: isSwitchingAgent ? 0.5 : 1
+                  }}
+                  disabled={isSwitchingAgent}
+                  title="Open sidebar"
+                >
+                  <i className="bi bi-list" style={{ fontSize: '1.5rem', lineHeight: 1 }}></i>
+                </Button>
+              )}
 
-                  {config.user_edit_llm && (
+              <Navbar.Brand className="text-nowrap d-flex align-items-baseline brand-spacing m-0 px-0" style={{ paddingBottom: '5px' }}>
+                {renderLogo()}
+                {showBrandAsk && (
+                  <span className="brand-ask ms-2">ASK A QUESTION</span>
+                )}
+              </Navbar.Brand>
+            </div>
+
+            {isAuthenticated && selectedChatbot && !selectedChatbot.isGlobal && (
+              <div className="position-absolute top-50 start-50 translate-middle d-none d-md-flex align-items-center justify-content-center" style={{ pointerEvents: 'none' }}>
+                <span className="brand-ask text-light m-0 p-0" style={{ letterSpacing: '0.5px', lineHeight: 1 }}>
+                  {selectedChatbot.name.toUpperCase()}
+                </span>
+              </div>
+            )}
+
+            <div>
+              {isAuthenticated && (
+                  <Nav className="align-items-center">
+
+                    {showToolsMenu && (
+                      <NavDropdown
+                        title="Tools"
+                        id="tools-nav-dropdown"
+                        align="end"
+                        className="custom-nav-dropdown"
+                        show={showToolsDropdown}
+                        onMouseEnter={() => handleEnterWhich('tools')}
+                        onMouseLeave={() => handleLeaveWhich('tools')}
+                        onToggle={(isOpen) => handleToggleWhich('tools', isOpen)}
+                        disabled={isSwitchingAgent}
+                        style={{ opacity: isSwitchingAgent ? 0.5 : 1, pointerEvents: isSwitchingAgent ? 'none' : 'auto' }} // <--- ESTILO VISUAL
+                      >
+                        {showDeepQuery && (
+                          <NavDropdown.Item onClick={() => setIsModalOpen(true)}>
+                            DeepQuery Reports
+                            {reports.length > 0 && (
+                              <Badge bg={badgeProps.bg} text={badgeProps.text} className="ms-2">
+                                {reports.length}
+                              </Badge>
+                            )}
+                          </NavDropdown.Item>
+                        )}
+
+                        {showKnowledgeBase && (
+                          <NavDropdown.Item onClick={onOpenCSVManager}>Knowledge Base Manager</NavDropdown.Item>
+                        )}
+                        
+                        {showVectorDBManager && (
+                          <NavDropdown.Item onClick={() => setShowVectorDBSync(true)}>Vector DB Manager</NavDropdown.Item>
+                        )}
+                      </NavDropdown>
+                    )}
+
+                  {showAdminMenu && (
                     <NavDropdown
                       title="Administration"
                       id="admin-nav-dropdown"
@@ -220,31 +262,38 @@ const Header = ({
                       onMouseEnter={() => handleEnterWhich('admin')}
                       onMouseLeave={() => handleLeaveWhich('admin')}
                       onToggle={(isOpen) => handleToggleWhich('admin', isOpen)}
+                      disabled={isSwitchingAgent}
+                      style={{ opacity: isSwitchingAgent ? 0.5 : 1, pointerEvents: isSwitchingAgent ? 'none' : 'auto' }} // <--- ESTILO VISUAL
                     >
-                      <NavDropdown.Item onClick={() => setShowChatbotSettings(true)}>Chatbot Settings</NavDropdown.Item>
-                      <NavDropdown.Item onClick={() => setShowAISDKSettings(true)}>AI SDK Settings</NavDropdown.Item>
+                      <NavDropdown.Item onClick={() => setShowSettings(true)}>
+                        {settingsTitle}
+                      </NavDropdown.Item>
                     </NavDropdown>
                   )}
 
-                  <NavDropdown
-                    id="user-nav-dropdown"
-                    align="end"
-                    className="user-nav-dropdown"
-                    title={(<span className="user-dropdown-toggle"><img alt="User" src={`${process.env.PUBLIC_URL}/user.png`} className="user-avatar" /></span>)}
-                    show={showUserDropdown}
-                    onMouseEnter={() => handleEnterWhich('user')}
-                    onMouseLeave={() => handleLeaveWhich('user')}
-                    onToggle={(isOpen) => handleToggleWhich('user', isOpen)}
-                  >
-                    <NavDropdown.Item onClick={() => setShowProfile(true)}>Profile</NavDropdown.Item>
-                    <NavDropdown.Divider />
-                    <NavDropdown.Item onClick={handleLogout} className="text-danger">Logout</NavDropdown.Item>
-                  </NavDropdown>
-                </Nav>
-            )}
-          </div>
-        </Container>
-      </Navbar>
+                    <NavDropdown
+                      id="user-nav-dropdown"
+                      align="end"
+                      className="user-nav-dropdown"
+                      title={(<span className="user-dropdown-toggle"><img alt="User" src={`${assetBaseUrl}header/user.png`} className="user-avatar" /></span>)}
+                      show={showUserDropdown}
+                      onMouseEnter={() => handleEnterWhich('user')}
+                      onMouseLeave={() => handleLeaveWhich('user')}
+                      onToggle={(isOpen) => handleToggleWhich('user', isOpen)}
+                      disabled={isSwitchingAgent}
+                      style={{ opacity: isSwitchingAgent ? 0.5 : 1, pointerEvents: isSwitchingAgent ? 'none' : 'auto' }} // <--- ESTILO VISUAL
+                    >
+                      <NavDropdown.Item onClick={() => setShowProfile(true)}>Profile</NavDropdown.Item>
+                      <NavDropdown.Divider />
+                      <NavDropdown.Item onClick={handleLogout} className="text-danger">Logout</NavDropdown.Item>
+                    </NavDropdown>
+                  </Nav>
+              )}
+            </div>
+          </Container>
+        </Navbar>
+      </div>
+
       <VectorDBSyncModal
         show={showVectorDBSync}
         syncTimeout={config.sync_timeout}
@@ -252,25 +301,25 @@ const Header = ({
         syncedResources={syncedResources} 
         onResourcesUpdate={onResourcesUpdate}
       />
-      <ChatbotSettingsModal
-        show={showChatbotSettings}
-        handleClose={() => setShowChatbotSettings(false)}
+      <SettingsModal
+        show={showSettings}
+        handleClose={() => setShowSettings(false)}
         handleClearResults={handleClearResults}
+        selectedChatbot={selectedChatbot}
+        onSettingsApplied={onSettingsApplied}
+        title={settingsTitle} 
       />
-      <AISDKSettingsModal
-        show={showAISDKSettings}
-        handleClose={() => setShowAISDKSettings(false)}
-        handleClearResults={handleClearResults}
-      />
-      <CustomInstructionsModal
+      <ProfileModal
         show={showProfile}
         handleClose={() => setShowProfile(false)}
+        selectedChatbot={selectedChatbot}
       />
       {showCSVManager !== undefined && (
         <CSVManagerModal
           show={showCSVManager}
           handleClose={() => setShowCSVManager(false)}
           onSourcesChange={onCSVSourcesChange}
+          selectedChatbot={selectedChatbot}
         />
       )}
     </>
@@ -286,10 +335,17 @@ Header.propTypes = {
   showCSVManager: PropTypes.bool,
   setShowCSVManager: PropTypes.func,
   renderLogo: PropTypes.func.isRequired,
+  showBrandAsk: PropTypes.bool,
   syncedResources: PropTypes.object,
   userSyncPermissions: PropTypes.bool,
   onResourcesUpdate: PropTypes.func,
-  onCSVSourcesChange: PropTypes.func
+  onCSVSourcesChange: PropTypes.func,
+  toggleSidebar: PropTypes.func,
+  isSidebarOpen: PropTypes.bool,
+  selectedChatbot: PropTypes.object,
+  globalEnabled: PropTypes.bool,
+  onSettingsApplied: PropTypes.func,
+  isSwitchingAgent: PropTypes.bool
 };
 
 export default Header;

@@ -12,6 +12,7 @@
 import os
 import logging
 
+from utils.langfuse import init_langfuse
 from utils.uniformLLM import UniformLLM
 from utils.uniformEmbeddings import UniformEmbeddings
 from utils.uniformVectorStore import UniformVectorStore
@@ -106,6 +107,9 @@ def initialize_default_resources():
     This function is called once at application startup.
     """
     logging.info("Pre-initializing default resources...")
+
+    # Initialize Langfuse
+    init_langfuse()
 
     # Pre-initialize default LLM
     llm_provider = os.getenv("LLM_PROVIDER")

@@ -1,0 +1,39 @@
+from api.prompts import category_detection
+from api.prompts import graph_generation
+from api.prompts import response
+from api.prompts import vql_fixer
+from api.prompts import vql_generation
+from api.prompts import vql_rules
+
+QUERY_TO_VQL_PROMPT = vql_generation.query_to_vql.QUERY_TO_VQL
+
+ANSWER_VIEW_PROMPT = response.answer_view.ANSWER_VIEW
+RELATED_QUESTIONS_PROMPT = response.related_questions.RELATED_QUESTIONS
+
+GENERATE_VISUALIZATION_PROMPT = graph_generation.generate_visualization.GENERATE_VISUALIZATION
+GENERATE_VISUALIZATION_PYTHON_TEMPLATE = graph_generation.generate_visualization_python_template.GENERATE_VISUALIZATION_PYTHON_TEMPLATE
+
+DIRECT_SQL_CATEGORY_PROMPT = category_detection.direct_sql_category.DIRECT_SQL_CATEGORY
+DIRECT_SQL_CATEGORY_NO_AMBIGUITY_PROMPT = category_detection.direct_sql_category_no_ambiguity.DIRECT_SQL_CATEGORY_NO_AMBIGUITY
+DIRECT_METADATA_CATEGORY_PROMPT = category_detection.direct_metadata_category.DIRECT_METADATA_CATEGORY
+SQL_CATEGORY_PROMPT = category_detection.sql_category.SQL_CATEGORY
+SQL_CATEGORY_NO_AMBIGUITY_PROMPT = category_detection.sql_category_no_ambiguity.SQL_CATEGORY_NO_AMBIGUITY
+METADATA_CATEGORY_PROMPT = category_detection.metadata_category.METADATA_CATEGORY
+
+FIX_LIMIT_PROMPT = vql_fixer.fix_limit.FIX_LIMIT
+FIX_OFFSET_PROMPT = vql_fixer.fix_offset.FIX_OFFSET
+QUERY_FIXER_PROMPT = vql_fixer.query_fixer.QUERY_FIXER
+QUERY_REVIEWER_PROMPT = vql_fixer.query_reviewer.QUERY_REVIEWER
+
+VQL_RULES_PROMPT = vql_rules.vql_rules.VQL_RULES
+DATES_VQL_PROMPT = vql_rules.dates_vql.DATES_VQL
+ARITHMETIC_VQL_PROMPT = vql_rules.arithmetic_vql.ARITHMETIC_VQL
+SPATIAL_VQL_PROMPT = vql_rules.spatial_vql.SPATIAL_VQL
+LLM_VQL_PROMPT = vql_rules.llm_vql.LLM_VQL
+VECTOR_VQL_PROMPT = vql_rules.vector_vql.VECTOR_VQL
+JSON_VQL_PROMPT = vql_rules.json_vql.JSON_VQL
+XML_VQL_PROMPT = vql_rules.xml_vql.XML_VQL
+TEXT_VQL_PROMPT = vql_rules.text_vql.TEXT_VQL
+AGGREGATE_VQL_PROMPT = vql_rules.aggregate_vql.AGGREGATE_VQL
+CAST_VQL_PROMPT = vql_rules.cast_vql.CAST_VQL
+WINDOW_VQL_PROMPT = vql_rules.window_vql.WINDOW_VQL

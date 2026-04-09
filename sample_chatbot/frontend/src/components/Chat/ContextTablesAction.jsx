@@ -3,6 +3,8 @@ import Button from "react-bootstrap/Button";
 import OverlayTrigger from "react-bootstrap/OverlayTrigger";
 import Tooltip from "react-bootstrap/Tooltip";
 
+const assetBaseUrl = import.meta.env.BASE_URL;
+
 const renderTooltip = (content) => (
   <Tooltip id="context-tooltip">{content}</Tooltip>
 );
@@ -62,7 +64,7 @@ const ContextTablesAction = ({ tables, vql, dataCatalogUrl, icons, onOpenContext
             className="me-1 mb-1 d-inline-flex align-items-center"
           >
             <img
-              src="view.svg"
+              src={`${assetBaseUrl}denodo_view.svg`}
               alt="View"
               width="16"
               height="16"

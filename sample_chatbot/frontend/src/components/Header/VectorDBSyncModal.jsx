@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { isAxiosError } from 'axios';
 import Modal from 'react-bootstrap/Modal';
 import Button from 'react-bootstrap/Button';
 import Form from 'react-bootstrap/Form';
@@ -7,7 +8,7 @@ import Alert from 'react-bootstrap/Alert';
 import Tabs from 'react-bootstrap/Tabs';
 import Tab from 'react-bootstrap/Tab';
 import ListGroup from 'react-bootstrap/ListGroup';
-import axios from 'axios';
+import api from '../../api/client';
 import OverlayTrigger from 'react-bootstrap/OverlayTrigger';
 import Tooltip from 'react-bootstrap/Tooltip';
 import NotificationToast from "../NotificationToast/NotificationToast";
@@ -88,7 +89,7 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
     const processedIgnoreTags = ignoreTags.split(',').map(tag => tag.trim()).filter(tag => tag);
 
     try {
-      const response = await axios.post('sync_vdbs', {
+      const response = await api.post("sync_vdbs", {
         vdbs: processedVdbs,
         tags: processedTags,
         tags_to_ignore: processedIgnoreTags,
@@ -162,7 +163,7 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
 
     } catch (error) {
       let errorMsg = 'An error occurred during synchronization.';
-      if (axios.isAxiosError(error) && error.code === 'ECONNABORTED') {
+      if (isAxiosError(error) && error.code === 'ECONNABORTED') {
         errorMsg = `The synchronization timeout has been exceeded (${syncTimeout}ms).`;
       } else {
         errorMsg = error.response?.data?.message || errorMsg;
@@ -178,7 +179,7 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
     setIsLoading(true);
 
     try {
-      const response = await axios.delete('delete_metadata', {
+      const response = await api.delete("delete_metadata", {
         data: {
           vdp_database_names: deleteVdbs,
           vdp_tag_names: deleteTags,
@@ -259,17 +260,15 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
     setDeleteConflicting(false);
   };
 
-  const handleModalClose = () => {
-    if (!isLoading) {
-        resetState();
-    }
-    handleClose();
+  const handleOnExited = () => {
+    resetState();
+    setToastConfig((prev) => ({ ...prev, show: false }));
   };
 
   const renderFooterButtons = () => {
     if (activeTab === 'status') {
       return (
-        <Button variant="light" onClick={handleModalClose}>
+        <Button variant="light" onClick={handleClose}>
           Close
         </Button>
       );
@@ -278,7 +277,7 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
     if (activeTab === 'sync') {
       return (
         <>
-          <Button variant="light" onClick={handleModalClose}>
+          <Button variant="light" onClick={handleClose}>
             Cancel
           </Button>
           <Button variant="dark" type="submit" disabled={isLoading} form="sync-form">
@@ -295,7 +294,7 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
     if (activeTab === 'delete') {
       return (
         <>
-          <Button variant="light" onClick={handleModalClose}>
+          <Button variant="light" onClick={handleClose}>
             Cancel
           </Button>
           <Button variant="danger" type="submit" disabled={isLoading} form="delete-form">
@@ -323,7 +322,13 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
         onClose={handleToastClose} 
       />
 
-      <Modal show={show} onHide={handleModalClose} centered data-bs-theme="light">
+      <Modal 
+        show={show} 
+        onHide={handleClose} 
+        onExited={handleOnExited}
+        centered
+        data-bs-theme="light"
+      >
         <Modal.Header closeButton>
           <Modal.Title>Vector DB Manager</Modal.Title>
         </Modal.Header>

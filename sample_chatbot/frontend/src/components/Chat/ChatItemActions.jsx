@@ -2,6 +2,8 @@ import React from "react";
 import OverlayTrigger from "react-bootstrap/OverlayTrigger";
 import Tooltip from "react-bootstrap/Tooltip";
 
+const assetBaseUrl = import.meta.env.BASE_URL;
+
 const renderTooltip = (content) => (
   <Tooltip id="chat-item-action-tooltip">{content}</Tooltip>
 );
@@ -23,7 +25,7 @@ const ChatItemActions = ({
       container={resultsContainerRef && resultsContainerRef.current}
     >
       <img
-        src="feedback.svg"
+        src={`${assetBaseUrl}feedback.svg`}
         alt="Feedback"
         width="20"
         height="20"
@@ -43,7 +45,7 @@ const ChatItemActions = ({
         container={resultsContainerRef && resultsContainerRef.current}
       >
         <img
-          src="ai.png"
+          src={`${assetBaseUrl}ai.png`}
           alt="AI Icon"
           width="20"
           height="20"

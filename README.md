@@ -1,12 +1,81 @@
-![Denodo Logo](api/static/denodo-logo.png)
+![Denodo Logo](api/static/denodo_logo.png)
 
 # Denodo AI SDK
 
-Denodo AI SDK helps you quickly build AI chatbots and agents that answer questions using your enterprise data, combining similarity search + LLMs for accurate, context-aware results.
+The Denodo AI SDK is an open-source component designed to streamline the integration of the Denodo Platform with Large Language Models (LLMs). It provides developers with the essential tools to build high-performance AI agents that can interact natively with enterprise data through a governed data virtualization layer.
 
-It connects to the Denodo Platform, works with popular LLMs and vector stores, and ships with a ready-to-run sample chatbot and simple APIs to get started fast.
+By automating the complexities of Retrieval-Augmented Generation (RAG) and VQL query generation, the SDK ensures AI responses are grounded in real-time, factual enterprise context.
+
+## Key features
+
+- **Text-to-VQL**: Automatically translates natural language questions into Denodo Virtual Query Language (VQL), allowing AI agents to query the Denodo Platform directly without manual SQL/VQL coding.
+- **Metadata Search (RAG)**: Uses vectorization to index and search through your technical and business metadata. This enables agents to find the right data assets instantly using semantic search.
+- **DeepQuery Agent**: A sophisticated research agent that orchestrates complex tasks. It crafts a multi-step execution plan and carries it out by combining metadata discovery with live VQL data extraction.
+- **Model & Vector Store Agnostic**: Provides a flexible architecture to configure and switch between various LLMs and Vector Databases depending on your performance and privacy requirements.
+
+To showcase the AI SDK’s capabilities, a sample chatbot application is included.
 
 The complete user manual for the Denodo AI SDK is available [here](https://community.denodo.com/docs/html/document/denodoconnects/latest/en/Denodo%20AI%20SDK%20-%20User%20Manual).
+
+### Installation
+
+To get started with the AI SDK:
+
+1. Clone this repository and `cd` into it
+2. Create a new virtual environment (`python -m venv venv`) in the root of the AI SDK's path
+3. Activate the virtual environment (`source venv/bin/activate` for Linux/MacOS or `.\venv\Scripts\activate` for Windows)
+4. Install the requirements.txt (`python -m pip install -r requirements.txt`)
+5. Rename the configuration templates for both AI SDK (`api/utils/sdk_config.env.example` => `api/utils/sdk_config.env`) and the sample chatbot (`sample_chatbot/chatbot_config.env.example` => `sample_chatbot/chatbot_config.env`)
+5. Review the configuration files for both the AI SDK and the sample chatbot and configure your own LLM/embeddings providers
+
+### Specialized chatbots
+
+The sample chatbot includes a sidebar for specialized chatbots. These chatbots behave like custom agents focused on a specific use case, with their own databases, tags, LLM settings, feature flags, and behavioral constraints.
+
+Specialized chatbots are detected automatically from YAML files placed in `api/agents/custom`. Each chatbot can also define its own icon by adding an image file to `api/agents/custom/icons`.
+
+To create a specialized chatbot:
+
+1. Create a new YAML file in `api/agents/custom`.
+2. Add the chatbot icon file to `api/agents/custom/icons`.
+3. Start or restart the sample chatbot application.
+
+The sample chatbot will discover the new configuration and add the chatbot to the sidebar automatically.
+
+For example, you can create `api/agents/custom/samples_bank.yaml` with:
+
+```yaml
+name: "Banking agent"
+id: "banking-agent"
+description: "Retail banking analytics assistant."
+icon_file_name: "bank_agent.png"
+
+settings:
+  databases:
+    - "samples_bank"
+
+  llm_provider: "OpenAI"
+  llm_model: "gpt-4.1-mini"
+  unstructured_mode: false
+  feedback_enabled: false
+  reporting_enabled: false
+  deepquery_enabled: false
+  user_edit_llm: false
+```
+
+And place the corresponding icon at `api/agents/custom/icons/bank_agent.png`.
+
+This example creates a specialized chatbot with:
+
+- Access limited to the `samples_bank` database
+- LLM model fixed to `gpt-4.1-mini`
+- Unstructured CSV mode disabled
+- Feedback disabled
+- Reporting disabled
+- DeepQuery disabled
+- End users unable to edit the selected LLM
+
+This makes it easy to create focused chatbot experiences for specific teams or workflows while keeping the general chatbot available in parallel.
 
 ## DeepQuery
 
@@ -16,19 +85,14 @@ The complete user manual for the Denodo AI SDK is available [here](https://commu
 - An minimum allowance of minimum 50RPM OpenAI/AWS Bedrock/Google Vertex.
 - Powerful thinking model with over 128k context length.
 
-### Installation
-
-1. Delete any previous vector store and virtual environment.
-2. Create a new virtual environment (`python -m venv venv`), activate it (`source venv/bin/activate` or `.\venv\Scripts\activate`) and install the requirements.txt (`python -m pip install -r requirements.txt`)
-
 ### Configuration
 
 Depending on your LLM provider, here's a guide on how to configure Denodo DeepQuery:
 
-#### OpenAI (recommended model: o4-mini)
+#### OpenAI (recommended model: gpt-5.2-high)
 ```
 THINKING_PROVIDER=openai
-THINKING_MODEL=o4-mini
+THINKING_MODEL=gpt-5.2-high
 ```
 
 #### AWS Bedrock (recommended model: claude-4-sonnet)
@@ -41,10 +105,10 @@ AWS_CLAUDE_THINKING_TOKENS = 2048
 ```
 Please note that AWS Bedrock requires the previously mentioned extra env variables in sdk_config.env to activate thinking.
 
-#### Google Vertex (recommended model: gemini-2.5-pro)
+#### Google Vertex (recommended model: gemini-3-pro)
 ```
 THINKING_PROVIDER = google
-THINKING_MODEL = gemini-2.5-pro
+THINKING_MODEL = gemini-3-pro
 
 GOOGLE_THINKING = 1
 GOOGLE_THINKING_TOKENS = 2048

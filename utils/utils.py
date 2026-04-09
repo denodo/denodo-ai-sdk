@@ -20,6 +20,7 @@ import tiktoken
 import functools
 import contextvars
 
+from fastapi import Request
 from time import time
 from uuid import uuid4
 from boto3 import Session
@@ -28,6 +29,7 @@ from functools import wraps
 from botocore.session import get_session
 from langchain_core.documents.base import Document
 from botocore.credentials import RefreshableCredentials
+from utils.schema_catalog import SchemaCatalog, SchemaTable
 
 # ContextVar to store the current endpoint name
 current_endpoint: contextvars.ContextVar[str] = contextvars.ContextVar('current_endpoint', default=None)
@@ -39,27 +41,29 @@ def is_in_venv():
     """
     return sys.prefix != sys.base_prefix
 
-def log_params(func):
-    def _safe_str(value):
-        """Converts to string, flattens newlines and truncates if longer than 500 characters."""
+def log_params(func=None, *, truncate_input_chars=500, truncate_output_chars=500):
+    if func is None:
+        return functools.partial(log_params, truncate_input_chars=truncate_input_chars, truncate_output_chars=truncate_output_chars)
+
+    def _safe_str(value, max_chars):
+        """Converts to string, flattens newlines and truncates if longer than max_chars (unless max_chars is None)."""
         str_value = str(value)
         str_value = str_value.replace('\n', ' ').replace('\r', '').strip()
-        max_chars = 500
-        if len(str_value) > max_chars:
+        if max_chars is not None and len(str_value) > max_chars:
             return str_value[:max_chars] + '...'
         return str_value
 
     def _format_input_arg(key, value):
         if key == "auth":
             return f"{key}=<redacted>"
-        return f"{key}={_safe_str(value)}"
+        return f"{key}={_safe_str(value, truncate_input_chars)}"
 
     def _format_output_result(result):
         if isinstance(result, (list, tuple)):
             max_items = 20
             items_to_show = result[:max_items]
 
-            formatted_items = [_safe_str(item) for item in items_to_show]
+            formatted_items = [_safe_str(item, truncate_output_chars) for item in items_to_show]
 
             if len(result) > max_items:
                 formatted_items.append(f"... and {len(result) - max_items} more")
@@ -68,7 +72,7 @@ def log_params(func):
                 return "(" + ", ".join(formatted_items) + ")"
             else:
                 return "[" + ", ".join(formatted_items) + "]"
-        return _safe_str(result)
+        return _safe_str(result, truncate_output_chars)
 
     def _build_params_str(args, kwargs):
         return ", ".join(
@@ -182,50 +186,14 @@ def timed(func):
 
 # Get the associations for a given table
 def get_table_associations(table_name, table_json):
-    table_associations = []
-    schema_table_name = table_json['tableName']
-    if table_name == schema_table_name:
-        if 'associations' in table_json:
-            for association in table_json['associations']:
-                table_associations.append(str(association['table_id']))
-    return table_associations
+    if table_name != table_json['tableName']:
+        return []
+
+    return SchemaTable.from_dict(table_json).get_association_ids()
 
 # Summarize a schema
 def schema_summary(schema):
-    summary = "====="
-    table_name = schema['tableName']
-    if "description" in schema and schema['description'] and schema['description'].strip():
-        table_description = schema['description'].replace("\n", " ").strip()
-        summary += f"Table {table_name}=====\nDescription: {table_description}\nColumns:\n"
-    else:
-        summary += f"Table {table_name}=====\nColumns:\n"
-    for column_info in schema['schema']:
-        column_name = column_info['columnName']
-        column_type = column_info['type']
-        if "logicalName" in column_info:
-            column_logical_name = column_info['logicalName']
-        else:
-            column_logical_name = None
-        if "description" in column_info:
-            column_description = column_info['description'].replace("\n", " ").strip()
-        else:
-            column_description = None
-
-        if column_logical_name is not None and column_description is not None:
-            summary += f"- {column_name} ({column_type}) -> {column_logical_name}: {column_description}.\n"
-        elif column_logical_name is None and column_description is not None:
-            summary += f"- {column_name} ({column_type}) -> {column_description}.\n"
-        elif column_logical_name is not None and column_description is None:
-            summary += f"- {column_name} ({column_type}) -> {column_logical_name}.\n"
-        else:
-            summary += f"- {column_name} ({column_type})\n"
-
-    if "associations" in schema and len(schema['associations']) != 0:
-        summary += "\n"
-        for association in schema['associations']:
-            summary += f"This table is also associated with table {association['table_name']} on {association['where']}\n"
-    summary += "\n"
-    return summary
+    return SchemaTable.from_dict(schema).render_embedding_text()
 
 # Calculate the tokens of a given string
 def calculate_tokens(string, encoding = 'cl100k_base'):
@@ -251,72 +219,7 @@ def flatten_list(list_of_lists):
     return flattened_list
 
 def create_chunks(table, embeddings_token_limit):
-    """
-    This function takes a string (schema_summary) and keeps everything before the line with Columns:
-    Everything before that is the header and will be kept in every chunk.
-    After Columns: you get every line and distribute it evenly so that all chunks have similar token counts.
-    Function returns a list of Documents
-    """
-    # Split into header and content
-    summary = schema_summary(table)
-    parts = summary.split("Columns:\n", 1)
-    header = parts[0] + "Columns:\n"
-    content = parts[1] if len(parts) > 1 else ""
-
-    # Split content into individual column lines and associations
-    lines = content.split("\n")
-    column_lines = []
-    association_lines = []
-
-    # Separate column lines from association information
-    for line in lines:
-        if line.startswith("This table is also associated"):
-            association_lines.append(line)
-        elif line.strip():  # Only add non-empty lines
-            column_lines.append(line)
-
-    # Association footer that will be added to all chunks
-    association_footer = "\n" + "\n".join(association_lines) if association_lines else ""
-
-    # Calculate optimal chunk size based on 8000 token limit
-    # Account for header and association footer in token calculation
-    base_content = header + association_footer
-    base_tokens = calculate_tokens(base_content)
-    available_tokens = (embeddings_token_limit - 500) - base_tokens
-
-    column_content = "\n".join(column_lines)
-    total_tokens = calculate_tokens(column_content)
-    target_chunks = (total_tokens // available_tokens) + 1
-    chunk_size = max(1, len(column_lines) // target_chunks)
-
-    chunks = []
-    base_id = str(table['id'])
-
-    for i in range(0, len(column_lines), chunk_size):
-        current_lines = column_lines[i:i + chunk_size]
-        chunk_content = header + "\n".join(current_lines) + association_footer + "\n"
-
-        document_id = f"{base_id}_{len(chunks)}"
-
-        # Create metadata for the chunk
-        base_metadata = {
-            "view_name": table['tableName'],
-            "view_json": json.dumps(table),
-            "view_id": base_id,  # Same ID for all chunks of the same table
-            "document_id": document_id,
-            "database_name": table['tableName'].split('.')[0]
-        }
-
-        for tag in table.get('tagDetails', []):
-            base_metadata[f"tag_{tag['name']}"] = "1"
-
-        chunks.append(Document(
-            id=document_id,  # Unique ID for each chunk
-            page_content=chunk_content,
-            metadata=base_metadata
-        ))
-
-    return chunks
+    return SchemaTable.from_dict(table).to_embedding_documents(embeddings_token_limit)
 
 @timed
 def prepare_sample_data_schema(schema):
@@ -416,33 +319,7 @@ def prepare_last_update_vector(
 
 @timed
 def prepare_schema(schema, embeddings_token_limit = 0):
-    def create_document(table, embeddings_token_limit):
-        table_summary = schema_summary(table)
-        table_summary_tokens = calculate_tokens(table_summary)
-        if embeddings_token_limit and table_summary_tokens > embeddings_token_limit:
-            return create_chunks(table, embeddings_token_limit)
-
-        id = str(table['id'])
-
-        base_metadata = {
-            "view_name": table['tableName'],
-            "view_json": json.dumps(table),
-            "view_id": id,
-            "document_id": id,
-            "database_name": table['tableName'].split('.')[0],
-            "last_update": int(time() * 1000)
-        }
-
-        for tag in table.get('tagDetails', []):
-            base_metadata[f"tag_{tag['name']}"] = "1"
-
-        return Document(
-            id=id,
-            page_content=schema_summary(table),
-            metadata=base_metadata
-        )
-
-    return [create_document(table, embeddings_token_limit) for table in schema['views']]
+    return SchemaCatalog.from_storage_json(schema).to_embedding_documents(embeddings_token_limit)
 
 def normalize_root_path(root_path):
     if not root_path:
@@ -452,6 +329,26 @@ def normalize_root_path(root_path):
         root_path = "/" + root_path
 
     return root_path.rstrip('/')
+
+def format_comma_separated_list(raw_string):
+    """
+    Takes a raw comma-separated string, removes extra spaces,
+    and returns a cleanly formatted string joined by ', '.
+    """
+    if not raw_string:
+        return ""
+    return ", ".join([item.strip() for item in raw_string.split(",") if item.strip()])
+
+def filter_allowed_headers(headers_dict):
+    allowed_headers = [h.strip().lower() for h in os.getenv("FORWARD_CUSTOM_HEADERS", "").split(",") if h.strip()]
+    return {k: v for k, v in headers_dict.items() if k.lower() in allowed_headers}
+
+def get_custom_request_headers(request: Request):
+    """
+    Dependency function to extract custom headers from the incoming FastAPI Request
+    based on the FORWARD_CUSTOM_HEADERS environment variable.
+    """
+    return filter_allowed_headers(request.headers)
 
 def get_custom_headers_from_env(provider_name):
     """
@@ -519,7 +416,7 @@ class RefreshableBotoSession:
                 "access_key": session_credentials.access_key,
                 "secret_key": session_credentials.secret_key,
                 "token": session_credentials.token,
-                "expiry_time": datetime.fromtimestamp(time() + self.session_ttl).replace(tzinfo = pytz.utc).isoformat(),
+                "expiry_time": datetime.fromtimestamp(time() + self.session_ttl, tz=pytz.utc).isoformat(),
             }
 
         return credentials

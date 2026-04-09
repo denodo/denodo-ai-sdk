@@ -24,9 +24,10 @@ from api.utils.sdk_utils import (
     timing_context, add_tokens, generate_session_id,
     handle_endpoint_error, authenticate
 )
-from api.utils import sdk_ai_tools
-from api.utils import sdk_answer_question
+from api.utils import ai_tools
+from api.utils import answer_question
 from api.utils import state_manager
+from utils.utils import get_custom_request_headers
 
 router = APIRouter()
 
@@ -84,13 +85,20 @@ class answerQuestionRequest(BaseModel):
     )
     mode: Literal["default", "data", "metadata"] = Field(default = "default")
     disclaimer: bool = True
-    verbose: bool = True
+    verbose: bool = Field(
+        default = True,
+        description="If true, the LLM will return a natural language response in the answer key based on the selected mode. In data/default mode, it uses the execution result from the generated SQL. In metadata mode, it uses the vector search output of the schema of the relevant views. If set to false, data/default mode returns the execution result and generated SQL query, while metadata mode returns the vector search output of the schema of the relevant views. Setting to false is the recommended option when using the endpoint as a tool."
+    )
     check_ambiguity: bool = Field(
         default = bool(int(os.getenv('CHECK_AMBIGUITY', '1'))),
         description="If false, skip ambiguity detection."
     )
-    vql_execute_rows_limit: int = int(os.getenv('VQL_EXECUTE_ROWS_LIMIT', '100'))
-    llm_response_rows_limit: int = int(os.getenv('LLM_RESPONSE_ROWS_LIMIT', '15'))
+    vql_execute_rows_limit: int = Field(
+        default=100,
+        ge=1,
+        le=int(os.getenv('VQL_EXECUTE_ROWS_LIMIT', '10000')),
+        description="Maximum number of rows to return from the VQL execution result."
+    )
 
 class answerQuestionResponse(BaseModel):
     answer: str
@@ -98,6 +106,7 @@ class answerQuestionResponse(BaseModel):
     query_explanation: str
     tokens: Dict
     execution_result: Dict
+    related_tables: List[Dict] = Field(default_factory=list)
     related_questions: List[str]
     tables_used: List[str]
     raw_graph: str
@@ -118,6 +127,7 @@ class answerQuestionResponse(BaseModel):
 async def answer_question_get(
     request: answerQuestionRequest = Query(),
     auth: str = Depends(authenticate),
+    custom_headers: dict = Depends(get_custom_request_headers)
 ):
     """This endpoint processes a natural language question and:
 
@@ -138,10 +148,8 @@ async def answer_question_get(
     - LLM_MAX_TOKENS
     - CUSTOM_INSTRUCTIONS
     - VQL_EXECUTE_ROWS_LIMIT
-    - LLM_RESPONSE_ROWS_LIMIT
-
     You can also override the LLM temperature and max_tokens via API parameters for fine-tuning the model behavior."""
-    return await process_question(request, auth)
+    return await process_question(request, auth, custom_headers)
 
 @router.post(
         '/answerQuestion',
@@ -152,6 +160,7 @@ async def answer_question_get(
 async def answer_question_post(
     endpoint_request: answerQuestionRequest,
     auth: str = Depends(authenticate),
+    custom_headers: dict = Depends(get_custom_request_headers)
 ):
     """This endpoint processes a natural language question and:
 
@@ -172,12 +181,10 @@ async def answer_question_post(
     - LLM_MAX_TOKENS
     - CUSTOM_INSTRUCTIONS
     - VQL_EXECUTE_ROWS_LIMIT
-    - LLM_RESPONSE_ROWS_LIMIT
-
     You can also override the LLM temperature and max_tokens via API parameters for fine-tuning the model behavior."""
-    return await process_question(endpoint_request, auth)
+    return await process_question(endpoint_request, auth, custom_headers)
 
-async def process_question(request_data: answerQuestionRequest, auth: str):
+async def process_question(request_data: answerQuestionRequest, auth: str, custom_headers: dict = None):
     """Main function to process the question and return the answer"""
     # Generate session ID for Langfuse debugging purposes
     session_id = generate_session_id(request_data.question)
@@ -206,13 +213,14 @@ async def process_question(request_data: answerQuestionRequest, auth: str):
         logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
 
-    vector_search_tables, sample_data, timings, error_message = await sdk_ai_tools.get_relevant_tables(
+    vector_search_tables, sample_data, timings, error_message = await ai_tools.get_relevant_tables(
         query=request_data.question,
         vector_store=vector_store,
         sample_data_vector_store=sample_data_vector_store,
         vdb_list=request_data.vdp_database_names,
         tag_list=request_data.vdp_tag_names,
         auth=auth,
+        custom_headers=custom_headers,
         vector_search_k=request_data.vector_search_k,
         use_views=request_data.use_views,
         expand_set_views=request_data.expand_set_views,
@@ -235,7 +243,7 @@ async def process_question(request_data: answerQuestionRequest, auth: str):
         request_data.custom_instructions = base_instructions
 
     if request_data.mode == "metadata" and not request_data.verbose:
-        response = sdk_answer_question.process_metadata_category(
+        response = answer_question.process_metadata_category(
             category_response='',
             category_related_questions=[],
             vector_search_tables=vector_search_tables,
@@ -248,7 +256,7 @@ async def process_question(request_data: answerQuestionRequest, auth: str):
         return JSONResponse(content=jsonable_encoder(response), media_type='application/json')
 
     with timing_context("llm_time", timings):
-        category, category_response, category_related_questions, sql_category_tokens = await sdk_ai_tools.sql_category(
+        category, category_response, category_related_questions, sql_category_tokens = await ai_tools.sql_category(
             query=request_data.question,
             vector_search_tables=vector_search_tables,
             llm=llm,
@@ -256,24 +264,26 @@ async def process_question(request_data: answerQuestionRequest, auth: str):
             custom_instructions=request_data.custom_instructions,
             session_id=session_id,
             column_description_char_limit=request_data.vector_search_column_description_char_limit,
-            check_ambiguity=request_data.check_ambiguity
+            check_ambiguity=request_data.check_ambiguity,
+            markdown_response=request_data.markdown_response,
         )
 
-    ambiguity_message = sdk_answer_question.build_ambiguity_message(category_response)
+    ambiguity_message = answer_question.build_ambiguity_message(category_response)
 
     if ambiguity_message:
-        response = sdk_answer_question.process_ambiguity_category(
+        response = answer_question.process_ambiguity_category(
             ambiguity_message=ambiguity_message,
             vector_search_tables=vector_search_tables,
             timings=timings,
             tokens=sql_category_tokens
         )
     elif category == "SQL":
-        response = await sdk_answer_question.process_sql_category(
+        response = await answer_question.process_sql_category(
             request=request_data,
             vector_search_tables=vector_search_tables,
             category_response=category_response,
             auth=auth,
+            custom_headers=custom_headers,
             timings=timings,
             session_id=session_id,
             sample_data=sample_data,
@@ -282,7 +292,7 @@ async def process_question(request_data: answerQuestionRequest, auth: str):
         )
         response['tokens'] = add_tokens(response['tokens'], sql_category_tokens)
     elif category == "METADATA":
-        response = sdk_answer_question.process_metadata_category(
+        response = answer_question.process_metadata_category(
             category_response=category_response,
             category_related_questions=category_related_questions,
             vector_search_tables=vector_search_tables,
@@ -291,7 +301,7 @@ async def process_question(request_data: answerQuestionRequest, auth: str):
             disclaimer=request_data.disclaimer
         )
     else:
-        response = sdk_answer_question.process_unknown_category(timings=timings)
+        response = answer_question.process_unknown_category(timings=timings)
 
     response['llm_provider'] = request_data.llm_provider
     response['llm_model'] = request_data.llm_model

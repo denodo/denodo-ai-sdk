@@ -14,3 +14,28 @@
   scrollbar-width: auto;
   scrollbar-color: #adb5bd transparent;
 }
+
+.dropdown-item {
+  color: #212529 !important;
+  transition: all 0.2s ease !important;
+  background-color: transparent !important;
+  cursor: pointer;
+}
+
+.dropdown-item:hover {
+  background-color: #f1f3f5 !important; 
+  color: #112533 !important;
+}
+
+.active-tool-item {
+  background-color: #f8f9fa !important;
+  font-weight: 600 !important;
+}
+
+.dropdown-header {
+  color: #112533 !important;
+  font-size: 0.8rem !important;
+  font-weight: 700 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}

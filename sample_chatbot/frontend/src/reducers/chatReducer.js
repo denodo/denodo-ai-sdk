@@ -7,7 +7,8 @@ export const actionTypes = {
   ERROR_CHAT_ITEM: "ERROR_CHAT_ITEM",
   CLEAR_CHAT: "CLEAR_CHAT",
   DELETE_CHAT_ITEM: "DELETE_CHAT_ITEM",
-  SET_CHAT_ITEM_FEEDBACK: "SET_CHAT_ITEM_FEEDBACK", // If needed later
+  PURGE_EXITING_ITEMS: "PURGE_EXITING_ITEMS",
+  SET_CHAT_ITEM_FEEDBACK: "SET_CHAT_ITEM_FEEDBACK",
 };
 
 export const chatReducer = (state, action) => {
@@ -20,7 +21,11 @@ export const chatReducer = (state, action) => {
 
     case actionTypes.DELETE_CHAT_ITEM: {
       const { resultIndex } = action.payload;
-      return state.filter((_, i) => i !== resultIndex);
+      return state.map((r, i) => i === resultIndex ? { ...r, isExiting: true } : r);
+    }
+
+    case actionTypes.PURGE_EXITING_ITEMS: {
+      return state.filter((r) => !r.isExiting);
     }
 
     case actionTypes.SET_CHAT_ITEM_FEEDBACK: {
@@ -137,4 +142,3 @@ export const chatReducer = (state, action) => {
       return state;
   }
 };
-

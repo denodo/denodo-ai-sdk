@@ -32,6 +32,7 @@ class ReportingToolsMixin:
             action_description=action_description,
             cohorts=self.cohorts,
             auth=self.auth,
+            custom_headers=getattr(self, "custom_headers", None),
             mode="data",
             verbose=False,
             plot=True if action == "generate_graph" else False,

@@ -24,6 +24,7 @@ class AnalysisAgent(Agent, AnalysisToolsMixin):
         max_loops=None,
         tool_response_mode="answer",  # "answer" or "complete"
         auth=None,
+        custom_headers=None,
         start_llm=None,  # Optional LLM for first interaction only
         xml_callbacks=None,  # Dictionary of tag -> callback function
         max_concurrent_tool_calls=5,
@@ -40,12 +41,14 @@ class AnalysisAgent(Agent, AnalysisToolsMixin):
             max_loops: Maximum number of interaction loops before timeout
             tool_response_mode: Response mode for tools, either "answer" or "complete"
             auth: Authentication token for database access
+            custom_headers: Custom HTTP headers to be forwarded to the Data Marketplace
             start_llm: Optional LLM to use only for the first interaction
             xml_callbacks: Dictionary mapping XML tag names to callback functions
             max_concurrent_tool_calls: Maximum number of tools that can be called concurrently
         """
-        # Store auth for tool calls
+        # Store auth and headers for tool calls
         self.auth = auth
+        self.custom_headers = custom_headers
 
         # Save filters
         self.vdp_database_names = kwargs.get('vdp_database_names', '')

@@ -169,7 +169,9 @@ const ResourcesFilterModal = ({
                   label={allDbsSelected ? "Deselect All" : "Select All"}
                   id="db-select-all"
                   checked={allDbsSelected}
-                  indeterminate={someDbsSelected}
+                  ref={(input) => {
+                    if (input) input.indeterminate = someDbsSelected;
+                  }}
                   onChange={handleSelectAllDbs}
                   className="fw-bold"
                 />
@@ -202,7 +204,9 @@ const ResourcesFilterModal = ({
                   label={allTagsSelected ? "Deselect All" : "Select All"}
                   id="tag-select-all"
                   checked={allTagsSelected}
-                  indeterminate={someTagsSelected}
+                  ref={(input) => {
+                    if (input) input.indeterminate = someTagsSelected;
+                  }}
                   onChange={handleSelectAllTags}
                   className="fw-bold"
                 />

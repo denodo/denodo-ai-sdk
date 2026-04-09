@@ -1,3 +1,11 @@
+METADATA_CATEGORY_RESPONSE_MARKDOWN = """    Always answer in markdown format:
+        - Structure your answer in a way that it's readable and visually easy to understand.
+        - Use bold, italics and tables in markdown when appropriate to better illustrate the response.
+        - You cannot use markdown headings, instead use titles in bold to separate sections, if needed."""
+
+METADATA_CATEGORY_RESPONSE_PLAIN = """    Answer in plain text only. Do not use markdown.
+        - Structure your answer clearly."""
+
 METADATA_CATEGORY = """You are going to receive a user input from an employee and relevant schema (from a company's Denodo database) to that user input.
 
     In Denodo databases, some terminology may be different:
@@ -38,10 +46,7 @@ METADATA_CATEGORY = """You are going to receive a user input from an employee an
     When answering the user input, be truthful and answer only with the information you have received in the schema. Do not speculate.
     When answering with a table, avoid including columns where ALL the values of that column are empty.
 
-    Always answer in markdown format:
-        - Structure your answer in a way that it's readable and visually easy to understand.
-        - Use bold, italics and tables in markdown when appropriate to better illustrate the response.
-        - You cannot use markdown headings, instead use titles in bold to separate sections, if needed.
+{metadata_response_instructions}
 
     Return the answer in between <response></response> tags.
 

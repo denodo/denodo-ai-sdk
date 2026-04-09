@@ -10,6 +10,7 @@ from fastmcp.server.dependencies import get_http_headers
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from api.endpoints.answerQuestion import answerQuestionRequest, process_question
 from utils.denodo_tools import format_data_query_output_mcp, format_metadata_query_output_mcp
+from utils.utils import filter_allowed_headers
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,22 @@ def get_mcp_app(host, port, root_path):
     MCP_AI_SDK_OIDC_JWKS_URI = os.getenv("MCP_AI_SDK_OIDC_JWKS_URI")
     MCP_AI_SDK_OIDC_AUDIENCE = os.getenv("MCP_AI_SDK_OIDC_AUDIENCE")
     MCP_AI_SDK_DCR_URL = os.getenv("MCP_AI_SDK_DCR_URL")
+    LLM_RESPONSE_ROWS_LIMIT = int(os.getenv("LLM_RESPONSE_ROWS_LIMIT", "100"))
+    DATA_QUERY_TOOL_DESCRIPTION = f"""Query the user's database in Denodo in natural language to retrieve data.
+    For example, you can use this tool to answer questions like "how many new customers did we get last month?"
+    Args:
+        question: Natural language question (e.g. "how many new customers did we get last month?")
+        limit: Maximum number of rows to return from the SQL execution result. Any integer between 1 and {LLM_RESPONSE_ROWS_LIMIT} can be set.
+        This limit is set to avoid LLM context saturation. However, you must be transparent with the user regarding this limit to avoid confusion.
+        For example, if 100 rows are returned for new customers, is it because limit is set to 100 (and then there may be more new customers) or because there are actually 100 new customers?
+    """
+    METADATA_QUERY_TOOL_DESCRIPTION = """Perform a similarity search in the user's database in Denodo and return the schema of the most similar tables.
+For example, it can be helpful to answer metadata questions like "what tables do we have related to X topic?",
+"what is the primary key of this table?", or "what associations does this table have?"
+Args:
+    search_query: Natural language query to search for the metadata of the tables (e.g. "tables related to loans")
+    n_results: Maximum number of metadata results to return.
+    """
 
     auth_provider = None
 
@@ -96,21 +113,22 @@ def get_mcp_app(host, port, root_path):
                 logger.error(f"Failed to extract Bearer token: {str(e)}")
                 raise ValueError("Invalid Bearer authentication format") from e
 
-        return auth
+        custom_headers = filter_allowed_headers(raw_headers)
 
-    @mcp.tool()
+        return auth, custom_headers
+
+    # Keep the MCP tool docs in the decorator description instead of the docstring
+    # so we can inject dynamic limits from environment variables when needed.
+    @mcp.tool(
+        description=DATA_QUERY_TOOL_DESCRIPTION
+    )
     async def data_query(
         question: str,
+        limit: int = LLM_RESPONSE_ROWS_LIMIT,
     ):
-        """Query the user's database in Denodo in natural language to retrieve data. For example,
-        you can use this tool to answer questions like "how many new customers did we get last month?"
-
-        Args:
-            question: Natural language question (e.g. "how many new customers did we get last month?")
-        """
         logger.info(f"MCP request received - Mode: data, Question: {question}")
 
-        auth = _extract_auth()
+        auth, custom_headers = _extract_auth()
 
         try:
             logger.debug("Processing request directly via process_question function")
@@ -119,9 +137,11 @@ def get_mcp_app(host, port, root_path):
                 question=question,
                 mode="data",
                 verbose=False,
+                disclaimer=False,
+                vql_execute_rows_limit=limit
             )
 
-            response = await process_question(request, auth)
+            response = await process_question(request, auth, custom_headers=custom_headers)
             response_body = json.loads(response.body.decode())
 
             logger.info("MCP request completed successfully for mode: data")
@@ -130,24 +150,16 @@ def get_mcp_app(host, port, root_path):
             logger.exception(f"Error processing MCP request - Mode: data, Question: {question}")
             return f"Error fetching response: {str(e)}"
 
-    @mcp.tool()
+    @mcp.tool(
+        description=METADATA_QUERY_TOOL_DESCRIPTION
+    )
     async def metadata_query(
         search_query: str,
         n_results: int = 5,
     ):
-        """Perform a similarity search in the user's database in Denodo and return the schema of the most similar tables.
-        For example, it can be helpful to answer metadata questions like:
-        - What tables do we have related to X topic.
-        - What is the primary key of this table.
-        - What associations does this table have.
-
-        Args:
-            search_query: Natural language query to search for the metadata of the tables. For example, 'tables related to loans'.
-            n_results: Maximum number of results to return.
-        """
         logger.info(f"MCP request received - Mode: metadata, Question: {search_query}")
 
-        auth = _extract_auth()
+        auth, custom_headers = _extract_auth()
 
         try:
             logger.debug("Processing request directly via process_question function")
@@ -159,7 +171,7 @@ def get_mcp_app(host, port, root_path):
                 vector_search_k=n_results,
             )
 
-            response = await process_question(request, auth)
+            response = await process_question(request, auth, custom_headers=custom_headers)
             response_body = json.loads(response.body.decode())
 
             logger.info("MCP request completed successfully for mode: metadata")
@@ -168,4 +180,4 @@ def get_mcp_app(host, port, root_path):
             logger.exception(f"Error processing MCP request - Mode: metadata, Question: {search_query}")
             return f"Error fetching response: {str(e)}"
 
-    return mcp.http_app(transport="http", path="/mcp", stateless_http=True)
+    return mcp.http_app(transport="http", path="/mcp", stateless_http=True, json_response=True)

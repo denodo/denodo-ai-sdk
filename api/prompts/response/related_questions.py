@@ -18,7 +18,7 @@ If the schema supplied is empty or the execution result is an error/empty, only 
 
 Here is the SQL schema for this query: <schema>{schema}</schema>.
 Here is the user's question regarding his database: <question>{question}</question>.
-Here is the execution result of the SQL query: <execution_result>{sql_response}</execution_result>.
+Here is the execution result of the SQL query: <execution_result>{execution_result_csv}</execution_result>.
 
 Limit your response to:
     - The related questions, each question in between <related_question></related_question> tags."""

@@ -20,13 +20,12 @@ class ChatService:
         """
         self._config = config
 
-    def process_query_stream(self, user, llm, query, tool_name, vdp_databases, vdp_tags, allow_external_associations):
+    def process_query_stream(self, user, query, tool_name, vdp_databases, vdp_tags, allow_external_associations):
         """
         Process a query and yield streaming response chunks.
 
         Args:
             user: User instance
-            llm: Default UniformLLM instance
             query: User's query string
             tool_name: Optional tool name to use
             vdp_databases: Database filter string
@@ -37,11 +36,15 @@ class ChatService:
             SSE formatted response chunks
         """
         try:
-            chatbot = user.get_or_create_chatbot(llm)
+            chatbot = user.get_or_create_chatbot()
         except Exception as e:
             logging.error(f"Error creating chatbot: {str(e)}", exc_info=True)
             yield f"data: {json.dumps({'type': 'error', 'message': f'There was an error configuring the chatbot: {str(e)}'})}\n\n"
             return
+
+
+        vdp_databases = vdp_databases or ",".join(self._config.databases)
+        vdp_tags = vdp_tags or ",".join(self._config.tags)
 
         for chunk in chatbot.process_query(
             query=query,
@@ -63,7 +66,8 @@ class ChatService:
                         self._config.report_max_files,
                         query,
                         chunk,
-                        user.id
+                        user.id,
+                        self._config.reports_folder
                     )
             elif isinstance(chunk, str):
                 chunk = chunk.replace('\n', '<NEWLINE>')

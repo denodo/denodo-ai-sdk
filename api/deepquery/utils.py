@@ -3,6 +3,7 @@ import json
 
 from api.deepquery.prompts import ANALYSIS_TRACE_TEMPLATE
 from api.endpoints.answerQuestion import process_question, answerQuestionRequest
+from api.utils.answer_question.serializers import get_full_execution_result_rows
 
 def filter_tool_calls_report_agent(tool_calls, default_rows=10):
     """
@@ -25,7 +26,7 @@ def filter_tool_calls_report_agent(tool_calls, default_rows=10):
         # Step 2: For database_agent aggregate_metric, require execution_result != {}
         if (tool_call.get("tool_name") == "database_agent" and
             tool_call.get("input", {}).get("action") == "aggregate_metric"):
-            execution_result = tool_call.get("output", {}).get("execution_result", {})
+            execution_result = get_full_execution_result_rows(tool_call.get("output", {}).get("execution_result", {}))
             if not execution_result:
                 continue
 
@@ -60,7 +61,7 @@ def filter_tool_calls_report_agent(tool_calls, default_rows=10):
 
             # Step 6: Limit execution_result to DEFAULT_ROWS
             if "execution_result" in filtered_output:
-                execution_result = filtered_output["execution_result"]
+                execution_result = get_full_execution_result_rows(filtered_output["execution_result"])
                 if isinstance(execution_result, dict):
                     limited_result = {}
                     for i in range(1, default_rows + 1):
@@ -106,7 +107,7 @@ def filter_tool_calls_visualization(tool_calls, default_rows=10):
                 }
 
                 # Add execution_result with row limiting
-                execution_result = output.get("execution_result", {})
+                execution_result = get_full_execution_result_rows(output.get("execution_result", {}))
                 if execution_result and isinstance(execution_result, dict):
                     limited_result = {}
                     for i in range(1, default_rows + 1):
@@ -163,7 +164,7 @@ def filter_tool_calls_appendix(analysis_tool_calls, visualization_tool_calls, in
             # Skip aggregate_metric calls with empty execution_result
             if (tool_call.get("tool_name") == "database_agent" and
                 tool_call.get("input", {}).get("action") == "aggregate_metric"):
-                execution_result = tool_call.get("output", {}).get("execution_result", {})
+                execution_result = get_full_execution_result_rows(tool_call.get("output", {}).get("execution_result", {}))
                 if not execution_result or execution_result == {}:
                     continue
 
@@ -209,7 +210,7 @@ def filter_tool_calls_appendix(analysis_tool_calls, visualization_tool_calls, in
 
             # Apply execution_result limiting for database_agent tools
             if "execution_result" in filtered_call["output"]:
-                execution_result = filtered_call["output"]["execution_result"]
+                execution_result = get_full_execution_result_rows(filtered_call["output"]["execution_result"])
                 if isinstance(execution_result, dict):
                     # Count actual data rows (exclude metadata)
                     row_keys = [k for k in execution_result.keys() if k.startswith("Row ")]
@@ -273,7 +274,7 @@ def format_tool_calls_for_prompt(tool_calls):
                 note = tool_output.get("execution_result_note", "")
                 formatted_lines.append(f"    - Execution Result {note}:")
                 # Print the limited execution result data
-                execution_result = tool_output.get("execution_result", {})
+                execution_result = get_full_execution_result_rows(tool_output.get("execution_result", {}))
                 if execution_result:
                     for row_key, row_data in execution_result.items():
                         if row_key.startswith("Row "):
@@ -393,6 +394,7 @@ async def execute_base_database_query(
     action_description: str,
     cohorts: list,
     auth,
+    custom_headers: dict = None,
     mode: str = "data",
     verbose: bool = False,
     plot: bool = False,
@@ -414,6 +416,7 @@ async def execute_base_database_query(
         action_description: Description of the action
         cohorts: List of cohort dictionaries with 'name' and 'description' keys
         auth: Authentication token
+        custom_headers: Custom HTTP headers to forward
         mode: Query mode ("data" or "metadata")
         verbose: Whether to use verbose mode
         plot: Whether to generate plots
@@ -464,7 +467,7 @@ async def execute_base_database_query(
     )
 
     # Call the endpoint function directly
-    response = await process_question(request, auth)
+    response = await process_question(request, auth, custom_headers=custom_headers)
 
     # Extract the JSON content from the JSONResponse
     response_data = response.body.decode('utf-8')

@@ -26,6 +26,7 @@ from api.utils.sdk_utils import (
     format_metadata_response, delete_by_db_or_tag, get_by_db_or_tag,
     check_metadata_user_permission
 )
+from utils.utils import get_custom_request_headers
 
 router = APIRouter()
 
@@ -42,7 +43,7 @@ class getMetadataRequest(BaseModel):
     vector_store_provider: str = os.getenv('VECTOR_STORE')
     rate_limit_rpm: int = os.getenv('RATE_LIMIT_RPM', 0)
     examples_per_table: int = Query(
-        default = 100,
+        default=100,
         ge=0,
         le=500
     )
@@ -77,7 +78,8 @@ class getMetadataResponse(BaseModel):
 @handle_endpoint_error("getMetadata")
 def getMetadata(
     endpoint_request: getMetadataRequest = Query(),
-    auth: str = Depends(authenticate)
+    auth: str = Depends(authenticate),
+    custom_headers: dict = Depends(get_custom_request_headers)
 ):
     """
     This endpoint retrieves the metadata from a list of VDP databases (separated by commas) and returns it in JSON and natural language format.
@@ -103,7 +105,7 @@ def getMetadata(
         raise HTTPException(status_code=400, detail="At least one database or tag must be provided")
 
     if endpoint_request.incremental:
-        status_code, response_message = activate_incremental(auth)
+        status_code, response_message = activate_incremental(auth, custom_headers=custom_headers)
         logging.info(f"Received status code {status_code} and response message {response_message}")
 
     all_db_schemas = []
@@ -170,6 +172,7 @@ def getMetadata(
                 source_name=tag_name,
                 request=endpoint_request,
                 auth=auth,
+                custom_headers=custom_headers,
                 vector_store=vector_store,
                 sample_data_vector_store=sample_data_vector_store,
                 tagged_views=views_by_tag.get(tag_name, []),
@@ -195,6 +198,7 @@ def getMetadata(
                 source_name=db_name,
                 request=endpoint_request,
                 auth=auth,
+                custom_headers=custom_headers,
                 vector_store=vector_store,
                 sample_data_vector_store=sample_data_vector_store,
                 tags_to_ignore=tags_to_ignore

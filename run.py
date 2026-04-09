@@ -42,7 +42,7 @@ def parse_arguments():
     parser.add_argument("--production", action="store_true", help="Run in production mode")
     parser.add_argument("--background", action="store_true", help="Run processes in the background and exit after they start.")
     parser.add_argument("--log-level", choices=["DEBUG", "INFO"], default="INFO", help="Set the logging level (default: INFO)")
-    parser.add_argument("--mcp", nargs="?", const="remote", choices=["local", "remote"], help="Enable MCP server mode: local or remote (default: remote if flag is present)")
+    parser.add_argument("--mcp", nargs="?", const="remote", choices=["remote"], help="Enable remote MCP server via HTTP")
     return parser.parse_args()
 
 
@@ -144,14 +144,6 @@ if __name__ == "__main__":
 
         if processes:
             if sys.stdin.isatty():
-                if args.mcp == "local":
-                    console.print(Panel(
-                        "[white]To run a local MCP server, please refer to the official Denodo AI SDK documentation in the README.[/]\n\n"
-                        "[white]The documentation contains detailed instructions on configuring and running local MCP servers with stdio.[/]",
-                        border_style="green",
-                        width=PANEL_WIDTH,
-                        title="[bold]Local MCP Server with stdio[/]"
-                    ))
                 console.print("\n[bold cyan]Type 'exit' and press Enter to stop the application(s).[/bold cyan]")
                 cmd_listener_thread = threading.Thread(
                     target=command_listener,

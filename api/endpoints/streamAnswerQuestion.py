@@ -18,10 +18,11 @@ from typing import Literal
 from fastapi.responses import StreamingResponse
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from api.utils import sdk_ai_tools
-from api.utils import sdk_answer_question
+from api.utils import ai_tools
+from api.utils import answer_question
 from api.utils import state_manager
 from api.utils.sdk_utils import timing_context, handle_endpoint_error, generate_session_id, authenticate
+from utils.utils import get_custom_request_headers
 
 router = APIRouter()
 
@@ -84,8 +85,12 @@ class streamAnswerQuestionRequest(BaseModel):
         default = bool(int(os.getenv('CHECK_AMBIGUITY', '1'))),
         description="If false, skip ambiguity detection."
     )
-    vql_execute_rows_limit: int = int(os.getenv('VQL_EXECUTE_ROWS_LIMIT', '100'))
-    llm_response_rows_limit: int = int(os.getenv('LLM_RESPONSE_ROWS_LIMIT', '15'))
+    vql_execute_rows_limit: int = Field(
+        default=100,
+        ge=1,
+        le=int(os.getenv('VQL_EXECUTE_ROWS_LIMIT', '10000')),
+        description="Maximum number of rows to return from the VQL execution result."
+    )
 
 @router.get(
         '/streamAnswerQuestion',
@@ -95,7 +100,8 @@ class streamAnswerQuestionRequest(BaseModel):
 @handle_endpoint_error("streamAnswerQuestion")
 async def stream_answer_question_get(
     request: streamAnswerQuestionRequest = Query(),
-    auth: str = Depends(authenticate)
+    auth: str = Depends(authenticate),
+    custom_headers: dict = Depends(get_custom_request_headers)
 ):
     """This endpoint processes a natural language question and:
 
@@ -118,11 +124,9 @@ async def stream_answer_question_get(
     - CHAT_MODEL
     - CUSTOM_INSTRUCTIONS
     - VQL_EXECUTE_ROWS_LIMIT
-    - LLM_RESPONSE_ROWS_LIMIT
-
     As you can see, you can specify a different provider for SQL generation and chat generation. This is because generating a correct SQL query
     is a complex task that should be handled with a powerful LLM."""
-    return await process_stream_question(request, auth)
+    return await process_stream_question(request, auth, custom_headers)
 
 @router.post(
         '/streamAnswerQuestion',
@@ -131,7 +135,8 @@ async def stream_answer_question_get(
 @handle_endpoint_error("streamAnswerQuestion")
 async def stream_answer_question_post(
     endpoint_request: streamAnswerQuestionRequest,
-    auth: str = Depends(authenticate)
+    auth: str = Depends(authenticate),
+    custom_headers: dict = Depends(get_custom_request_headers)
 ):
     """This endpoint processes a natural language question and:
 
@@ -154,13 +159,11 @@ async def stream_answer_question_post(
     - CHAT_MODEL
     - CUSTOM_INSTRUCTIONS
     - VQL_EXECUTE_ROWS_LIMIT
-    - LLM_RESPONSE_ROWS_LIMIT
-
     As you can see, you can specify a different provider for SQL generation and chat generation. This is because generating a correct SQL query
     is a complex task that should be handled with a powerful LLM."""
-    return await process_stream_question(endpoint_request, auth)
+    return await process_stream_question(endpoint_request, auth, custom_headers)
 
-async def process_stream_question(request_data: streamAnswerQuestionRequest, auth: str):
+async def process_stream_question(request_data: streamAnswerQuestionRequest, auth: str, custom_headers: dict = None):
     """Main function to process the question and stream the answer"""
     # Generate session ID for Langfuse debugging purposes
     session_id = generate_session_id(request_data.question)
@@ -189,13 +192,14 @@ async def process_stream_question(request_data: streamAnswerQuestionRequest, aut
         logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
 
-    vector_search_tables, sample_data, timings, error_message = await sdk_ai_tools.get_relevant_tables(
+    vector_search_tables, sample_data, timings, error_message = await ai_tools.get_relevant_tables(
         query=request_data.question,
         vector_store=vector_store,
         sample_data_vector_store=sample_data_vector_store,
         vdb_list=request_data.vdp_database_names,
         tag_list=request_data.vdp_tag_names,
         auth=auth,
+        custom_headers=custom_headers,
         vector_search_k=request_data.vector_search_k,
         use_views=request_data.use_views,
         expand_set_views=request_data.expand_set_views,
@@ -218,7 +222,7 @@ async def process_stream_question(request_data: streamAnswerQuestionRequest, aut
         request_data.custom_instructions = base_instructions
 
     with timing_context("llm_time", timings):
-        category, category_response, category_related_questions, sql_category_tokens = await sdk_ai_tools.sql_category(
+        category, category_response, category_related_questions, sql_category_tokens = await ai_tools.sql_category(
             query=request_data.question,
             vector_search_tables=vector_search_tables,
             llm=llm,
@@ -226,10 +230,11 @@ async def process_stream_question(request_data: streamAnswerQuestionRequest, aut
             custom_instructions=request_data.custom_instructions,
             session_id=session_id,
             column_description_char_limit=request_data.vector_search_column_description_char_limit,
-            check_ambiguity=request_data.check_ambiguity
+            check_ambiguity=request_data.check_ambiguity,
+            markdown_response=request_data.markdown_response,
         )
 
-    ambiguity_message = sdk_answer_question.build_ambiguity_message(category_response)
+    ambiguity_message = answer_question.build_ambiguity_message(category_response)
 
     if ambiguity_message:
         def generator():
@@ -237,11 +242,12 @@ async def process_stream_question(request_data: streamAnswerQuestionRequest, aut
         return StreamingResponse(generator(), media_type = 'text/plain')
 
     if category == "SQL":
-        response = await sdk_answer_question.process_sql_category(
+        response = await answer_question.process_sql_category(
             request=request_data,
             vector_search_tables=vector_search_tables,
             category_response=category_response,
             auth=auth,
+            custom_headers=custom_headers,
             timings=timings,
             session_id=session_id,
             sample_data=sample_data,
@@ -249,7 +255,7 @@ async def process_stream_question(request_data: streamAnswerQuestionRequest, aut
             sql_gen_llm=llm
         )
     elif category == "METADATA":
-        response = sdk_answer_question.process_metadata_category(
+        response = answer_question.process_metadata_category(
             category_response=category_response,
             category_related_questions=category_related_questions,
             vector_search_tables=vector_search_tables,
@@ -258,7 +264,7 @@ async def process_stream_question(request_data: streamAnswerQuestionRequest, aut
             disclaimer=request_data.disclaimer
         )
     else:
-        response = sdk_answer_question.process_unknown_category(timings=timings)
+        response = answer_question.process_unknown_category(timings=timings)
 
     def generator():
         yield from response.get('answer', 'Error processing the question.')

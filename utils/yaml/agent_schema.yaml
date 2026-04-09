@@ -1,0 +1,145 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+type: object
+required:
+  - name
+  - id
+properties:
+  name:
+    type: string
+    description: "Displayed name"
+    minLength: 1
+    maxLength: 60
+
+  id:
+    description: "Unique agent identifier in slug format."
+    pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    maxLength: 255
+
+  description:
+    type: string
+    description: "Displayed description"
+    maxLength: 1000
+
+  #Icon
+  icon_file_name:
+    type: string
+    description: "File name of the icon to display in the UI. The file must be located in 'api/agents/custom/icons'."
+
+  # Access Control
+  allowed_users:
+    type: array
+    items:
+      type: string
+    description: "List of users allowed to access this agent. If not set (null or missing), everyone is allowed access. If set to an empty list, no one is allowed access."
+
+  settings:
+    type: object
+    properties:
+      # Features
+      deepquery_enabled:
+        type: boolean
+        description: "Enable/disable DeepQuery feature"
+      reporting_enabled:
+        type: boolean
+        description: "Enable/disable reporting. If reporting is enable, all the users queries, responses and token usage will be recorded in reports/{agent_id}/user_report.csv."
+      feedback_enabled:
+        type: boolean
+        description: "Enable/disable if users can add feedback (positive or negative) + details on specific interactions. This feedback is added to the report in reports/user_report.csv."
+      unstructured_mode:
+        type: boolean
+        description: "Enable/disable unstructured mode. By default, users can upload their own unstructured data through CSV files and ask questions about their documents."
+      user_edit_llm:
+        type: boolean
+        description: "Allow users to edit LLM settings (provider, model, temperature, max_tokens) through the settings modal"
+      auto_graph:
+        type: boolean
+        description: "The chatbot LLM might decide to request a graph generation even when not explicitly asked for in your question."
+      filters_enabled:
+        type: boolean
+        description: "Allow users to narrow the query scope through the filter modal"
+
+      # LLM Configuration
+      llm_provider:
+        type: string
+        description: "LLM provider"
+      llm_model:
+        type: string
+        description: "LLM model"
+      llm_temperature:
+        type: number
+        description: "Defines the temperature setting for the chatbot LLM (0.0 to 2.0 for OpenAI, 0.0 to 1.0 for others)"
+      llm_max_tokens:
+        type: integer
+        description: "Defines the maximum output tokens for the chatbot LLM"
+      llm_response_rows_limit:
+        type: integer
+        description: "Maximum number of rows from the VQL execution result that are passed to the LLM for generating the final answer"
+
+      ai_sdk_llm_settings:
+        type: object
+        properties:
+          base_llm:
+            type: object
+            properties:
+              llm_provider:
+                type: string
+                description: "AI SDK base LLM provider"
+              llm_model:
+                type: string
+                description: "AI SDK base LLM model"
+              llm_temperature:
+                type: number
+                description: "Defines the temperature setting for the AI SDK base LLM (0.0 to 2.0 for OpenAI, 0.0 to 1.0 for others)"
+              llm_max_tokens:
+                type: integer
+                description: "Defines the maximum output tokens for the AI SDK base LLM"
+          thinking_llm:
+            type: object
+            properties:
+              llm_provider:
+                type: string
+                description: "AI SDK thinking LLM provider"
+              llm_model:
+                type: string
+                description: "AI SDK thinking LLM model"
+              llm_temperature:
+                type: number
+                description: "Defines the temperature setting for the AI SDK thinking LLM (0.0 to 2.0 for OpenAI, 0.0 to 1.0 for others)"
+              llm_max_tokens:
+                type: integer
+                description: "Defines the maximum output tokens for the AI SDK thinking LLM"
+          use_base_llm_for_execution:
+            type: boolean
+            description: "Defines which LLM to use for DeepQuery execution phase"
+          check_ambiguity:
+            type: boolean
+            description: "If enabled, the chatbot will ask for clarification when a user query can be interpreted in multiple ways."
+
+      # Reporting Configuration
+      report_max_size:
+        type: integer
+        description: "Max size in megabytes of the reports generated in reports/{agent_id}. Will create a new timestamped one after reaching maxsize."
+      report_max_files:
+        type: integer
+        description: "Maximum number of report CSV files to keep in the reports/{agent_id} directory. Set to 0 to disable the limit."
+
+      databases:
+        type: array
+        items:
+          type: string
+        description: "Restricts the chatbot’s context scope to specific databases."
+      tags:
+        type: array
+        items:
+          type: string
+        description: "Restricts the chatbot’s context scope to views that have the specified tags assigned"
+
+      #Custom instructions
+      custom_intructions:
+        type: string
+        description: "Default custom instructions to guide the specific behavior of this chatbot agent."
+      user_add_custom_instructions:
+        type: boolean
+        description: "Allow users to add the custom instructions from the UI. If custom_istruction is set, the user instructions will be appended to them."
+
+additionalProperties: false

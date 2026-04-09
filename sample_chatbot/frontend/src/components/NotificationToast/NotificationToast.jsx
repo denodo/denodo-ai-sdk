@@ -68,12 +68,24 @@ const NotificationToast = ({
         </Toast.Header>
         <Toast.Body>
           <div className="d-flex justify-content-between align-items-start gap-3">
-            <div style={{ flex: 1 }}>{message}</div>
+            <div 
+              style={{ 
+                flex: 1, 
+                maxHeight: '250px',
+                overflowY: 'auto',
+                paddingRight: '10px',
+                wordBreak: 'break-word',
+                whiteSpace: 'pre-wrap'
+              }}
+              className="toast-scroll-area"
+            >
+              {message}
+            </div>
             <button
               onClick={handleCopy}
               className="btn btn-sm btn-link p-0 text-secondary border-0"
               title="Copy to clipboard"
-              style={{ marginTop: '-2px' }}
+              style={{ marginTop: '-2px', flexShrink: 0 }}
             >
               <i 
                 className={`bi bi-${copied ? 'check-lg text-success' : 'copy'} cursor-pointer ms-2`} 

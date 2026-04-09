@@ -1,0 +1,49 @@
+# Copy this file to `samples_bank.yaml` and adjust the values for your environment.
+# Icon file name expected in the `api/agents/custom/icons` directory.
+
+name: "Banking agent"
+id: "banking-agent"
+description: >-
+  Retail banking analytics assistant for the the samples_bank database. This example
+  shows how to scope a custom agent to a specific database, expose end-user filters,
+  and configure agent-specific behavior.
+icon_file_name: "bank_agent.png"
+allowed_users:
+  - "admin"
+  - "bank_analyst"
+settings:
+  deepquery_enabled: true
+  reporting_enabled: true
+  feedback_enabled: false
+  unstructured_mode: false
+  user_edit_llm: false
+  auto_graph: true
+  filters_enabled: true
+
+  llm_provider: "OpenAI"
+  llm_model: "gpt-5.2-none"
+  llm_temperature: 0.2
+  llm_max_tokens: 4096
+  llm_response_rows_limit: 25
+
+  ai_sdk_llm_settings:
+    base_llm:
+      llm_provider: "OpenAI"
+      llm_model: "gpt-5.2-none"
+      llm_temperature: 0
+      llm_max_tokens: 4096
+    thinking_llm:
+      llm_provider: "OpenAI"
+      llm_model: "gpt-5.2-high"
+      llm_temperature: 0
+      llm_max_tokens: 4096
+    use_base_llm_for_execution: false
+    check_ambiguity: true
+
+  report_max_size: 50
+  report_max_files: 20
+
+  databases:
+    - "samples_bank"
+
+  user_add_custom_instructions: false

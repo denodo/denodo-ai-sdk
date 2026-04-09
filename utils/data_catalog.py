@@ -17,6 +17,7 @@ import requests
 import aiohttp
 import asyncio
 from utils.utils import timed, log_params
+from utils.schema_catalog import SchemaCatalog
 
 DATA_MARKETPLACE_URL = (os.getenv("AI_SDK_DATA_MARKETPLACE_URL") or 'http://localhost:9090/denodo-data-catalog').rstrip('/') + '/'
 DATA_MARKETPLACE_VERIFY_SSL = os.getenv('DATA_MARKETPLACE_VERIFY_SSL', '0') == '1'
@@ -48,7 +49,8 @@ def get_views_metadata_documents(
     tagged_views=None,
     incremental=True,
     tags_to_ignore=None,
-    views_per_request=50
+    views_per_request=50,
+    custom_headers=None
 ):
     """
     Retrieve JSON documents from views metadata with support for OAuth token or Basic auth.
@@ -125,6 +127,9 @@ def get_views_metadata_documents(
             headers['Authorization'] = calculate_basic_auth_authorization_header(*auth)
         else:
             headers['Authorization'] = f'Bearer {auth}'
+
+        if custom_headers:
+            headers.update(custom_headers)
 
         # 1. Make request and raise any connection/HTTP errors
         response = requests.post(
@@ -229,7 +234,7 @@ def get_views_metadata_documents(
         processed_views = parse_metadata_json(
             json_response=all_views,
             use_associations=table_associations,
-            use_descriptions=table_descriptions,
+            use_table_descriptions=table_descriptions,
             use_column_descriptions=table_column_descriptions,
             filter_tables=filter_tables or [],
             view_prefix_filter=view_prefix_filter,
@@ -261,10 +266,11 @@ async def is_empty_result(json_response):
 
     return False, ""
 
-@log_params
+@log_params(truncate_input_chars=None, truncate_output_chars=None)
 @timed
 async def execute_vql(vql, auth, limit, truncate_vectors=True, execution_url=DATA_MARKETPLACE_EXECUTION_URL,
-                server_id=DATA_MARKETPLACE_SERVER_ID, verify_ssl=DATA_MARKETPLACE_VERIFY_SSL):
+                server_id=DATA_MARKETPLACE_SERVER_ID, verify_ssl=DATA_MARKETPLACE_VERIFY_SSL,
+                custom_headers=None):
     """
     Execute VQL against Data Marketplace with support for OAuth token or Basic auth.
 
@@ -286,6 +292,9 @@ async def execute_vql(vql, auth, limit, truncate_vectors=True, execution_url=DAT
         headers['Authorization'] = calculate_basic_auth_authorization_header(*auth)
     else:
         headers['Authorization'] = f'Bearer {auth}'
+
+    if custom_headers:
+        headers.update(custom_headers)
 
     data = {
         "vql": vql,
@@ -348,7 +357,8 @@ async def get_allowed_view_ids(
     auth,
     server_id=DATA_MARKETPLACE_SERVER_ID,
     permissions_url=DATA_MARKETPLACE_PERMISSIONS_URL,
-    verify_ssl=DATA_MARKETPLACE_VERIFY_SSL
+    verify_ssl=DATA_MARKETPLACE_VERIFY_SSL,
+    custom_headers=None
 ):
     """
     Retrieve allowed view IDs for all views accessible to the user.
@@ -360,7 +370,7 @@ async def get_allowed_view_ids(
         verify_ssl: Whether to verify SSL certificates
 
     Returns:
-       List of unique allowed view IDs across all accessible views
+        List of unique allowed view IDs across all accessible views
     """
     # Prepare headers based on auth type
     headers = {
@@ -372,6 +382,9 @@ async def get_allowed_view_ids(
             else f'Bearer {auth}'
         )
     }
+
+    if custom_headers:
+        headers.update(custom_headers)
 
     # Use "ALL" data mode to fetch all accessible view IDs in a single request
     data = {"dataMode": "ALL"}
@@ -426,108 +439,22 @@ def remove_none_values(json_dict):
 def parse_metadata_json(
     json_response,
     use_associations = True,
-    use_descriptions = True,
+    use_table_descriptions = True,
     use_column_descriptions = True,
     filter_tables = [],
     view_prefix_filter='',
     view_suffix_filter=''
 ):
-    # Denodo 9.1.0 onwards, the response is wrapped in viewsDetails
-    if 'viewsDetails' in json_response:
-        json_response = json_response['viewsDetails']
-
-    if len(json_response) == 0:
-        return None
-
-    json_metadata = {'views': []}
-
-    for table in json_response:
-        json_table = remove_none_values(table)
-        table_database = json_table.get('databaseName', '')
-        table_name = json_table.get('name', '')
-        table_name = f"{table_database}.{table_name}"
-        table_name = table_name.replace('"', '')
-
-        if table_name in filter_tables:
-            continue
-
-        if view_prefix_filter and not json_table.get('name', '').startswith(view_prefix_filter):
-            continue
-
-        if view_suffix_filter and not json_table.get('name', '').endswith(view_suffix_filter):
-            continue
-
-        if 'viewFieldDataList' in json_table:
-            output_table = {
-                'tableName': table_name,
-                'description': json_table.get('description', ""),
-            }
-
-            sample_data_dict = {}
-            for example in json_table['viewFieldDataList']:
-                    sample_data_dict[example['fieldName'].strip('"')] = example['fieldValues']
-            # Combine the example data with the schema
-            for field in json_table['schema']:
-                field_name = field['name'].strip('"')
-                if field_name in sample_data_dict:
-                    field['sample_data'] = sample_data_dict[field_name]
-                else:
-                    field['sample_data'] = []
-        else:
-            output_table = {
-                'tableName': table_name,
-                'description': json_table.get('description', ""),
-            }
-
-        keys_to_remove = ['name', 'description', 'databaseName', 'viewFieldDataList']
-
-        for key in keys_to_remove:
-            json_table.pop(key, None)
-
-        json_table = output_table | json_table
-
-        for i, item in enumerate(json_table['schema']):
-            column_name = {'columnName': item['name']}
-            item.pop('name')
-            if not use_column_descriptions:
-                if 'logicalName' in item:
-                    item.pop('logicalName')
-                if 'description' in item:
-                    item.pop('description')
-            json_table['schema'][i] = column_name | item
-
-        if "associationData" in json_table:
-            if use_associations is False:
-                json_table.pop('associationData')
-            else:
-                json_table['associations'] = []
-                for association in json_table['associationData']:
-                    other_table = association['viewDetailsOfTheOtherView']['name']
-                    other_table_db = association['viewDetailsOfTheOtherView']['databaseName']
-                    mapping = association['mapping'].replace('"', '')
-                    mapping = mapping.split("=")
-
-                    for i in range(len(mapping)):
-                        table_name = mapping[i].split(".")[0]
-                        if table_name != other_table:
-                            mapping[i] = f"{table_database}.{mapping[i]}"
-                        else:
-                            mapping[i] = f"{other_table_db}.{mapping[i]}"
-
-                    mapping = " = ".join(mapping)
-                    association_data = {
-                        'table_name': f"{other_table_db}.{other_table}",
-                        'table_id': association['viewDetailsOfTheOtherView']['id'],
-                        'where': mapping
-                    }
-                    json_table['associations'].append(association_data)
-                json_table.pop("associationData")
-
-        if "description" in json_table and use_descriptions is False:
-            json_table.pop('description')
-
-        json_metadata['views'].append(json_table)
-    return json_metadata
+    schema_catalog = SchemaCatalog.from_marketplace_json(
+        json_response=json_response,
+        use_associations=use_associations,
+        use_table_descriptions=use_table_descriptions,
+        use_column_descriptions=use_column_descriptions,
+        filter_tables=filter_tables,
+        view_prefix_filter=view_prefix_filter,
+        view_suffix_filter=view_suffix_filter
+    )
+    return schema_catalog.to_storage_json()
 
 # Parse the result of the Execution to a more readable format
 def parse_execution_json(json_response):
@@ -548,7 +475,8 @@ def activate_incremental(
     auth,
     enabled=True,
     server_id=DATA_MARKETPLACE_SERVER_ID,
-    verify_ssl=DATA_MARKETPLACE_VERIFY_SSL
+    verify_ssl=DATA_MARKETPLACE_VERIFY_SSL,
+    custom_headers=None
 ):
     """
     Enable or disable incremental metadata updates for the Data Marketplace.
@@ -573,6 +501,9 @@ def activate_incremental(
             else f'Bearer {auth}'
         )
     }
+
+    if custom_headers:
+        headers.update(custom_headers)
 
     # Prepare request data
     data = {

@@ -1,3 +1,34 @@
+version 1.1 - 20260409
+----------------------
+
+- Included home page chat bar in the sample chatbot for a more actionable experience
+- Updated Denodo Platform icons to high-definition SVG files
+- Applied max-width styling to images embedded in LLM responses
+- Added samples_bank custom agent examples and log imported custom agents during server startup
+- Upgraded Pillow and other sample chatbot dependencies to resolve detected CVEs
+- Added support for headers to be sent to the AI SDK and included in requests to the Data Marketplace
+- AI SDK MCP server: enforced JSON responses for compatibility with Alibaba Bailian
+- Fixed race condition where sdk_config.env could be read after Langfuse initialization and rendering Langfuse unusable in the AI SDK API
+- Fixed AWS Bedrock failing with expired credentials when using an EC2 instance profile in non-UTC timezones
+- Added truncate_input_chars and truncate_output_chars to the log_params decorator to show complete VQL queries that would sometimes get cut off
+- Upgraded FastMCP to 2.14.5 to resolve AI SDK MCP server compatibility issues
+- Fixed markdown formatting constraints not being respected in metadata answer mode
+- Fixed handling of stale PostgreSQL/PGVector connections
+- Increased CSV field size limit for chatbot user feedback submissions
+- Addressed SAST code vulnerability findings
+- Corrected verify_ssl documentation in the AI SDK example configuration
+- Fixed AI SDK reporting version "Unknown" in production mode
+- Documented the verbose parameter in answerDataQuestion
+
+version 1.1-beta - 20260326
+---------------------------
+
+- Removed support for local MCP servers
+- Added support for storing association descriptions in the vector database
+- Added support for specialized chatbots in the sample chatbot
+- Updated dependencies to resolve reported security vulnerabilities (CVEs)
+- Optimized execution result token usage and improved execution result visibility in chatbot responses
+
 version 1.0 - 20260220
 ------------------------
 

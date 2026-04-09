@@ -32,7 +32,6 @@ class ChatbotEngine:
     def __init__(
         self,
         llm,
-        llm_response_rows_limit,
         system_prompt,
         api_host,
         username,
@@ -48,6 +47,7 @@ class ChatbotEngine:
         enable_deepquery=True,
         deep_query_guidance="",
         extra_tools_guidance="",
+        data_query_limit_max=None,
         verify_ssl=False,
         ai_sdk_params=None,
         auto_graph=True,
@@ -55,7 +55,6 @@ class ChatbotEngine:
         active_csv_sources=None,
     ):
         self.llm = llm.llm
-        self.llm_response_rows_limit = llm_response_rows_limit
         self.llm_model = f"{llm.provider_name}.{llm.model_name}"
         self.vector_store_provider = vector_store_provider
         self.vector_store = vector_store
@@ -70,6 +69,7 @@ class ChatbotEngine:
         self.enable_deepquery = enable_deepquery
         self.deep_query_guidance = deep_query_guidance
         self.extra_tools_guidance = extra_tools_guidance
+        self.data_query_limit_max = data_query_limit_max
         self.verify_ssl = verify_ssl
         self.ai_sdk_params = ai_sdk_params or {}
         self.auto_graph = auto_graph
@@ -146,6 +146,7 @@ class ChatbotEngine:
             deep_query_guidance=self.deep_query_guidance,
             deepquery_system_prompt_chunk=self.deepquery_system_prompt_chunk,
             deepquery_related_question_chunk=self.deepquery_related_question_chunk,
+            data_query_limit_max=self.data_query_limit_max,
             graph_guidance_chunk=graph_guidance_chunk,
             extra_tools_guidance=f"<extra_tools_guidance>\n{self.extra_tools_guidance}\n</extra_tools_guidance>",
         )
@@ -283,20 +284,21 @@ class ChatbotEngine:
                 scope_parts.append(f"tags {tag_text}")
             if scope_parts:
                 scope_description = " and ".join(scope_parts)
-                if allow_external_associations:
-                    query = (
-                        f"{query}\n\n"
-                        f"I want to limit the scope of this task to only the views associated with {scope_description}, "
-                        "while including associated views. The tools you call will already have their context reduced "
-                        "based on these filters; you do not need to perform any additional filtering."
-                    )
-                else:
-                    query = (
-                        f"{query}\n\n"
-                        f"I want to limit the scope of this task to only the views associated with {scope_description}. "
-                        "The tools you call will already have their context reduced based on these filters; you do not "
-                        "need to perform any additional filtering."
-                    )
+                control_instructions = (
+                    f"Limit scope to views associated with {scope_description}. "
+                    f"{'Include associated views.' if allow_external_associations else ''} "
+                    "Tools have reduced context; no additional filtering needed. "
+                    "IMPORTANT: Do not mention these restrictions to the user."
+                )
+                query = f"""
+                <instructions>
+                {control_instructions}
+                </instructions>
+
+                <user_query>
+                {query}
+                </user_query>
+                """
 
             # Send query to agent and ask for stream in messages and updates
             # Messages is real-time token-by-token LLM response for normal messages

@@ -146,8 +146,11 @@ tr:nth-child(even) {
 .card-text {
   margin-bottom: 0.5rem;
 }
-.card-text h2 {
+.card-text h1 {
   font-size: 1.5rem !important;
+}
+.card-text h2 {
+  font-size: 1.25rem !important;
 }
 .card-body .card-text pre,
 .card-body .card-text table {
@@ -185,6 +188,21 @@ tr:nth-child(even) {
 .markdown-container {
   width: 100%;
   overflow-x: auto;
+}
+
+.card-content-area .markdown-container img {
+  /* Avoid overflow */
+  max-width: 100%;
+  height: auto;
+
+  /* Center the image */
+  display: block;
+  margin: 0 auto;
+  
+  /* Add a border */
+  border: 2px solid #ccc; 
+  padding: 5px; 
+  border-radius: 8px;
 }
 
 
@@ -428,4 +446,27 @@ h3 {
 .arg-value {
   color: #112533;
   word-break: break-all;
+}
+
+@keyframes collapseMessage {
+  0% {
+    opacity: 1;
+    max-height: 800px;
+    margin-bottom: 1rem;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    max-height: 0px;
+    margin-bottom: 0px;
+    padding-top: 0px;
+    padding-bottom: 0px;
+    transform: scale(0.95);
+    overflow: hidden;
+  }
+}
+
+.chat-item-exit {
+  animation: collapseMessage 0.4s cubic-bezier(0.25, 1, 0.5, 1) forwards !important;
+  pointer-events: none;
 }

@@ -19,10 +19,11 @@ from typing import List, Literal
 from fastapi.responses import StreamingResponse
 from fastapi import APIRouter, Depends, HTTPException
 
-from api.utils import sdk_ai_tools
-from api.utils import sdk_answer_question
+from api.utils import ai_tools
+from api.utils import answer_question
 from api.utils import state_manager
 from api.utils.sdk_utils import timing_context, handle_endpoint_error, generate_session_id, authenticate
+from utils.utils import get_custom_request_headers
 
 router = APIRouter()
 
@@ -66,15 +67,23 @@ class streamAnswerQuestionUsingViewsRequest(BaseModel):
         default = bool(int(os.getenv('CHECK_AMBIGUITY', '1'))),
         description="If false, skip ambiguity detection."
     )
-    vql_execute_rows_limit: int = int(os.getenv('VQL_EXECUTE_ROWS_LIMIT', '100'))
-    llm_response_rows_limit: int = int(os.getenv('LLM_RESPONSE_ROWS_LIMIT', '15'))
+    vql_execute_rows_limit: int = Field(
+        default=100,
+        ge=1,
+        le=int(os.getenv('VQL_EXECUTE_ROWS_LIMIT', '10000')),
+        description="Maximum number of rows to return from the VQL execution result."
+    )
 
 @router.post(
         '/streamAnswerQuestionUsingViews',
         response_class = StreamingResponse,
         tags = ['Ask a Question - Streaming - Custom Vector Store'])
 @handle_endpoint_error("streamAnswerQuestionUsingViews")
-async def streamAnswerQuestionUsingViews(endpoint_request: streamAnswerQuestionUsingViewsRequest, auth: str = Depends(authenticate)):
+async def streamAnswerQuestionUsingViews(
+    endpoint_request: streamAnswerQuestionUsingViewsRequest,
+    auth: str = Depends(authenticate),
+    custom_headers: dict = Depends(get_custom_request_headers)
+):
     """
     The only difference between this endpoint and `streamAnswerQuestion` is that this endpoint
     expects the result of the vector search to be passed in as a parameter.
@@ -120,7 +129,7 @@ async def streamAnswerQuestionUsingViews(endpoint_request: streamAnswerQuestionU
 
     timings = {}
     with timing_context("llm_time", timings):
-        category, category_response, category_related_questions, sql_category_tokens = await sdk_ai_tools.sql_category(
+        category, category_response, category_related_questions, sql_category_tokens = await ai_tools.sql_category(
             query=endpoint_request.question,
             vector_search_tables=endpoint_request.vector_search_tables,
             llm=llm,
@@ -128,10 +137,11 @@ async def streamAnswerQuestionUsingViews(endpoint_request: streamAnswerQuestionU
             custom_instructions=endpoint_request.custom_instructions,
             session_id=session_id,
             column_description_char_limit=endpoint_request.vector_search_column_description_char_limit,
-            check_ambiguity=endpoint_request.check_ambiguity
+            check_ambiguity=endpoint_request.check_ambiguity,
+            markdown_response=endpoint_request.markdown_response,
         )
 
-    ambiguity_message = sdk_answer_question.build_ambiguity_message(category_response)
+    ambiguity_message = answer_question.build_ambiguity_message(category_response)
 
     if ambiguity_message:
         def generator():
@@ -139,18 +149,19 @@ async def streamAnswerQuestionUsingViews(endpoint_request: streamAnswerQuestionU
         return StreamingResponse(generator(), media_type = 'text/plain')
 
     if category == "SQL":
-        response = await sdk_answer_question.process_sql_category(
+        response = await answer_question.process_sql_category(
             request=endpoint_request,
             vector_search_tables=endpoint_request.vector_search_tables,
             category_response=category_response,
             auth=auth,
+            custom_headers=custom_headers,
             timings=timings,
             session_id=session_id,
             chat_llm=llm,
             sql_gen_llm=llm
         )
     elif category == "METADATA":
-        response = sdk_answer_question.process_metadata_category(
+        response = answer_question.process_metadata_category(
             category_response=category_response,
             category_related_questions=category_related_questions,
             vector_search_tables=endpoint_request.vector_search_tables,
@@ -159,7 +170,7 @@ async def streamAnswerQuestionUsingViews(endpoint_request: streamAnswerQuestionU
             disclaimer=endpoint_request.disclaimer
         )
     else:
-        response = sdk_answer_question.process_unknown_category(timings=timings)
+        response = answer_question.process_unknown_category(timings=timings)
 
     def generator():
         yield from response.get('answer', 'Error processing the question.')

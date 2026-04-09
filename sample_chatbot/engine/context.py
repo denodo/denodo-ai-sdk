@@ -26,7 +26,7 @@ TOOL_DEFINITIONS = {
         "optional": False,
     },
     "deep_query": {
-        "pretty_name": "DeepQuery",
+        "pretty_name": "Deep Query",
         "aliases": ["@deep_query", "@deepquery"],
         "optional": True,
     },

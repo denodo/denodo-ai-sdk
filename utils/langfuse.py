@@ -1,28 +1,49 @@
 import os
 import inspect
 import logging
+import threading
 
 from uuid import uuid4
 from datetime import datetime
 from utils.version import AI_SDK_VERSION
 
-_ENABLED = bool(os.getenv("LANGFUSE_SECRET_KEY") and os.getenv("LANGFUSE_PUBLIC_KEY"))
+_lock = threading.Lock()
+_configured = False
+_client = None
+_handler = None
+_warned_missing_init = False
 
-if _ENABLED:
-    from langfuse import Langfuse
-    from langfuse.langchain import CallbackHandler
+def init_langfuse():
+    """
+    Load Langfuse client and LangChain callback handler from the current environment.
 
-    _client = Langfuse(release=AI_SDK_VERSION)
-    _handler = CallbackHandler()
-else:
-    _client = None
-    _handler = None
+    Call once per process after env is available (e.g. after load_dotenv). The API does
+    this via state_manager.initialize_default_resources(); the sample chatbot does it at
+    the start of create_app.
+    Safe to call multiple times; only the first call takes effect.
+    """
+    global _client, _handler, _configured
+    with _lock:
+        if _configured:
+            return
+        _configured = True
+        secret = os.getenv("LANGFUSE_SECRET_KEY")
+        public = os.getenv("LANGFUSE_PUBLIC_KEY")
+        if not (secret and public):
+            logging.info("Langfuse disabled: LANGFUSE_SECRET_KEY and LANGFUSE_PUBLIC_KEY not both set.")
+            return
+        from langfuse import Langfuse
+        from langfuse.langchain import CallbackHandler
+
+        _client = Langfuse(release=AI_SDK_VERSION)
+        _handler = CallbackHandler()
+        logging.info("Langfuse tracing enabled.")
 
 def is_enabled():
-    return _ENABLED
+    return _handler is not None
 
 def get_handler():
-    return _handler if _ENABLED else None
+    return _handler
 
 def _default_run_name():
     frame = inspect.currentframe()
@@ -31,13 +52,19 @@ def _default_run_name():
     return "unknown"
 
 def build_config(model_id=None, session_id=None, run_name=None, user_id=None, extra_metadata=None):
+    global _warned_missing_init
     config = {}
 
     if run_name:
         config["run_name"] = run_name
 
-    if not _ENABLED or _handler is None:
-        logging.warning("Langfuse is not enabled.")
+    if not _configured:
+        if not _warned_missing_init:
+            logging.warning("Langfuse was not initialized.")
+            _warned_missing_init = True
+        return config
+
+    if _handler is None:
         return config
 
     config["callbacks"] = [_handler]

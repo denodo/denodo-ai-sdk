@@ -51,12 +51,14 @@ def _knowledge_query_impl(search_query, vector_store, k=5, document_size_limit_c
 
 # =============================================================================
 # LangChain Tool Definitions
+# Response format must always be content_and_artifact
 # =============================================================================
 
 @tool(response_format="content_and_artifact")
 def data_query(
     runtime: ToolRuntime[UserContext],
     natural_language_query: str,
+    limit: int = 0,
     plot: int = 0,
     plot_details: str = "",
 ):
@@ -64,6 +66,7 @@ def data_query(
 
     Args:
         natural_language_query: Natural language query to search for the data in the user's Denodo instance. For example, 'number of total customers'.
+        limit: Maximum number of rows to return. If omitted, it defaults to the data_query limit configured for this session.
         plot: Whether to plot the data. 1 for yes, 0 for no.
         plot_details: Any extra details of the graph to generate. For example, 'bar chart of the number of customers by country'.
     """
@@ -75,6 +78,8 @@ def data_query(
         logging.info(f"Received UI filters: vdp_tag_names={runtime.context.vdp_tag_names}")
 
     auth = create_basic_auth_header(runtime.context.username, runtime.context.password)
+    default_limit = (runtime.context.ai_sdk_params or {}).get("vql_execute_rows_limit")
+    effective_limit = default_limit if limit in (None, 0) else limit
 
     response = denodo_tools.data_query(
         natural_language_query=natural_language_query,
@@ -84,6 +89,7 @@ def data_query(
         vdp_tag_names=runtime.context.vdp_tag_names,
         plot=plot,
         plot_details=plot_details,
+        limit=effective_limit,
         custom_instructions=runtime.context.custom_instructions,
         verify_ssl=runtime.context.verify_ssl,
         **(runtime.context.ai_sdk_params or {}),

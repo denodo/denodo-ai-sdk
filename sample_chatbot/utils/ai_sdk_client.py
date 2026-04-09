@@ -22,7 +22,7 @@ def ai_sdk_health_check(api_host, verify_ssl=False):
     except Exception:
         return False
 
-def get_user_views(api_host, username, password, query, views=200, verify_ssl=False):
+def get_user_views(api_host, username, password, query, tags=None, databases=None, views=200, verify_ssl=False):
     """
     Get views available to a user via similarity search.
 
@@ -31,17 +31,28 @@ def get_user_views(api_host, username, password, query, views=200, verify_ssl=Fa
         username: User's username
         password: User's password
         query: Search query
+        tags: List of tags to include
+        databases: List of databases to include
         views: Maximum number of views to return
         verify_ssl: Whether to verify SSL certificates
 
     Returns:
         Tuple of (status_code, table_names or error_message)
     """
+
+    if databases is None:
+        databases = []
+    if tags is None:
+        tags = []
+
     try:
         request_params = {
             'query': query,
             'scores': False,
-            'n_results': views
+            'n_results': views,
+            'vdp_database_names': ','.join(databases),
+            'vdp_tag_names': ','.join(tags)
+
         }
 
         response = requests.get(
@@ -215,3 +226,62 @@ def get_synced_resources(api_host, username, password, verify_ssl=False):
         logging.error(f"Failed to connect to /getVectorDBInfo: {str(e)}")
 
     return synced_resources, partial_resources, user_sync_permissions
+
+def filter_synced_resources(raw_synced, allowed_databases=None, allowed_tags=None):
+    """
+    Filters raw synced resources based on allowed databases and tags.
+    """
+    synced_resources = {}
+
+    if "DATABASE" in raw_synced:
+        dbs = raw_synced["DATABASE"]
+        if allowed_databases:
+            dbs = {k: v for k, v in dbs.items() if k in allowed_databases}
+        if dbs:
+            synced_resources["DATABASE"] = dbs
+
+    if "TAG" in raw_synced:
+        tags = raw_synced["TAG"]
+        if allowed_tags:
+            tags = {k: v for k, v in tags.items() if k in allowed_tags}
+        if tags:
+            synced_resources["TAG"] = tags
+
+    return synced_resources
+
+def filter_partial_resources(raw_partial, allowed_databases=None, allowed_tags=None):
+    """
+    Filters raw partial resources based on allowed databases and tags.
+    """
+    partial_resources = {
+        "partial_tags_by_db": {},
+        "partial_dbs_by_tag": {},
+        "partial_tags_by_tag": {}
+    }
+
+    p_tags_by_db = raw_partial.get("partial_tags_by_db", {})
+    p_dbs_by_tag = raw_partial.get("partial_dbs_by_tag", {})
+    p_tags_by_tag = raw_partial.get("partial_tags_by_tag", {})
+
+    # Filter partial_tags_by_db
+    for db, tags_list in p_tags_by_db.items():
+        if not allowed_databases or db in allowed_databases:
+            valid_tags = [t for t in tags_list if (not allowed_tags or t in allowed_tags)]
+            if valid_tags:
+                partial_resources["partial_tags_by_db"][db] = valid_tags
+
+    # Filter partial_dbs_by_tag
+    for tag, dbs_list in p_dbs_by_tag.items():
+        if not allowed_tags or tag in allowed_tags:
+            valid_dbs = [d for d in dbs_list if (not allowed_databases or d in allowed_databases)]
+            if valid_dbs:
+                partial_resources["partial_dbs_by_tag"][tag] = valid_dbs
+
+    # Filter partial_tags_by_tag
+    for tag, tags_list in p_tags_by_tag.items():
+        if not allowed_tags or tag in allowed_tags:
+            valid_tags = [t for t in tags_list if (not allowed_tags or t in allowed_tags)]
+            if valid_tags:
+                partial_resources["partial_tags_by_tag"][tag] = valid_tags
+
+    return partial_resources

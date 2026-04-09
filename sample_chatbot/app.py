@@ -9,9 +9,9 @@ import warnings
 import logging.config
 
 from flask import Flask
-from utils.uniformLLM import UniformLLM
 from utils.logging_utils import get_logging_config
-from sample_chatbot.config import init_config
+from utils.yaml.validate_and_parse import load_and_validate_agents
+from sample_chatbot.config import init_agents, setup_agents_directories, log_agents_config
 from sample_chatbot.extensions import login_manager
 from sample_chatbot.services.user_store import user_store
 from sample_chatbot.utils.helpers import check_env_variables, setup_directories
@@ -36,6 +36,10 @@ def create_app(config=None):
     Returns:
         Configured Flask application instance.
     """
+    from utils.langfuse import init_langfuse
+
+    init_langfuse()
+
     # Ignore warnings
     warnings.filterwarnings("ignore")
 
@@ -46,15 +50,19 @@ def create_app(config=None):
     log_config = get_logging_config()
     logging.config.dictConfig(log_config)
 
-    # Create upload and report directories
-    setup_directories()
+    #Load agents configuration:
+    agents_config = load_and_validate_agents()
 
     # Initialize configuration
     if config is None:
-        config = init_config()
+        config = init_agents(agents_config)
 
-    # Log configuration
-    config.log_config(logging)
+    # Create upload and report directories
+    setup_directories()
+    setup_agents_directories()
+
+    # Log agents configuration
+    log_agents_config(logging)
 
     # Connect to AI SDK
     logging.info("Connecting to AI SDK...")
@@ -73,15 +81,6 @@ def create_app(config=None):
 
     # Store config in app for access from routes
     app.config['CHATBOT_CONFIG'] = config
-
-    # Initialize LLM and store in app config
-    llm = UniformLLM(
-        config.llm_provider,
-        config.llm_model,
-        config.llm_temperature,
-        config.llm_max_tokens
-    )
-    app.config['LLM'] = llm
 
     # Initialize Flask-Login
     login_manager.init_app(app)

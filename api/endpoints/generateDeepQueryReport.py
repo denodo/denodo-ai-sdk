@@ -22,6 +22,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException
 from api.utils.sdk_utils import handle_endpoint_error, authenticate
 from api.deepquery.main import generate_report_from_deepquery_metadata
+from utils.utils import get_custom_request_headers
 
 router = APIRouter()
 
@@ -59,6 +60,7 @@ class generateDeepQueryReportResponse(BaseModel):
 async def generate_deep_query_report_post(
     endpoint_request: generateDeepQueryReportRequest,
     auth: str = Depends(authenticate),
+    custom_headers: dict = Depends(get_custom_request_headers),
 ):
     """Generate an HTML report from a DeepQuery analysis.
 
@@ -113,6 +115,7 @@ async def generate_deep_query_report_post(
         max_reporting_loops=endpoint_request.max_reporting_loops,
         include_failed_tool_calls_appendix=endpoint_request.include_failed_tool_calls_appendix,
         auth=auth,
+        custom_headers=custom_headers
     )
 
     total_time = time.time() - start_time

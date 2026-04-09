@@ -43,16 +43,23 @@ class UniformVectorStore:
             )
         elif self.provider == "pgvector":
             from langchain_postgres import PGVector
+            from sqlalchemy import create_engine
 
-            PGVECTOR_CONNECTION_STRING = os.getenv("PGVECTOR_CONNECTION_STRING", "postgresql+psycopg://langchain:langchain@localhost:6024/langchain")
+            PGVECTOR_CONNECTION_STRING = os.getenv("PGVECTOR_CONNECTION_STRING")
 
             if not PGVECTOR_CONNECTION_STRING:
                 raise ValueError("PGVECTOR_CONNECTION_STRING environment variable not set.")
 
+            engine = create_engine(
+                PGVECTOR_CONNECTION_STRING,
+                pool_pre_ping=True, # Test connection before use to handle dropped connections
+                pool_recycle=1800, # Recycle connections after 1800 seconds
+            )
+
             self.client = PGVector(
                 embeddings=self.embeddings,
+                connection=engine,
                 collection_name=self.index_name,
-                connection=PGVECTOR_CONNECTION_STRING,
                 use_jsonb=True,
             )
         elif self.provider == "opensearch":
@@ -197,7 +204,10 @@ class UniformVectorStore:
         # Build search filter if view_ids has values
         elif view_ids is not None:
             search_filter = self._build_search_filter(view_ids, database_names, tag_names, view_names)
-        # Otherwise, no filter on view_ids
+        elif not view_names and ((database_names and len(database_names) > 0) or (tag_names and len(tag_names) > 0)):
+            search_filter = self._build_metadata_search_filter(database_names, tag_names)
+        elif view_names:
+            search_filter = self._build_get_view_ids_search_filter(view_names)
         else:
             search_filter = None
 

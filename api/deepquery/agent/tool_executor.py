@@ -1,8 +1,8 @@
 import json
 import time
-import hashlib
 import asyncio
 import logging
+import uuid
 
 from datetime import datetime
 from api.deepquery.agent.xml_utils import parse_xml
@@ -49,7 +49,7 @@ class ToolExecutor:
         tool_map = {tool.__name__: tool for tool in self.tools}
 
         # Create tool ID first
-        tool_id = hashlib.md5(f"{tool_name}_{datetime.now().isoformat()}".encode()).hexdigest()[:8]
+        tool_id = uuid.uuid4().hex[:8]
 
         self.logger.info(f"Executing tool: {tool_name} (ID: {tool_id})")
 

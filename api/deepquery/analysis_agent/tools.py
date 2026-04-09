@@ -3,6 +3,7 @@ from langchain_core.output_parsers import StrOutputParser
 from api.deepquery.agent.xml_utils import remove_think_tags
 from api.deepquery.analysis_agent.prompts import SCHEMA_DIGEST_PROMPT
 from api.deepquery.utils import execute_base_database_query
+from api.utils.answer_question.serializers import get_full_execution_result_rows
 from utils import langfuse
 
 class AnalysisToolsMixin:
@@ -138,6 +139,7 @@ class AnalysisToolsMixin:
             action_description=action_description,
             cohorts=self.cohorts,
             auth=self.auth,
+            custom_headers=getattr(self, "custom_headers", None),
             mode=mode,
             verbose=False,
             disclaimer=False,
@@ -151,11 +153,12 @@ class AnalysisToolsMixin:
             return json_response
 
         # Keep only the first N rows where keys are 'Row 1', 'Row 2', ..., 'Row N'
+        execution_result_rows = get_full_execution_result_rows(json_response.get("execution_result", {}))
         filtered = {}
         for i in range(1, default_rows + 1):
             key = f"Row {i}"
-            if key in json_response.get("execution_result", {}):
-                filtered[key] = json_response["execution_result"][key]
+            if key in execution_result_rows:
+                filtered[key] = execution_result_rows[key]
         json_response["execution_result"] = filtered
 
         # Handle metadata summary actions

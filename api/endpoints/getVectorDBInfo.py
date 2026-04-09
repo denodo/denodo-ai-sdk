@@ -21,9 +21,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from api.utils import state_manager
 from api.utils.sdk_utils import get_user_synced_resources, handle_endpoint_error, check_metadata_user_permission, authenticate
 from utils.data_catalog import get_allowed_view_ids, DataCatalogAuthError
+from utils.utils import get_custom_request_headers
 
 router = APIRouter()
-
 
 class VectorDBInfoResponse(BaseModel):
     synced_resources: Dict = Field(
@@ -51,14 +51,17 @@ class VectorDBInfoResponse(BaseModel):
     tags=['Vector Store']
 )
 @handle_endpoint_error("getVectorDBInfo")
-async def getVectorDBInfo(auth: str = Depends(authenticate)):
+async def getVectorDBInfo(
+    auth: str = Depends(authenticate),
+    custom_headers: dict = Depends(get_custom_request_headers)
+):
     """
     Gets the synchronized VDBs and tags with their last synchronization date.
     This list is filtered to show only the resources that contain at least one view
     the current user has permissions for.
     """
     try:
-        allowed_view_ids = await get_allowed_view_ids(auth=auth)
+        allowed_view_ids = await get_allowed_view_ids(auth=auth, custom_headers=custom_headers)
         allowed_view_ids_str = [str(vid) for vid in allowed_view_ids]
     except DataCatalogAuthError as e:
         raise HTTPException(status_code=401, detail=f"Authentication failed during getVectorDBInfo: {str(e)}") from e
