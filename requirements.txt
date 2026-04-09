@@ -96,8 +96,8 @@ langchain-openai==1.1.0
 langchain-postgres==0.0.16
 langchain-sambanova==1.0.0
 langchain-text-splitters==1.0.0
-langchain==1.1.0
-langgraph==1.0.10
+langchain==1.2.15
+langgraph==1.1.6
 langgraph-checkpoint==4.0.0
 langfuse==3.10.1
 langsmith==0.4.4

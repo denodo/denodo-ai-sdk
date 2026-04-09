@@ -1,6 +1,7 @@
 version 1.1 - 20260409
 ----------------------
 
+- Upgraded Langchain and Langgraph dependencies to resolve dependency conflicts in the sample chatbot
 - Included home page chat bar in the sample chatbot for a more actionable experience
 - Updated Denodo Platform icons to high-definition SVG files
 - Applied max-width styling to images embedded in LLM responses
