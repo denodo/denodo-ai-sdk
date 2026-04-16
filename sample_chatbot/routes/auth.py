@@ -175,12 +175,13 @@ def change_agent():
         current_user.set_custom_instructions(user_details, custom_instructions)
 
     if active_csvs is not None:
-        current_user.active_csv_sources = active_csvs
+        valid_active_csvs = [src for src in active_csvs if src in current_user.csv_sources]
+        current_user.active_csv_sources = valid_active_csvs
+
         for src in current_user.csv_sources:
-            current_user.csv_sources[src]['active'] = (src in active_csvs)
+            current_user.csv_sources[src]['active'] = (src in valid_active_csvs)
 
         current_user._update_csv_description()
-
         current_user.chatbot = None
 
     filtered_synced = current_user.synced_resources

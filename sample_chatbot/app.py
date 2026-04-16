@@ -9,6 +9,7 @@ import warnings
 import logging.config
 
 from flask import Flask
+from utils.utils import validate_data_dir
 from utils.logging_utils import get_logging_config
 from utils.yaml.validate_and_parse import load_and_validate_agents
 from sample_chatbot.config import init_agents, setup_agents_directories, log_agents_config
@@ -46,6 +47,8 @@ def create_app(config=None):
     # Check required environment variables
     check_env_variables(REQUIRED_VARS)
 
+    data_dir = validate_data_dir()
+
     # Set up logging
     log_config = get_logging_config()
     logging.config.dictConfig(log_config)
@@ -58,7 +61,12 @@ def create_app(config=None):
         config = init_agents(agents_config)
 
     # Create upload and report directories
-    setup_directories()
+    upload_folder = os.path.join(data_dir, "uploads")
+
+    setup_directories(
+        upload_folder=upload_folder,
+        report_folder=os.path.join(data_dir, "reports")
+    )
     setup_agents_directories()
 
     # Log agents configuration
@@ -74,7 +82,7 @@ def create_app(config=None):
 
     # Create Flask app
     app = Flask(__name__, static_folder='frontend/build')
-    app.config['UPLOAD_FOLDER'] = "uploads"
+    app.config['UPLOAD_FOLDER'] = upload_folder
     app.config['APPLICATION_ROOT'] = config.root_path
     app.secret_key = os.urandom(24)
     app.session_interface.digest_method = staticmethod(hashlib.sha256)

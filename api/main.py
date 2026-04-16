@@ -32,8 +32,10 @@ from api.endpoints import (  # noqa: E402
     generateDeepQueryReport,
 )
 from utils.logging_utils import get_logging_config, transaction_id_var # noqa: E402
-from utils.utils import normalize_root_path, format_comma_separated_list, generate_transaction_id # noqa: E402
+from utils.utils import normalize_root_path, format_comma_separated_list, generate_transaction_id, validate_data_dir # noqa: E402
 from utils.version import AI_SDK_VERSION # noqa: E402
+
+DATA_DIR = validate_data_dir()
 
 required_vars = [
     "AI_SDK_DATA_MARKETPLACE_URL",
@@ -108,6 +110,7 @@ def log_ai_sdk_parameters():
         "AI SDK Port": AI_SDK_PORT,
         "AI SDK Root Path": AI_SDK_ROOT_PATH or "/",
         "AI SDK Version": AI_SDK_VERSION,
+        "AI SDK Data Dir (logs, cache, reports...)": DATA_DIR,
         "AI SDK Workers": AI_SDK_WORKERS,
         "Using SSL": bool(AI_SDK_SSL_KEY and AI_SDK_SSL_CERT),
         "LLM Model": f"{AI_SDK_LLM_PROVIDER}/{AI_SDK_LLM_MODEL} (temp={AI_SDK_LLM_TEMPERATURE}, max_tokens={AI_SDK_LLM_MAX_TOKENS})",
@@ -196,10 +199,6 @@ base_app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-reports_dir = "api/reports"
-os.makedirs(reports_dir, exist_ok=True)
-base_app.mount("/reports", StaticFiles(directory=reports_dir), name="reports")
 
 @base_app.get("/favicon.svg", include_in_schema=False)
 async def favicon():

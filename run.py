@@ -15,13 +15,14 @@ import time
 import signal
 import argparse
 import threading
+from dotenv import dotenv_values
 from rich.panel import Panel
 from rich.console import Console
 from utils.runner_migration import run_migration_tool
 from utils.runner_demo import load_demo_data
 from utils.runner_display import print_header, PANEL_WIDTH
 from utils.runner_process import run_process, shutdown_gracefully, command_listener
-from utils.utils import is_in_venv
+from utils.utils import is_in_venv, validate_data_dir
 
 console = Console()
 
@@ -30,7 +31,6 @@ def parse_arguments():
     parser.add_argument("mode", choices=["api", "sample_chatbot", "both"], help="Mode to run: api, sample_chatbot, or both")
     parser.add_argument("--migrate", action="store_true", help="Run the migration tool before starting services")
     parser.add_argument("--timeout", type=int, default=30, help="Timeout in seconds (default: 30)")
-    parser.add_argument("--load-demo", action="store_true", help="Load demo data before starting (only works with 'both' mode)")
     parser.add_argument("--host", default="localhost", help="GRPC host (default: localhost)")
     parser.add_argument("--grpc-port", type=int, default=9994, help="GRPC port (default: 9994)")
     parser.add_argument("--dm-port", "--dc-port", dest="dc_port", metavar="DM_PORT", type=int, default=9090, help="Data Marketplace port (default: 9090)")
@@ -43,6 +43,9 @@ def parse_arguments():
     parser.add_argument("--background", action="store_true", help="Run processes in the background and exit after they start.")
     parser.add_argument("--log-level", choices=["DEBUG", "INFO"], default="INFO", help="Set the logging level (default: INFO)")
     parser.add_argument("--mcp", nargs="?", const="remote", choices=["remote"], help="Enable remote MCP server via HTTP")
+    _demo = parser.add_mutually_exclusive_group()
+    _demo.add_argument("--load-demo", action="store_true", help="Load demo data (only with mode 'both'). Prompts before overwriting samples_bank if it exists.")
+    _demo.add_argument("--load-demo-overwrite", action="store_true", help="Load demo data (only with mode 'both') and drop existing samples_bank without prompting. For non-interactive runs. Cannot be combined with --load-demo.")
     return parser.parse_args()
 
 
@@ -58,6 +61,33 @@ if __name__ == "__main__":
     log_threads = []
 
     print_header()
+
+    env_api = dotenv_values('api/utils/sdk_config.env') if args.mode in ["api", "both"] else {}
+    env_chat = dotenv_values('sample_chatbot/chatbot_config.env') if args.mode in ["sample_chatbot", "both"] else {}
+
+    if args.mode == "both":
+        dir_api = env_api.get("AI_SDK_DATA_DIR")
+        dir_chat = env_chat.get("AI_SDK_DATA_DIR")
+
+        if dir_api and dir_chat and dir_api != dir_chat:
+            console.print(Panel(
+                f"[bold yellow]WARNING: Data Directory Mismatch[/]\n\n"
+                f"You are running in 'both' mode but have different paths configured:\n"
+                f" • sdk_config.env: [cyan]{dir_api}[/]\n"
+                f" • chatbot_config.env: [cyan]{dir_chat}[/]\n\n"
+                f"To prevent data separation, the system will force the sdk_config.env path:\n"
+                f"[bold white]{dir_api}[/]\n\n"
+                f"[italic]Please fix your .env files to ensure consistent data persistence.[/]",
+                border_style="yellow",
+                width=PANEL_WIDTH
+            ))
+            env_chat["AI_SDK_DATA_DIR"] = dir_api
+
+    env_dict = {**env_api, **env_chat}
+    if "AI_SDK_DATA_DIR" in env_dict:
+        os.environ["AI_SDK_DATA_DIR"] = env_dict["AI_SDK_DATA_DIR"]
+
+    DATA_DIR = validate_data_dir()
 
     # Check if running in a virtual environment
     if not is_in_venv():
@@ -96,8 +126,22 @@ if __name__ == "__main__":
         ))
 
     try:
-        if args.load_demo:
-            if not load_demo_data(args.host, args.grpc_port, args.dc_port, args.server_id, args.dc_user, args.dc_password):
+        if args.load_demo or args.load_demo_overwrite:
+            if args.mode != "both":
+                console.print(
+                    "[bold red]ERROR:[/] Demo loading is only supported with mode [cyan]both[/] "
+                    "(e.g. [cyan]python run.py both --load-demo[/] or [cyan]both --load-demo-overwrite[/])."
+                )
+                sys.exit(1)
+            if not load_demo_data(
+                args.host,
+                args.grpc_port,
+                args.dc_port,
+                args.server_id,
+                args.dc_user,
+                args.dc_password,
+                demo_overwrite=args.load_demo_overwrite,
+            ):
                 console.print("[bold red]ERROR:[/] Failed to load demo data. Please check the logs for more information.")
                 sys.exit(1)
 
@@ -118,7 +162,7 @@ if __name__ == "__main__":
             except TimeoutError:
                 # Display formatted error panel with debugging instructions
                 service_display_name = "AI SDK" if process_name == "api" else "Sample chatbot"
-                log_file_path = f"logs/{process_name}.log"
+                log_file_path = os.path.join(DATA_DIR, "logs", f"{process_name}.log") if DATA_DIR != "." else f"logs/{process_name}.log"
                 debug_command = f"python -m {process_name}.main"
 
                 console.print(Panel(

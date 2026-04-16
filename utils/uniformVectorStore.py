@@ -26,10 +26,13 @@ class UniformVectorStore:
                 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
             from chromadb.config import Settings
             from langchain_chroma import Chroma
+            data_dir = os.getenv("AI_SDK_DATA_DIR", ".")
+            persist_dir = os.path.join(data_dir, self.index_name)
+
             self.client = Chroma(
                 collection_name=self.index_name,
                 embedding_function=self.embeddings,
-                persist_directory=self.index_name,
+                persist_directory=persist_dir,
                 collection_metadata={
                     "hnsw:space": "cosine",
                     "hnsw:construction_ef": 512,

@@ -22,7 +22,13 @@ class UniformEmbeddings:
         self.provider_name = provider_name
         self.model_name = model_name
         self.model = None
-        self.store = LocalFileStore("./cache/embeddings/")
+        data_dir = os.getenv("AI_SDK_DATA_DIR", ".")
+        if data_dir != ".":
+            cache_path = os.path.join(data_dir, "cache", "embeddings")
+        else:
+            cache_path = "./cache/embeddings/"
+
+        self.store = LocalFileStore(cache_path)
         self.base_embeddings = None
 
         if self.provider_name.lower() == "openai":

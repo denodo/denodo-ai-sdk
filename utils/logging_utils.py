@@ -139,7 +139,9 @@ def get_logging_config():
     }
 
     if not no_logs_to_file:
-        log_file_path = os.environ.get("LOG_FILE_PATH", "logs/default.log")
+        data_dir = os.environ.get("AI_SDK_DATA_DIR", ".")
+        default_log_path = os.path.join(data_dir, "logs", "default.log") if data_dir != "." else "logs/default.log"
+        log_file_path = os.environ.get("LOG_FILE_PATH", default_log_path)
         max_log_size_mb = float(os.environ.get("LOG_MAX_SIZE_MB", 1))
 
         LOGGING_CONFIG["handlers"]["rotating_file"] = {

@@ -87,7 +87,7 @@ Args:
     logger.info("MCP Server initialized")
 
     def _extract_auth():
-        raw_headers = get_http_headers()
+        raw_headers = get_http_headers(include={"authorization"})
         headers = {k.lower(): v for k, v in raw_headers.items()}
         auth = headers.get("authorization")
 

@@ -41,6 +41,29 @@ def is_in_venv():
     """
     return sys.prefix != sys.base_prefix
 
+def validate_data_dir():
+    """
+    Validates and returns the centralized data directory (AI_SDK_DATA_DIR).
+    If the directory doesn't exist, it attempts to create it.
+    If it fails or lacks write permissions, it falls back to '.' (current directory).
+    """
+    data_dir = os.getenv("AI_SDK_DATA_DIR", ".")
+    if data_dir != ".":
+        data_dir = os.path.abspath(data_dir)
+        if not os.path.exists(data_dir):
+            try:
+                os.makedirs(data_dir, exist_ok=True)
+            except Exception as e:
+                logging.warning(f"Could not create AI_SDK_DATA_DIR '{data_dir}': {e}. Falling back to '.'")
+                data_dir = "."
+
+        if data_dir != "." and not os.access(data_dir, os.W_OK):
+            logging.warning(f"AI_SDK_DATA_DIR '{data_dir}' is not writable. Falling back to '.'")
+            data_dir = "."
+
+    os.environ["AI_SDK_DATA_DIR"] = data_dir
+    return data_dir
+
 def log_params(func=None, *, truncate_input_chars=500, truncate_output_chars=500):
     if func is None:
         return functools.partial(log_params, truncate_input_chars=truncate_input_chars, truncate_output_chars=truncate_output_chars)

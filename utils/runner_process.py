@@ -23,7 +23,9 @@ def run_process(process_type, args):
     else:
         no_logs = args.no_logs
 
-    env['LOG_FILE_PATH'] = os.path.join("logs", f"{process_type}.log")
+    data_dir = env.get("AI_SDK_DATA_DIR", ".")
+    log_dir = os.path.join(data_dir, "logs") if data_dir != "." else "logs"
+    env['LOG_FILE_PATH'] = os.path.join(log_dir, f"{process_type}.log")
     env['LOG_MAX_SIZE_MB'] = str(args.max_log_size)
     env['NO_LOGS_TO_FILE'] = str(no_logs)
     env['LOG_LEVEL'] = args.log_level

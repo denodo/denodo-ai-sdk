@@ -1,3 +1,12 @@
+version 1.1.1 - 20260415
+----------------------
+
+- Upgraded FastMCP to 3.2.0 to resolve container startup issue and CVEs
+- Added AI_SDK_DATA_DIR as a configuration parameter for easier data persistence management
+- Fixed bug during custom agent switch caused by unsynced active_csvs payload from chatbot UI
+- Upgraded Pillow to 12.2.0 to resolve CVEs
+- Expanded the data of the example samples_bank dataset and improved the metadata to conform to AI-ready semantic layer standards
+
 version 1.1 - 20260409
 ----------------------
 

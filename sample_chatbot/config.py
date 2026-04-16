@@ -27,6 +27,9 @@ class ChatbotConfig:
         # Access control
         self.allowed_users = config_dict.get('allowed_users', None)
 
+        # Centralized Data Directory
+        self.data_dir = os.getenv("AI_SDK_DATA_DIR", ".")
+
         # LLM Configuration
         self.llm_provider = get_config_value(settings, 'llm_provider', 'CHATBOT_LLM_PROVIDER')
         self.llm_model = get_config_value(settings, 'llm_model', 'CHATBOT_LLM_MODEL')
@@ -88,7 +91,11 @@ class ChatbotConfig:
         self.filters_enabled = settings.get('filters_enabled', True)
 
         # Reporting Configuration
-        self.reports_folder = "reports/" + self.id
+        if self.data_dir != ".":
+            self.reports_folder = os.path.join(self.data_dir, "reports", self.id)
+        else:
+            self.reports_folder = f"reports/{self.id}"
+
         self.report_max_size = get_config_value(settings, 'report_max_size', 'CHATBOT_REPORT_MAX_SIZE', '10', int)
         self.report_max_files = get_config_value(settings, 'report_max_files', 'CHATBOT_REPORT_MAX_FILES', '10', int)
 
@@ -153,6 +160,7 @@ class ChatbotConfig:
         logger.info(f"    - Embeddings Model: {self.embeddings_provider}/{self.embeddings_model}")
         logger.info(f"    - Vector Store Provider: {self.vector_store_provider}")
         logger.info(f"    - AI SDK Host: {self.ai_sdk_host}")
+        logger.info(f"    - AI SDK Data Dir (logs, cache, reports...): {self.data_dir}")
         logger.info(f"    - Using SSL: {self.ssl_enabled}")
         logger.info(f"    - DeepQuery: {'enabled' if self.deepquery_enabled else 'disabled'}")
         logger.info(f"    - Reporting: {self.reporting_enabled}")

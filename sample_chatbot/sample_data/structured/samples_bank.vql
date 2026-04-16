@@ -52,7 +52,7 @@ CREATE OR REPLACE FOLDER '/02 - Datasets' ;
 CREATE OR REPLACE FOLDER '/03 - Associations' DESCRIPTION 'This folder stores associations.' ;
 
 CREATE OR REPLACE DATASOURCE DF ds_bank_account
-    FOLDER = '/01 - data sources'
+    FOLDER = '/01 - Data Sources'
     ROUTE LOCAL 'LocalConnection' '../samples/ai-sdk/sample_chatbot/sample_data/structured/account.csv' FILENAMEPATTERN = ''
     CHARSET = 'UTF-8'
     COLUMNDELIMITER = ','
@@ -60,7 +60,7 @@ CREATE OR REPLACE DATASOURCE DF ds_bank_account
     HEADER = TRUE;
 
 CREATE OR REPLACE DATASOURCE DF ds_bank_customer
-    FOLDER = '/01 - data sources'
+    FOLDER = '/01 - Data Sources'
     ROUTE LOCAL 'LocalConnection' '../samples/ai-sdk/sample_chatbot/sample_data/structured/customer.csv' FILENAMEPATTERN = ''
     CHARSET = 'UTF-8'
     COLUMNDELIMITER = ','
@@ -68,7 +68,7 @@ CREATE OR REPLACE DATASOURCE DF ds_bank_customer
     HEADER = TRUE;
 
 CREATE OR REPLACE DATASOURCE DF ds_bank_loan
-    FOLDER = '/01 - data sources'
+    FOLDER = '/01 - Data Sources'
     ROUTE LOCAL 'LocalConnection' '../samples/ai-sdk/sample_chatbot/sample_data/structured/loan.csv' FILENAMEPATTERN = ''
     CHARSET = 'UTF-8'
     COLUMNDELIMITER = ','
@@ -76,7 +76,7 @@ CREATE OR REPLACE DATASOURCE DF ds_bank_loan
     HEADER = TRUE;
 
 CREATE OR REPLACE DATASOURCE DF ds_bank_loan_officer
-    FOLDER = '/01 - data sources'
+    FOLDER = '/01 - Data Sources'
     ROUTE LOCAL 'LocalConnection' '../samples/ai-sdk/sample_chatbot/sample_data/structured/loan_officer.csv' FILENAMEPATTERN = ''
     CHARSET = 'UTF-8'
     COLUMNDELIMITER = ','
@@ -84,7 +84,7 @@ CREATE OR REPLACE DATASOURCE DF ds_bank_loan_officer
     HEADER = TRUE;
 
 CREATE OR REPLACE DATASOURCE DF ds_bank_payment
-    FOLDER = '/01 - data sources'
+    FOLDER = '/01 - Data Sources'
     ROUTE LOCAL 'LocalConnection' '../samples/ai-sdk/sample_chatbot/sample_data/structured/payment.csv' FILENAMEPATTERN = ''
     CHARSET = 'UTF-8'
     COLUMNDELIMITER = ','
@@ -92,7 +92,7 @@ CREATE OR REPLACE DATASOURCE DF ds_bank_payment
     HEADER = TRUE;
 
 CREATE OR REPLACE DATASOURCE DF ds_bank_property
-    FOLDER = '/01 - data sources'
+    FOLDER = '/01 - Data Sources'
     ROUTE LOCAL 'LocalConnection' '../samples/ai-sdk/sample_chatbot/sample_data/structured/property.csv' FILENAMEPATTERN = ''
     CHARSET = 'UTF-8'
     COLUMNDELIMITER = ','
@@ -100,7 +100,7 @@ CREATE OR REPLACE DATASOURCE DF ds_bank_property
     HEADER = TRUE;
 
 CREATE OR REPLACE DATASOURCE DF ds_bank_rate
-    FOLDER = '/01 - data sources'
+    FOLDER = '/01 - Data Sources'
     ROUTE LOCAL 'LocalConnection' '../samples/ai-sdk/sample_chatbot/sample_data/structured/rate.csv' FILENAMEPATTERN = ''
     CHARSET = 'UTF-8'
     COLUMNDELIMITER = ','
@@ -108,7 +108,7 @@ CREATE OR REPLACE DATASOURCE DF ds_bank_rate
     HEADER = TRUE;
 
 CREATE OR REPLACE DATASOURCE DF ds_bank_underwriting
-    FOLDER = '/01 - data sources'
+    FOLDER = '/01 - Data Sources'
     ROUTE LOCAL 'LocalConnection' '../samples/ai-sdk/sample_chatbot/sample_data/structured/underwriting.csv' FILENAMEPATTERN = ''
     CHARSET = 'UTF-8'
     COLUMNDELIMITER = ','
@@ -118,34 +118,34 @@ CREATE OR REPLACE DATASOURCE DF ds_bank_underwriting
 ALTER DATABASE samples_bank
   CHARSET DEFAULT;
 
-CREATE OR REPLACE WRAPPER DF bv_bank_loan
-    FOLDER = '/02 - datasets'
+CREATE OR REPLACE WRAPPER DF ds_bank_loan
+    FOLDER = '/02 - Datasets'
     DATASOURCENAME=ds_bank_loan
     OUTPUTSCHEMA (
         loan_id = 'loan_id',
         customer_id = 'customer_id',
         loan_amount = 'loan_amount',
         interest_rate = 'interest_rate',
-        term = 'term',
+        term_years = 'term',
         property_id = 'property_id',
         loan_officer_id = 'loan_officer_id',
         status = 'status',
-        date_created = 'date_created'
+        loan_origination_date = 'date_created'
     );
 
-CREATE OR REPLACE WRAPPER DF "ds_bank_account_d1a3d1a8-f41f-40c6-8a09-4c35ffcd021c"
-    FOLDER = '/02 - datasets'
+CREATE OR REPLACE WRAPPER DF ds_bank_account
+    FOLDER = '/02 - Datasets'
     DATASOURCENAME=ds_bank_account
     OUTPUTSCHEMA (
         acct_id = 'acct_id',
         customer_id = 'customer_id',
         acct_type = 'acct_type',
         balance = 'balance',
-        date_created = 'date_created'
+        account_opened_date = 'date_created'
     );
 
 CREATE OR REPLACE WRAPPER DF ds_bank_customer
-    FOLDER = '/02 - datasets'
+    FOLDER = '/02 - Datasets'
     DATASOURCENAME=ds_bank_customer
     OUTPUTSCHEMA (
         customer_id = 'customer_id',
@@ -160,7 +160,7 @@ CREATE OR REPLACE WRAPPER DF ds_bank_customer
     );
 
 CREATE OR REPLACE WRAPPER DF ds_bank_loan_officer
-    FOLDER = '/02 - datasets'
+    FOLDER = '/02 - Datasets'
     DATASOURCENAME=ds_bank_loan_officer
     OUTPUTSCHEMA (
         loan_officer_id = 'loan_officer_id',
@@ -171,7 +171,7 @@ CREATE OR REPLACE WRAPPER DF ds_bank_loan_officer
     );
 
 CREATE OR REPLACE WRAPPER DF ds_bank_payment
-    FOLDER = '/02 - datasets'
+    FOLDER = '/02 - Datasets'
     DATASOURCENAME=ds_bank_payment
     OUTPUTSCHEMA (
         payment_id = 'payment_id',
@@ -181,7 +181,7 @@ CREATE OR REPLACE WRAPPER DF ds_bank_payment
     );
 
 CREATE OR REPLACE WRAPPER DF ds_bank_property
-    FOLDER = '/02 - datasets'
+    FOLDER = '/02 - Datasets'
     DATASOURCENAME=ds_bank_property
     OUTPUTSCHEMA (
         property_id = 'property_id',
@@ -193,17 +193,17 @@ CREATE OR REPLACE WRAPPER DF ds_bank_property
     );
 
 CREATE OR REPLACE WRAPPER DF ds_bank_rate
-    FOLDER = '/02 - datasets'
+    FOLDER = '/02 - Datasets'
     DATASOURCENAME=ds_bank_rate
     OUTPUTSCHEMA (
         rate_id = 'rate_id',
         loan_type = 'loan_type',
-        term = 'term',
+        term_years = 'term',
         interest_rate = 'interest_rate'
     );
 
 CREATE OR REPLACE WRAPPER DF ds_bank_underwriting
-    FOLDER = '/02 - datasets'
+    FOLDER = '/02 - Datasets'
     DATASOURCENAME=ds_bank_underwriting
     OUTPUTSCHEMA (
         underwriting_id = 'underwriting_id',
@@ -214,13 +214,14 @@ CREATE OR REPLACE WRAPPER DF ds_bank_underwriting
     );
 
 CREATE OR REPLACE TABLE account I18N us_pst (
-        acct_id:int (description = 'The unique identifier of the account'),
-        customer_id:int (description = 'The identifier of the customer'),
-        acct_type:text (description = 'The type of account'),
-        balance:double (description = 'The balance, this is the current amount of money in the account'),
-        date_created:localdate (description = 'The account creation date')
+        acct_id:int,
+        customer_id:int,
+        acct_type:text (description = 'Product type. Valid values (case-sensitive): Checking, Savings, Money Market, CD. Checking: everyday deposits and debits. Savings: interest-bearing deposit. Money Market: higher-balance savings tier with tiered rates. CD: certificate of deposit, fixed term until maturity.'),
+        balance:double (description = 'Current balance in USD'),
+        account_opened_date:localdate
     )
-    FOLDER = '/02 - datasets'
+    FOLDER = '/02 - Datasets'
+    DESCRIPTION = 'One row per bank account. Monetary amounts are USD. Join to customer for holder profile.'
     CACHE OFF
     TIMETOLIVEINCACHE DEFAULT
     ADD SEARCHMETHOD ds_bank_account(
@@ -230,25 +231,26 @@ CREATE OR REPLACE TABLE account I18N us_pst (
              ADD customer_id NOS ZERO ()
              ADD acct_type NOS ZERO ()
              ADD balance NOS ZERO ()
-             ADD date_created NOS ZERO ()
+             ADD account_opened_date NOS ZERO ()
         )
-        OUTPUTLIST (acct_id, acct_type, balance, customer_id, date_created
+        OUTPUTLIST (acct_id, acct_type, balance, customer_id, account_opened_date
         )
-        WRAPPER (df "ds_bank_account_d1a3d1a8-f41f-40c6-8a09-4c35ffcd021c")
+        WRAPPER (df ds_bank_account)
     );
 
 CREATE OR REPLACE TABLE customer I18N us_pst (
-        customer_id:text (description = 'The unique identifier of the customer'),
-        first_name:text (description = 'The first name of the customer'),
-        last_name:text (description = 'The last name of the customer'),
-        email:text (description = 'The email of the customer'),
-        phone_number:text (description = 'The phone number of the customer'),
-        address:text (description = 'The address of the customer'),
-        city:text (description = 'The city where the customer lives'),
-        state:text (description = 'the state where the customer lives'),
-        zip_code:text (description = 'the zip code where the customer lives')
+        customer_id:int,
+        first_name:text,
+        last_name:text,
+        email:text,
+        phone_number:text,
+        address:text,
+        city:text,
+        state:text,
+        zip_code:text
     )
-    FOLDER = '/02 - datasets'
+    FOLDER = '/02 - Datasets'
+    DESCRIPTION = 'One row per customer. Use as the primary customer dimension. Join to samples_bank.loan and samples_bank.account on customer_id.'
     CACHE OFF
     TIMETOLIVEINCACHE DEFAULT
     ADD SEARCHMETHOD ds_bank_customer(
@@ -270,45 +272,47 @@ CREATE OR REPLACE TABLE customer I18N us_pst (
     );
 
 CREATE OR REPLACE TABLE loan I18N us_pst (
-        loan_id:int (description = 'A unique identifier for each loan.'),
-        customer_id:int (description = 'A unique identifier for each customer.'),
-        loan_amount:double (description = 'The total amount of money that has been loaned'),
-        interest_rate:double (description = 'The interest rate applied to the loan.'),
-        term:int (description = 'The duration of the loan'),
-        property_id:int (description = 'A reference to the property associated with the loan, if applicable.'),
-        loan_officer_id:int (description = 'A reference to the loan officer who managed the loan application.'),
-        status:text (description = 'The current status of the loan. Can be rejected, pending or approved.'),
-        date_created:localdate (description = 'The date the loan was originated')
+        loan_id:int,
+        customer_id:int,
+        loan_amount:double (description = 'Principal in USD'),
+        interest_rate:double (description = 'Annual rate as a percentage (e.g. 4.5 means 4.5%)'),
+        term_years:int,
+        property_id:int,
+        loan_officer_id:int,
+        status:text (description = 'Application status. Valid values (case-sensitive): approved, pending, rejected'),
+        loan_origination_date:localdate
     )
-    FOLDER = '/02 - datasets'
+    FOLDER = '/02 - Datasets'
+    DESCRIPTION = 'Mortgage-style loans. One row per loan application. Use for origination, status, term, and principal. For individual payments and repayment timing, use samples_bank.payment. Monetary amounts are USD.'
     CACHE OFF
     TIMETOLIVEINCACHE DEFAULT
-    ADD SEARCHMETHOD bv_bank_loan(
+    ADD SEARCHMETHOD ds_bank_loan(
         I18N us_pst
         CONSTRAINTS (
              ADD loan_id NOS ZERO ()
              ADD customer_id NOS ZERO ()
              ADD loan_amount NOS ZERO ()
              ADD interest_rate NOS ZERO ()
-             ADD term NOS ZERO ()
+             ADD term_years NOS ZERO ()
              ADD property_id NOS ZERO ()
              ADD loan_officer_id NOS ZERO ()
              ADD status NOS ZERO ()
-             ADD date_created NOS ZERO ()
+             ADD loan_origination_date NOS ZERO ()
         )
-        OUTPUTLIST (customer_id, date_created, interest_rate, loan_amount, loan_id, loan_officer_id, property_id, status, term
+        OUTPUTLIST (customer_id, loan_origination_date, interest_rate, loan_amount, loan_id, loan_officer_id, property_id, status, term_years
         )
-        WRAPPER (df bv_bank_loan)
+        WRAPPER (df ds_bank_loan)
     );
 
 CREATE OR REPLACE TABLE loan_officer I18N us_pst (
-        loan_officer_id:int (description = 'A unique identifier for each loan officer.'),
-        first_name:text (description = 'The first name of the loan officer'),
-        last_name:text (description = 'The last name of the loan officer'),
-        email:text (description = 'The email of the loan officer'),
-        phone_number:text (description = 'The phone number of the loan officer')
+        loan_officer_id:int,
+        first_name:text,
+        last_name:text,
+        email:text,
+        phone_number:text
     )
-    FOLDER = '/02 - datasets'
+    FOLDER = '/02 - Datasets'
+    DESCRIPTION = 'One row per loan officer. Join to samples_bank.loan on loan_officer_id to analyze assignments and workload.'
     CACHE OFF
     TIMETOLIVEINCACHE DEFAULT
     ADD SEARCHMETHOD ds_bank_loan_officer(
@@ -326,12 +330,13 @@ CREATE OR REPLACE TABLE loan_officer I18N us_pst (
     );
 
 CREATE OR REPLACE TABLE payment I18N us_pst (
-        payment_id:int (description = 'A unique identifier for each payment transaction.'),
-        loan_id:int (description = 'A reference to the loan for which the payment is made.'),
-        payment_amount:double (description = 'The amount of money paid in the transaction.'),
-        payment_date:localdate (description = 'The date on which the payment was made.')
+        payment_id:int,
+        loan_id:int,
+        payment_amount:double (description = 'Amount in USD'),
+        payment_date:localdate
     )
-    FOLDER = '/02 - datasets'
+    FOLDER = '/02 - Datasets'
+    DESCRIPTION = 'One row per payment applied to a loan. Use for repayment volume and timing. For application-stage attributes use samples_bank.loan and samples_bank.underwriting.'
     CACHE OFF
     TIMETOLIVEINCACHE DEFAULT
     ADD SEARCHMETHOD ds_bank_payment(
@@ -348,14 +353,15 @@ CREATE OR REPLACE TABLE payment I18N us_pst (
     );
 
 CREATE OR REPLACE TABLE property I18N us_pst (
-        property_id:int (description = 'A unique identifier for each property'),
-        address:text (description = 'The street address of the property'),
-        city:text (description = 'The city in which the property is located.'),
-        state:text (description = 'The state in which the property is located.'),
-        zip_code:text (description = 'The postal code for the property’s location.'),
-        property_value:double (description = 'The assessed value of the property in dollars')
+        property_id:int,
+        address:text,
+        city:text,
+        state:text,
+        zip_code:text,
+        property_value:double (description = 'Assessed value in USD')
     )
-    FOLDER = '/02 - datasets'
+    FOLDER = '/02 - Datasets'
+    DESCRIPTION = 'One row per collateral property. Join to samples_bank.loan on property_id for LTV-style analysis.'
     CACHE OFF
     TIMETOLIVEINCACHE DEFAULT
     ADD SEARCHMETHOD ds_bank_property(
@@ -374,12 +380,13 @@ CREATE OR REPLACE TABLE property I18N us_pst (
     );
 
 CREATE OR REPLACE TABLE rate I18N us_pst (
-        rate_id:int (description = 'A unique identifier for each interest rate entry.'),
-        loan_type:text (description = 'The type of loan to which the interest rate applies'),
-        term:int (description = 'The term length of the loan in years'),
-        interest_rate:double (description = 'The interest rate for the loan, expressed as a percentage.')
+        rate_id:int,
+        loan_type:text (description = 'Mortgage rate program. Valid values (case-sensitive): Fixed, ARM_5_1 (5 years fixed then adjustable), ARM_7_1 (7 years fixed then adjustable), Jumbo_Fixed (non-conforming fixed-rate tier in this sample).'),
+        term_years:int,
+        interest_rate:double (description = 'Quoted annual rate as a percentage for this loan_type and term_years')
     )
-    FOLDER = '/02 - datasets'
+    FOLDER = '/02 - Datasets'
+    DESCRIPTION = 'Reference rows for offered rates by loan_type and term_years (years). Includes Fixed, ARM_5_1, ARM_7_1, and Jumbo_Fixed rows. Not transactional loan history.'
     CACHE OFF
     TIMETOLIVEINCACHE DEFAULT
     ADD SEARCHMETHOD ds_bank_rate(
@@ -387,22 +394,23 @@ CREATE OR REPLACE TABLE rate I18N us_pst (
         CONSTRAINTS (
              ADD rate_id NOS ZERO ()
              ADD loan_type NOS ZERO ()
-             ADD term NOS ZERO ()
+             ADD term_years NOS ZERO ()
              ADD interest_rate NOS ZERO ()
         )
-        OUTPUTLIST (interest_rate, loan_type, rate_id, term
+        OUTPUTLIST (interest_rate, loan_type, rate_id, term_years
         )
         WRAPPER (df ds_bank_rate)
     );
 
 CREATE OR REPLACE TABLE underwriting I18N us_pst (
-        underwriting_id:int (description = 'It is the underwriting identifier.'),
-        loan_id:int (description = 'It is the loan identifier. Relates to loan.'),
-        credit_score:int (description = 'It represents the credit score of an individual involved in the underwriting process. The credit_score field is an integer type.'),
-        employment_history:text (description = ' It describes the employment history of the borrower. Example records include "Stable" and "Varied".'),
-        financial_history:text (description = 'It provides information about the financial history of the borrower. Sample records are "Good" and "Fair".')
+        underwriting_id:int,
+        loan_id:int,
+        credit_score:int (description = 'Underwriting credit score for the borrower at decision time'),
+        employment_history:text (description = 'Valid values (case-sensitive): Stable, Varied'),
+        financial_history:text (description = 'Valid values (case-sensitive): Good, Fair, Excellent, Bad')
     )
-    FOLDER = '/02 - datasets'
+    FOLDER = '/02 - Datasets'
+    DESCRIPTION = 'One row per loan credit assessment. Join to samples_bank.loan on loan_id.'
     CACHE OFF
     TIMETOLIVEINCACHE DEFAULT
     ADD SEARCHMETHOD ds_bank_underwriting(
@@ -420,37 +428,43 @@ CREATE OR REPLACE TABLE underwriting I18N us_pst (
     );
 
 CREATE OR REPLACE ASSOCIATION customer_accounts REFERENTIAL CONSTRAINT 
-FOLDER = '/03 - associations'
+FOLDER = '/03 - Associations'
+    DESCRIPTION = 'Maps customers to their accounts on customer_id. Use for balances and deposit activity alongside borrowing.'
     ENDPOINT account customer PRINCIPAL (0,1)
     ENDPOINT customers account (0,*)
     ADD MAPPING customer_id=customer_id;
 
 CREATE OR REPLACE ASSOCIATION customer_loans REFERENTIAL CONSTRAINT 
-FOLDER = '/03 - associations'
+FOLDER = '/03 - Associations'
+    DESCRIPTION = 'Maps customers to loan applications on customer_id. Primary path for customer-level loan metrics.'
     ENDPOINT loan customer PRINCIPAL (0,1)
     ENDPOINT customers loan (0,*)
     ADD MAPPING customer_id=customer_id;
 
 CREATE OR REPLACE ASSOCIATION loan_payments REFERENTIAL CONSTRAINT 
-FOLDER = '/03 - associations'
+FOLDER = '/03 - Associations'
+    DESCRIPTION = 'Maps loans to payment rows on loan_id. Use for repayment analysis, not for underwriting categories.'
     ENDPOINT payment loan PRINCIPAL (0,1)
     ENDPOINT loan payment (0,*)
     ADD MAPPING loan_id=loan_id;
 
 CREATE OR REPLACE ASSOCIATION loan_underwritings REFERENTIAL CONSTRAINT 
-FOLDER = '/03 - associations'
+FOLDER = '/03 - Associations'
+    DESCRIPTION = 'Maps loans to underwriting attributes on loan_id. Use for credit and employment history with loan context.'
     ENDPOINT underwriting loan PRINCIPAL (0,1)
     ENDPOINT loan underwriting (0,*)
     ADD MAPPING loan_id=loan_id;
 
 CREATE OR REPLACE ASSOCIATION loanofficer_loans REFERENTIAL CONSTRAINT 
-FOLDER = '/03 - associations'
+FOLDER = '/03 - Associations'
+    DESCRIPTION = 'Maps loan officers to loans they manage on loan_officer_id.'
     ENDPOINT loan loan_officer PRINCIPAL (0,1)
     ENDPOINT loan_officer loan (0,*)
     ADD MAPPING loan_officer_id=loan_officer_id;
 
 CREATE OR REPLACE ASSOCIATION property_loans REFERENTIAL CONSTRAINT 
-FOLDER = '/03 - associations'
+FOLDER = '/03 - Associations'
+    DESCRIPTION = 'Maps collateral properties to loans on property_id.'
     ENDPOINT loan property PRINCIPAL (0,1)
     ENDPOINT property loan (0,*)
     ADD MAPPING property_id=property_id;
