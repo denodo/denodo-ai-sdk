@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
+import { useConfig } from "../../contexts/ConfigContext";
 import Card from "react-bootstrap/Card";
 import Badge from "react-bootstrap/Badge";
 import Spinner from "react-bootstrap/Spinner";
@@ -8,6 +9,7 @@ import Button from "react-bootstrap/Button";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CSVLink } from "react-csv";
+import ExcelJS from "exceljs";
 import "./ToolBlocks.css";
 
 const assetBaseUrl = import.meta.env.BASE_URL;
@@ -22,6 +24,18 @@ const ToolBlocks = ({
   onOpenTable,
   onToolIconClick,
 }) => {
+  const { config } = useConfig();
+  const toolPublicTextKeys = useMemo(() => {
+    const map = {};
+    const tools = Array.isArray(config?.chatbot_tools) ? config.chatbot_tools : [];
+    for (const tool of tools) {
+      if (tool.name && tool.tool_public_text_key) {
+        map[tool.name] = tool.tool_public_text_key;
+      }
+    }
+    return map;
+  }, [config?.chatbot_tools]);
+
   const [expandedTools, setExpandedTools] = useState({});
   const [paletteSelectorOpenId, setPaletteSelectorOpenId] = useState(null);
   const [selectedPalette, setSelectedPalette] = useState("");
@@ -60,6 +74,33 @@ const ToolBlocks = ({
     return [headers, ...dataRows];
   };
 
+  // function to download response as excel
+  const handleDownloadExcel = async (apiResponse) => {
+    const data = parseApiResponseToCsv(apiResponse);
+    if (!data || data.length === 0) return;
+
+    // new workbook & worksheet
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Data");
+
+    worksheet.addRows(data);
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    // create a Blob; trigger download
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "denodo_data.xlsx";
+
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
+
   const renderToolIcons = (toolCall) => {
     if (toolCall.status !== "finished" && toolCall.status !== "error") return null;
     const artifact = toolCall.artifact || {};
@@ -77,7 +118,7 @@ const ToolBlocks = ({
       });
     };
 
-    if (toolCall.toolName === "data_query") {
+    if (toolCall.toolName === "data_agent") {
       icons.push(
         <OverlayTrigger
           key="denodo"
@@ -87,7 +128,7 @@ const ToolBlocks = ({
           container={resultsContainerRef?.current}
         >
           <img
-            src={`${assetBaseUrl}tools/data_query/denodo_icon_black.svg`}
+            src={`${assetBaseUrl}tools/data_agent/denodo_icon_black.svg`}
             alt="Denodo Icon"
             width="20"
             height="20"
@@ -121,7 +162,7 @@ const ToolBlocks = ({
               aria-label="View execution result"
             >
               <img
-                src={`${assetBaseUrl}tools/data_query/table.png`}
+                src={`${assetBaseUrl}tools/data_agent/table.png`}
                 alt="View execution result"
                 width="20"
                 height="20"
@@ -135,7 +176,7 @@ const ToolBlocks = ({
             key="csv"
             placement="left"
             delay={{ show: 250, hide: 400 }}
-            overlay={(props) => renderTooltip(props, "Download execution result")}
+            overlay={(props) => renderTooltip(props, "Download execution result as CSV")}
             container={resultsContainerRef?.current}
           >
             <CSVLink
@@ -144,10 +185,34 @@ const ToolBlocks = ({
               className="csv-link"
               target="_blank"
             >
-              <img src={`${assetBaseUrl}tools/data_query/csv_export.png`} alt="Export CSV" width="20" height="20" className="ms-2" />
+              <img src={`${assetBaseUrl}tools/data_agent/csv_export.png`} alt="Export CSV" width="20" height="20" className="ms-2" />
             </CSVLink>
           </OverlayTrigger>
         );
+        icons.push(
+        <OverlayTrigger
+          key="xlsx"
+          placement="left"
+          delay={{ show: 250, hide: 400 }}
+          overlay={(props) => renderTooltip(props, "Download execution result as XLSX")}
+          container={resultsContainerRef?.current}
+        >
+          <button
+            type="button"
+            className="ms-2 p-0 border-0 bg-transparent"
+            onClick={() => handleDownloadExcel(fullExecutionResult)}
+            aria-label="Download Excel"
+          >
+            <img
+              src={`${assetBaseUrl}tools/data_agent/xlsx_export.png`}
+              alt="Export XLSX"
+              width="20"
+              height="20"
+              className="cursor-pointer"
+            />
+          </button>
+        </OverlayTrigger>
+      );
       }
       if (
         artifact.raw_graph &&
@@ -163,7 +228,7 @@ const ToolBlocks = ({
             container={resultsContainerRef?.current}
           >
             <img
-              src={`${assetBaseUrl}tools/data_query/graph.png`}
+              src={`${assetBaseUrl}tools/data_agent/graph.png`}
               alt="View Graph"
               width="20"
               height="20"
@@ -175,7 +240,7 @@ const ToolBlocks = ({
       }
     }
 
-    if (toolCall.toolName === "metadata_query") {
+    if (toolCall.toolName === "metadata_search") {
       icons.push(
         <OverlayTrigger
           key="denodo-metadata"
@@ -185,7 +250,7 @@ const ToolBlocks = ({
           container={resultsContainerRef?.current}
         >
           <img
-            src={`${assetBaseUrl}tools/metadata_query/denodo_icon_black.svg`}
+            src={`${assetBaseUrl}tools/metadata_agent/denodo_icon_black.svg`}
             alt="Denodo Icon"
             width="20"
             height="20"
@@ -317,8 +382,18 @@ const ToolBlocks = ({
     );
   };
 
+  const getToolArgPreview = (toolCall) => {
+    const argKey = toolPublicTextKeys[toolCall.toolName];
+    if (!argKey || !toolCall.args) return null;
+    const value = toolCall.args[argKey];
+    if (value === undefined || value === null) return null;
+    const text = String(value).trim();
+    return text || null;
+  };
+
   const renderToolBox = (toolCall) => {
     const isExpanded = !!expandedTools[toolCall.toolCallId];
+    const argPreview = getToolArgPreview(toolCall);
     const toolOutput = toolCall.contentToLLM;
     const outputString = toolOutput 
       ? (typeof toolOutput === 'object' ? JSON.stringify(toolOutput, null, 2) : String(toolOutput))
@@ -332,9 +407,14 @@ const ToolBlocks = ({
         }`}
       >
         <div className="d-flex align-items-center justify-content-between">
-          <div className="d-flex align-items-center" style={{ gap: "8px" }}>
+          <div className="d-flex align-items-center toolbox-header-main">
             {toolCall.status === "running" && <Spinner size="sm" animation="border" />}
-            <Badge bg="secondary">{toolCall.toolName}</Badge>
+            <Badge bg="secondary" className="flex-shrink-0">{toolCall.toolName}</Badge>
+            {argPreview && (
+              <span className="toolbox-arg-preview" title={argPreview}>
+                {argPreview}
+              </span>
+            )}
           </div>
           <div className="d-flex align-items-center" style={{ gap: "8px" }}>
             {renderToolIcons(toolCall)}
@@ -411,7 +491,16 @@ const ToolBlocks = ({
         ) : (
           <Card.Text key={`msg-${idx}`}>
             <div className="markdown-container">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{b.content}</ReactMarkdown>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  a: ({node, ...props}) => (
+                    <a {...props} target="_blank" rel="noopener noreferrer" />
+                  )
+                }}
+              >
+                {b.content}
+              </ReactMarkdown>
             </div>
           </Card.Text>
         )

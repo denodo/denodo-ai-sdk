@@ -14,16 +14,16 @@ import logging
 import traceback
 
 from pydantic import BaseModel
-from typing import List
+from typing import List, Dict, Any
 
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.utils import state_manager
-from utils.data_catalog import get_allowed_view_ids, DataCatalogAuthError
-from api.utils.sdk_utils import filter_non_allowed_associations, handle_endpoint_error, authenticate
-from utils.utils import get_custom_request_headers
+from utils.data_catalog import get_user_permissions, DataCatalogAuthError
+from api.utils.sdk_utils import parse_view_document, handle_endpoint_error, authenticate
+from api.utils.sdk_utils import get_custom_request_headers
 
 router = APIRouter()
 
@@ -41,7 +41,7 @@ class similaritySearchRequest(BaseModel):
     scores: bool = False
 
 class similaritySearchResponse(BaseModel):
-    views: List[str]
+    views: List[Dict[str, Any]]
 
 @router.get(
         '/similaritySearch',
@@ -74,8 +74,15 @@ async def similaritySearch(
         raise HTTPException(status_code=500, detail=f"Failed to get vector store from state manager: {e}") from e
 
     try:
-        valid_view_ids = await get_allowed_view_ids(auth=auth, custom_headers=custom_headers)
-        valid_view_ids = [str(view_id) for view_id in valid_view_ids]
+        permissions_data = await get_user_permissions(auth=auth, custom_headers=custom_headers)
+        views_details = permissions_data.get("viewsPermissions", [])
+
+        valid_view_ids = [str(view["viewId"]) for view in views_details]
+
+        security_policies_by_view = {
+            str(view["viewId"]): view
+            for view in views_details
+        }
     except DataCatalogAuthError as e:
         raise HTTPException(status_code=401, detail=f"Authentication failed during similaritySearch: {str(e)}") from e
     except Exception as e:
@@ -92,24 +99,32 @@ async def similaritySearch(
 
     search_results = vector_store.search_batched(**search_params)
 
+    output_views = []
+    for result in search_results:
+        doc = result[0] if endpoint_request.scores else result
+        score = result[1] if endpoint_request.scores else None
+
+        view_id = str(doc.metadata.get("view_id", ""))
+        security_info = security_policies_by_view.get(view_id, {})
+
+        view_dict = parse_view_document(
+            doc=doc,
+            filter_associations=True, 
+            valid_view_ids=valid_view_ids,
+            security_info=security_info
+        )
+
+        view_dict["database_name"] = doc.metadata.get("database_name", "")
+
+        view_dict.update({key: val for key, val in doc.metadata.items() if key.startswith('tag_')})
+
+        if endpoint_request.scores:
+            view_dict["scores"] = score
+
+        output_views.append(view_dict)
+
     output = {
-        "views": [
-            {
-                "view_name": (result[0] if endpoint_request.scores else result).metadata["view_name"],
-                "view_json": (
-                    filter_non_allowed_associations(
-                        json.loads((result[0] if endpoint_request.scores else result).metadata["view_json"]),
-                        valid_view_ids
-                    )
-                ),
-                "view_text": (result[0] if endpoint_request.scores else result).page_content,
-                "database_name": (result[0] if endpoint_request.scores else result).metadata["database_name"],
-                **{key: (result[0] if endpoint_request.scores else result).metadata[key]
-                    for key in (result[0] if endpoint_request.scores else result).metadata
-                    if key.startswith('tag_')},
-                **({"scores": result[1]} if endpoint_request.scores else {})
-            } for result in search_results
-        ]
+        "views": output_views
     }
 
     return JSONResponse(content = jsonable_encoder(output), media_type = "application/json")

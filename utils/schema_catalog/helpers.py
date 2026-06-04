@@ -44,6 +44,9 @@ def normalize_schema_columns(schema, use_column_descriptions):
         if not use_column_descriptions:
             normalized_item.pop('logicalName', None)
             normalized_item.pop('description', None)
+        extra = normalized_item.get('extraProperties')
+        if extra is not None and not isinstance(extra, dict):
+            normalized_item.pop('extraProperties', None)
         normalized_schema.append(normalized_item)
 
     return normalized_schema

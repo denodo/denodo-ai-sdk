@@ -23,7 +23,7 @@ from api.utils import ai_tools
 from api.utils import answer_question
 from api.utils import state_manager
 from api.utils.sdk_utils import timing_context, handle_endpoint_error, generate_session_id, authenticate
-from utils.utils import get_custom_request_headers
+from api.utils.sdk_utils import get_custom_request_headers
 
 router = APIRouter()
 
@@ -57,8 +57,12 @@ class streamAnswerQuestionUsingViewsRequest(BaseModel):
         description="Maximum number of views to consider in total, including associations of the initial vector_search_k results."
     )
     vector_search_column_description_char_limit: int = Field(
-        default = 200,
-        description="Maximum characters of table or column descriptions used when filtering how many views to keep. Not applied during vector search or VQL generation (those use full descriptions). Refer to the docs for when this trimming is applied."
+        default=200,
+        description="Maximum characters of column descriptions used when filtering how many views to keep. Not applied during vector search or VQL generation (those use full descriptions). Refer to the docs for when this trimming is applied."
+    )
+    vector_search_table_description_char_limit: int = Field(
+        default=1000,
+        description="Maximum characters of table descriptions used when filtering how many views to keep. Not applied during vector search or VQL generation (those use full descriptions). Refer to the docs for when this trimming is applied."
     )
     mode: Literal["default", "data", "metadata"] = Field(default = "default")
     disclaimer: bool = True
@@ -137,6 +141,7 @@ async def streamAnswerQuestionUsingViews(
             custom_instructions=endpoint_request.custom_instructions,
             session_id=session_id,
             column_description_char_limit=endpoint_request.vector_search_column_description_char_limit,
+            table_description_char_limit=endpoint_request.vector_search_table_description_char_limit,
             check_ambiguity=endpoint_request.check_ambiguity,
             markdown_response=endpoint_request.markdown_response,
         )

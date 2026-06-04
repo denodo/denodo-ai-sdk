@@ -32,9 +32,6 @@ async def generate_view_answer(
         "execution_result_csv": vql_execution_result,
         "response_format": response_format,
         "response_example": response_example,
-        "tables_needed": sdk_utils.readable_tables(
-            [table for table in vector_search_tables if table['view_name'] in vql_query.replace('"', '').replace("'", '')]
-        ),
         "custom_instructions": custom_instructions
     }
 

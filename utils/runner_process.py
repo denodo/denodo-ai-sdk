@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import time
 import platform
 import threading
 import subprocess
@@ -14,7 +15,37 @@ from utils.runner_display import print_status, PANEL_WIDTH
 
 console = Console()
 
-def run_process(process_type, args):
+def spawn_services(process_types, args):
+    """
+    Spawn one subprocess per process_type in quick succession (no waiting)
+    so both API and chatbot can warm up concurrently. Returns the list of
+    spec dicts which can be passed to `wait_for_services`.
+    """
+    return [_spawn_service(p, args) for p in process_types]
+
+def wait_for_services(specs, args):
+    """
+    Wait for every spawned service to print its "ready" line, in parallel.
+    Returns (succeeded, failed) lists of (process_type, spec) tuples.
+
+    The timeout budget is shared across all services from a single wall-clock
+    deadline: services that boot quickly do not eat into the budget of
+    slower siblings.
+    """
+    succeeded = []
+    failed = []
+    deadline = time.monotonic() + args.timeout
+    for spec in specs:
+        remaining = max(0.0, deadline - time.monotonic())
+        if spec["success_event"].wait(remaining):
+            succeeded.append((spec["process_type"], spec))
+        else:
+            spec["process"].kill()
+            spec["log_thread"].join()
+            failed.append((spec["process_type"], spec))
+    return succeeded, failed
+
+def _spawn_service(process_type, args):
     env = os.environ.copy()
     env['PYTHONIOENCODING'] = 'utf-8'
 
@@ -29,6 +60,21 @@ def run_process(process_type, args):
     env['LOG_MAX_SIZE_MB'] = str(args.max_log_size)
     env['NO_LOGS_TO_FILE'] = str(no_logs)
     env['LOG_LEVEL'] = args.log_level
+
+    # When run.py is launching the chatbot alongside the API (`mode == both`),
+    # hand the chatbot the same startup budget that run.py uses for its own
+    # `success_event.wait` so the chatbot's end-of-startup AI SDK probe keeps
+    # retrying until the sibling API comes up. When the chatbot is launched
+    # alone (`mode == sample_chatbot`) we use a short probe so the chatbot
+    # doesn't hang for the full timeout when no API is around.
+    if process_type == "sample_chatbot":
+        if getattr(args, "mode", None) == "both":
+            env['CHATBOT_AI_SDK_WAIT_TIMEOUT'] = str(args.timeout)
+        else:
+            # Solo mode: a single short probe matches the prior fast-fail
+            # behavior — `requests` returns immediately on connection
+            # refused, so this adds ~no latency when the AI SDK isn't there.
+            env.setdefault('CHATBOT_AI_SDK_WAIT_TIMEOUT', '0')
 
     if process_type == "api":
         if os.path.exists("api/utils/sdk_config.env"):
@@ -126,12 +172,12 @@ def run_process(process_type, args):
 
     log_thread.start()
 
-    if not success_event.wait(args.timeout):
-        process.kill()
-        log_thread.join()
-        raise TimeoutError(f"{process_type} failed to start within {args.timeout} seconds")
-
-    return process, log_thread
+    return {
+        "process_type": process_type,
+        "process": process,
+        "log_thread": log_thread,
+        "success_event": success_event,
+    }
 
 def log_output(process, process_type, success_event, production=False, root_path_prefix="", print_to_console=False,
                imported_agent_names=None):
@@ -198,12 +244,45 @@ def shutdown_gracefully(processes_to_shutdown, timeout=5):
     for name, process in processes_to_shutdown:
         if process.poll() is None:
             console.print(f"[yellow]Stopping {name} process...[/]")
-            process.terminate()
-            try:
-                process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                console.print(f"[red]Force killing {name} process...[/]")
-                process.kill()
+            killed_with_taskkill = False
+
+            if platform.system() == "Windows":
+                system_root = os.environ.get("SystemRoot", "C:\\Windows")
+                taskkill_path = os.path.join(system_root, "System32", "taskkill.exe")
+
+                if os.path.exists(taskkill_path):
+                    subprocess.run( # noqa: S603
+                        [taskkill_path, '/F', '/T', '/PID', str(process.pid)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False
+                    )
+                    killed_with_taskkill = True
+                else:
+                    console.print("[yellow]Warning: expected system path to taskkill.exe not found. Using internal terminate.[/]")
+
+            if not killed_with_taskkill:
+                process.terminate()
+                try:
+                    process.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    console.print(f"[red]Force killing {name} process...[/]")
+                    process.kill()
+                    try:
+                        process.wait(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        pass
+
+            if process.stdout:
+                try:
+                    process.stdout.close()
+                except Exception: # noqa: S110
+                    pass
+            if process.stderr:
+                try:
+                    process.stderr.close()
+                except Exception: # noqa: S110
+                    pass
 
 def command_listener(processes_to_shutdown):
     while True:

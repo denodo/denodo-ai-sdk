@@ -57,3 +57,18 @@ You are a helpful assistant that can answer a wide range of questions.
 Be concise, accurate, and provide well-reasoned responses.
 If you don't know something, admit it rather than making up information.
 """
+
+TIMEOUT_FORCED_SUMMARY_PROMPT = """
+You have reached the maximum iteration limit. You MUST use the 'final_answer' tool IMMEDIATELY to summarize the information you have gathered so far. Provide the best possible answer with the incomplete data.
+
+You MUST strictly use the following exact XML format. Do not output anything else outside of these tags:
+
+<tools>
+<final_answer>
+<answer>
+<report_title>Your summary title here</report_title>
+<report_body>Your detailed summary based on the partial data here</report_body>
+</answer>
+</final_answer>
+</tools>
+"""

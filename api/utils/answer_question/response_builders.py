@@ -11,6 +11,7 @@ AMBIGUITY_TYPE_LABELS = {
     "TEMP": "Temporal ambiguity",
     "OUTPUT": "Output schema ambiguity",
     "QUAL": "Qualitative ambiguity",
+    "MISSING_OBL": "Missing obligatory input",
 }
 
 

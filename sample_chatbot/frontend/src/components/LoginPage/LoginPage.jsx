@@ -19,8 +19,23 @@ const LoginPage = ({ onSignIn, renderLogo, showBrandAsk = true }) => {
 
     const savedUserDetails =
       localStorage.getItem(`${username}_user_details`) || "";
-    const savedCustomInstructions =
-      localStorage.getItem(`${username}_custom_instructions`) || "";
+    let savedCustomInstructions = null;
+    const ciDictStr = localStorage.getItem(
+      `${username}_custom_instructions_dict`,
+    );
+    if (ciDictStr) {
+      try {
+        savedCustomInstructions = JSON.parse(ciDictStr);
+      } catch (e) {
+        savedCustomInstructions = null;
+      }
+    }
+    if (savedCustomInstructions == null) {
+      const legacy = localStorage.getItem(`${username}_custom_instructions`);
+      if (legacy) {
+        savedCustomInstructions = { global: legacy };
+      }
+    }
 
     try {
       await onSignIn({

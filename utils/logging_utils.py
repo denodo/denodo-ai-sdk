@@ -16,13 +16,31 @@ from contextvars import ContextVar
 from logging.handlers import RotatingFileHandler
 
 transaction_id_var: ContextVar[str] = ContextVar('transaction_id', default='system')
+username_var: ContextVar[str] = ContextVar('username', default='system')
 
-class TransactionIdFilter(logging.Filter):
+class ContextFilter(logging.Filter):
     """
-    This filter injects the transaction ID from the context variable into the log record.
+    This filter injects the transaction ID and conditionally formats the username.
     """
     def filter(self, record):
         record.transaction_id = transaction_id_var.get()
+        username = username_var.get()
+
+        if username in ["system", "anonymous"]:
+            record.user_tag = ""
+        else:
+            record.user_tag = f"[user: {username}] "
+
+        return True
+
+class StaticFilesFilter(logging.Filter):
+    """
+    Filters out noisy access logs for static assets (.png, .svg, .css, .js, etc.).
+    """
+    def filter(self, record):
+        msg = record.getMessage()
+        if "GET " in msg and any(ext in msg.lower() for ext in [".png", ".svg", ".css", ".js", ".ico", ".woff", ".woff2"]):
+            return False
         return True
 
 class RotatingLogFileHandler(RotatingFileHandler):
@@ -102,14 +120,17 @@ def get_logging_config():
         "version": 1,
         "disable_existing_loggers": False,
         "filters": {
-            "transaction_id_filter": {
-                "()": TransactionIdFilter,
+            "context_filter": {
+                "()": ContextFilter,
+            },
+            "static_files_filter": {
+                "()": StaticFilesFilter,
             }
         },
         "formatters": {
             "default": {
                 "()": "uvicorn.logging.DefaultFormatter",
-                "fmt": "[%(asctime)s] [%(process)d] [%(levelname)s] [%(transaction_id)s] %(message)s",
+                "fmt": "[%(asctime)s] [%(process)d] [%(levelname)s] [%(transaction_id)s] %(user_tag)s%(message)s",
                 "datefmt": "%Y-%m-%d %H:%M:%S %z",
             },
         },
@@ -118,13 +139,17 @@ def get_logging_config():
                 "class": "logging.StreamHandler",
                 "formatter": "default",
                 "stream": "ext://sys.stdout",
-                "filters": ["transaction_id_filter"],
+                "filters": ["context_filter", "static_files_filter"],
             },
         },
         "loggers": {
             # Root logger for the application
             "": {"handlers": handlers_to_use, "level": log_level},
-            # Uvicorn loggers captured to use the same handlers
+            "werkzeug": {
+                "handlers": handlers_to_use,
+                "level": log_level,
+                "propagate": False
+            },
             "uvicorn.error": {
                 "handlers": handlers_to_use,
                 "level": log_level,
@@ -151,7 +176,7 @@ def get_logging_config():
             "backupCount": 5,
             "encoding": "utf-8",
             "formatter": "default",
-            "filters": ["transaction_id_filter"],
+            "filters": ["context_filter", "static_files_filter"],
         }
         for logger in LOGGING_CONFIG["loggers"].values():
             logger['handlers'].append('rotating_file')

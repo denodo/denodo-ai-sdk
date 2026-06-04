@@ -63,6 +63,7 @@ class UniformLLM:
             logging.info(f"- {self.provider_name.upper()}_ENDPOINT (required)")
             logging.info(f"- {self.provider_name.upper()}_API_VERSION (required)")
             logging.info(f"- {self.provider_name.upper()}_PROXY (optional)")
+            logging.info(f"- {self.provider_name.upper()}_RESPONSES_API (optional, defaults to 0)")
             self.setup_custom_azure()
         elif self.provider_name.lower() not in self.VALID_PROVIDERS:
             logging.warning(f"Provider '{self.provider_name}' not in standard list. Creating custom OpenAI-compatible provider.")
@@ -70,7 +71,15 @@ class UniformLLM:
             logging.info(f"- {self.provider_name.upper()}_API_KEY (required)")
             logging.info(f"- {self.provider_name.upper()}_BASE_URL (required)")
             logging.info(f"- {self.provider_name.upper()}_PROXY (optional)")
+            logging.info(f"- {self.provider_name.upper()}_RESPONSES_API (optional, defaults to 0)")
             self.setup_custom()
+
+    def _get_use_responses_api(self, provider_prefix, default='0'):
+        use_responses_api = os.getenv(f'{provider_prefix}_RESPONSES_API', default) == '1'
+        logging.info(
+            f"Provider '{self.provider_name}': using Responses API {'yes' if use_responses_api else 'no'} for model: {self.model_name}"
+        )
+        return use_responses_api
 
     def setup_openrouter(self):
         from langchain_openai import ChatOpenAI
@@ -128,12 +137,12 @@ class UniformLLM:
             max_tokens = self.max_tokens)
 
     def setup_ollama(self):
-        from langchain_ollama.chat_models import ChatOllama
+        from langchain_ollama import ChatOllama
 
         kwargs = {
             "model": self.model_name,
             "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
+            "num_predict": self.max_tokens,
         }
 
         if base_url := os.getenv('OLLAMA_API_BASE_URL'):
@@ -285,6 +294,9 @@ class UniformLLM:
         if organization_id is not None:
             kwargs["organization"] = organization_id
 
+        use_responses_api = self._get_use_responses_api('OPENAI', '1')
+        kwargs["use_responses_api"] = use_responses_api
+
         self.llm = ChatOpenAI(**kwargs)
 
     def setup_azure(self):
@@ -328,6 +340,8 @@ class UniformLLM:
 
             kwargs["http_client"] = _http_client
             kwargs["http_async_client"] = _http_async_client
+
+        kwargs["use_responses_api"] = self._get_use_responses_api('AZURE', '0')
 
         self.llm = AzureChatOpenAI(**kwargs)
 
@@ -373,6 +387,8 @@ class UniformLLM:
 
             kwargs["http_client"] = _http_client
             kwargs["http_async_client"] = _http_async_client
+
+        kwargs["use_responses_api"] = self._get_use_responses_api(provider_upper, '0')
 
         self.llm = AzureChatOpenAI(**kwargs)
 
@@ -504,6 +520,8 @@ class UniformLLM:
 
             kwargs["http_client"] = _http_client
             kwargs["http_async_client"] = _http_async_client
+
+        kwargs["use_responses_api"] = self._get_use_responses_api(provider_upper, '0')
 
         self.llm = ChatOpenAI(**kwargs)
 

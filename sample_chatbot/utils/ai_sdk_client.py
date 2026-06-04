@@ -3,95 +3,89 @@ AI SDK client utilities.
 """
 
 import logging
+import time
 import requests
 
-def ai_sdk_health_check(api_host, verify_ssl=False):
+def ai_sdk_health_check(api_host, verify_ssl=False, timeout=10):
     """
     Check if the AI SDK is healthy and reachable.
 
     Args:
         api_host: AI SDK host URL
         verify_ssl: Whether to verify SSL certificates
+        timeout: Per-request HTTP timeout (seconds).
 
     Returns:
-        True if healthy, False otherwise
+        True if healthy, False otherwise.
     """
     try:
-        response = requests.get(f'{api_host}/health', verify=verify_ssl, timeout=10)
+        response = requests.get(f'{api_host}/health', verify=verify_ssl, timeout=timeout)
         return response.status_code == 200
     except Exception:
         return False
 
-def get_user_views(api_host, username, password, query, tags=None, databases=None, views=200, verify_ssl=False):
+
+def ai_sdk_wait_until_healthy(api_host, verify_ssl=False, total_timeout=30.0, poll_interval=0.5):
     """
-    Get views available to a user via similarity search.
+    Poll the AI SDK /health endpoint until it returns 200 or `total_timeout`
+    elapses. Intended for sample_chatbot startup so the chatbot can begin
+    serving even while the API is still warming up in a sibling process.
+
+    Returns True if the API became healthy within the budget, False otherwise.
+    """
+    deadline = time.monotonic() + total_timeout
+    attempt = 0
+    while True:
+        attempt += 1
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        # Per-attempt timeout is bounded so we don't overshoot the deadline.
+        per_request_timeout = max(0.5, min(2.0, remaining))
+        if ai_sdk_health_check(api_host, verify_ssl=verify_ssl, timeout=per_request_timeout):
+            if attempt > 1:
+                logging.info(f"AI SDK became healthy after {attempt} attempt(s).")
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(poll_interval, remaining))
+
+def get_user_access_info(api_host, username, password, verify_ssl=False):
+    """
+    Get user permissions and roles.
 
     Args:
         api_host: AI SDK host URL
         username: User's username
         password: User's password
-        query: Search query
-        tags: List of tags to include
-        databases: List of databases to include
-        views: Maximum number of views to return
         verify_ssl: Whether to verify SSL certificates
 
     Returns:
-        Tuple of (status_code, table_names or error_message)
+        Tuple of (status_code, permissions_dict or error_message)
     """
-
-    if databases is None:
-        databases = []
-    if tags is None:
-        tags = []
-
     try:
-        request_params = {
-            'query': query,
-            'scores': False,
-            'n_results': views,
-            'vdp_database_names': ','.join(databases),
-            'vdp_tag_names': ','.join(tags)
-
-        }
-
         response = requests.get(
-            f'{api_host}/similaritySearch',
-            params=request_params,
+            f'{api_host}/getUserPermissions',
             auth=(username, password),
             verify=verify_ssl,
             timeout=30
         )
-        response.raise_for_status()
-        data = response.json()
-        data = data.get('views', [])
-        if len(data) > 0:
-            table_names = [view['view_name'] for view in data]
-        else:
-            table_names = []
-        return 200, table_names
-    except requests.exceptions.HTTPError as e:
-        status_code = e.response.status_code
-        try:
-            response_json = e.response.json()
-            detail = response_json.get('detail')
-            if isinstance(detail, dict):
-                error_message = detail.get('error')
-            else:
-                error_message = str(detail)
-            if not error_message:
-                raise ValueError
-        except (requests.exceptions.JSONDecodeError, ValueError):
-            try:
-                error_message = str(e.response.text)
-            except Exception:
-                error_message = f"AI SDK failed with HTTP status code {status_code}"
 
-        return status_code, error_message
+        if response.status_code == 200:
+            return 200, response.json()
+        elif response.status_code == 401:
+            return 401, "Invalid credentials"
+        else:
+            return response.status_code, f"API Error: {response.text}"
+
+    except requests.exceptions.RequestException as e:
+        return 500, f"Failed to connect to AI SDK: {str(e)}"
 
 def connect_to_ai_sdk(api_host, username, password, insert=True, examples_per_table=100,
-                      parallel=True, vdp_database_names=None, incremental=True,
-                      vdp_tag_names=None, tags_to_ignore=None, verify_ssl=False):
+                      parallel=True, vdp_database_names=None, incremental=False,
+                      vdp_tag_names=None, tags_to_ignore=None, verify_ssl=False,
+                      timeout_seconds=300):
     """
     Connect to AI SDK and fetch/sync metadata.
 
@@ -107,6 +101,7 @@ def connect_to_ai_sdk(api_host, username, password, insert=True, examples_per_ta
         vdp_tag_names: List of VDP tag names to sync
         tags_to_ignore: List of tags to ignore
         verify_ssl: Whether to verify SSL certificates
+        timeout_seconds: Request timeout in seconds
 
     Returns:
         Tuple of (status_code, result or error_message)
@@ -132,7 +127,8 @@ def connect_to_ai_sdk(api_host, username, password, insert=True, examples_per_ta
             f'{api_host}/getMetadata',
             params=request_params,
             auth=(username, password),
-            verify=verify_ssl
+            verify=verify_ssl,
+            timeout=timeout_seconds
         )
 
         if response.status_code == 204:
@@ -157,6 +153,8 @@ def connect_to_ai_sdk(api_host, username, password, insert=True, examples_per_ta
 
         return 200, {"vdbs": vdbs, "data_usage_errors": data_usage_errors}
 
+    except requests.exceptions.Timeout:
+        return 408, f"The synchronization timed out after {timeout_seconds} seconds."
     except Exception as e:
         return 500, f"Unexpected error: {str(e)}"
 

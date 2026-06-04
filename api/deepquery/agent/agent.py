@@ -1,7 +1,11 @@
 import time
 import logging
 
-from api.deepquery.agent.prompts import GENERAL_AGENT_PROMPT, DEFAULT_POST_TOOL_PROMPT
+from api.deepquery.agent.prompts import (
+    GENERAL_AGENT_PROMPT,
+    DEFAULT_POST_TOOL_PROMPT,
+    TIMEOUT_FORCED_SUMMARY_PROMPT
+)
 
 from langchain_core.output_parsers import StrOutputParser
 from utils import langfuse
@@ -155,16 +159,9 @@ class Agent:
         if self.conversation_manager.should_end_conversation(response):
             parsed = parse_xml(response)
             parsed_tools = parse_xml(parsed.get("tools", ""))
-            if "final_answer" in parsed_tools:
-                tool_id, final_answer = await self.tool_executor.execute_tool(self, "final_answer", parsed_tools["final_answer"])
-                return {
-                    "answer": final_answer,
-                    "conversation_history": self.conversation_manager.memory,
-                    "tool_calls": self.tool_executor.tool_calls,
-                    "loop_count": 0
-                }
+            _, final_answer = await self.tool_executor.execute_tool(self, "final_answer", parsed_tools["final_answer"])
             return {
-                "answer": "Conversation ended due to length constraints.",
+                "answer": final_answer,
                 "conversation_history": self.conversation_manager.memory,
                 "tool_calls": self.tool_executor.tool_calls,
                 "loop_count": 0
@@ -206,7 +203,8 @@ class Agent:
         self.logger.info(f"Starting execution loop from iteration {loop_count}")
         loop_start_time = time.time()
 
-        while True:
+        # Execute normal interactions as long as we haven't hit the limit
+        while loop_count < self.max_loops:
             if loop_count == 0:
                 temperature = 0.5
             else:
@@ -215,38 +213,20 @@ class Agent:
 
             self.logger.info(f"Loop iteration {loop_count}/{self.max_loops} with temperature={temperature}")
 
-            if loop_count > self.max_loops:
-                duration = time.time() - loop_start_time
-                self.logger.warning(f"Agent execution timed out after {loop_count} iterations in {duration:.2f}s")
-                return {
-                    "answer": "TIMEOUT - TRY AGAIN",
-                    "conversation_history": self.conversation_manager.memory,
-                    "tool_calls": self.tool_executor.tool_calls,
-                    "loop_count": loop_count
-                }
-
             # Process input and get response from LLM
             response = await self._get_llm_response(user_input, temperature)
             self.conversation_manager.update_memory(user_input, response)
 
-            # Check for final answer or token limit
+            # Check for final answer
             if self.conversation_manager.should_end_conversation(response):
                 duration = time.time() - loop_start_time
                 parsed = parse_xml(response)
                 parsed_tools = parse_xml(parsed.get("tools", ""))
-                if "final_answer" in parsed_tools:
-                    self.logger.info(f"Final answer found, completing execution after {loop_count} iterations in {duration:.2f}s")
-                    tool_id, final_answer = await self.tool_executor.execute_tool(self, "final_answer", parsed_tools["final_answer"])
-                    self.logger.info(f"Agent execution completed successfully with {len(self.tool_executor.tool_calls)} total tool calls")
-                    return {
-                        "answer": final_answer,
-                        "conversation_history": self.conversation_manager.memory,
-                        "tool_calls": self.tool_executor.tool_calls,
-                        "loop_count": loop_count
-                    }
-                self.logger.warning(f"Conversation ended due to length constraints after {loop_count} iterations in {duration:.2f}s")
+                self.logger.info(f"Final answer found, completing execution after {loop_count} iterations in {duration:.2f}s")
+                _, final_answer = await self.tool_executor.execute_tool(self, "final_answer", parsed_tools["final_answer"])
+                self.logger.info(f"Agent execution completed successfully with {len(self.tool_executor.tool_calls)} total tool calls")
                 return {
-                    "answer": "Conversation ended due to length constraints.",
+                    "answer": final_answer,
                     "conversation_history": self.conversation_manager.memory,
                     "tool_calls": self.tool_executor.tool_calls,
                     "loop_count": loop_count
@@ -256,6 +236,37 @@ class Agent:
             user_input = await self.conversation_manager.process_tools_and_prepare_next_input(
                 response, self.tool_executor, self
             )
+
+        # If the code reaches here, it means the loop exhausted max_loops without returning.
+        duration = time.time() - loop_start_time
+        self.logger.warning(f"Agent execution timed out after {self.max_loops} iterations in {duration:.2f}s. Forcing partial answer.")
+
+        forced_input = {"text": TIMEOUT_FORCED_SUMMARY_PROMPT}
+
+        try:
+            final_response = await self._get_llm_response(forced_input, temperature=0.0)
+
+            if self.conversation_manager.should_end_conversation(final_response):
+                parsed = parse_xml(final_response)
+                parsed_tools = parse_xml(parsed.get("tools", ""))
+
+                _, partial_answer = await self.tool_executor.execute_tool(self, "final_answer", parsed_tools["final_answer"])
+                self.logger.info("Successfully extracted partial answer from tool call after timeout.")
+                return {
+                    "answer": partial_answer,
+                    "conversation_history": self.conversation_manager.memory,
+                    "tool_calls": self.tool_executor.tool_calls,
+                    "loop_count": self.max_loops
+                }
+        except Exception as e:
+            self.logger.error(f"Failed to generate forced answer after timeout: {e}")
+
+        return {
+            "answer": "TIMEOUT_ERROR",
+            "conversation_history": self.conversation_manager.memory,
+            "tool_calls": self.tool_executor.tool_calls,
+            "loop_count": self.max_loops
+        }
 
     async def _get_llm_response(self, user_input, temperature=0, chain=None):
         """

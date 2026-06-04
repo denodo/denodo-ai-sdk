@@ -28,7 +28,7 @@ const formatTimestamp = (timestamp) => {
   }
 };
 
-const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, onResourcesUpdate }) => {
+const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpdate }) => {
   // Common state
   const [activeTab, setActiveTab] = useState('status');
   const [isLoading, setIsLoading] = useState(false);
@@ -48,7 +48,8 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
   const [syncTags, setSyncTags] = useState('');
   const [ignoreTags, setIgnoreTags] = useState('');
   const [examplesPerTable, setExamplesPerTable] = useState(100);
-  const [incremental, setIncremental] = useState(true);
+  const [timeoutSeconds, setTimeoutSeconds] = useState(300);
+  const [incremental, setIncremental] = useState(false);
   const [parallel, setParallel] = useState(true);
 
   // Delete state
@@ -80,6 +81,9 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
            requestedTags.some(tag => existingTags.includes(tag));
   };
 
+  const isTimeoutValid = timeoutSeconds !== '' && Number(timeoutSeconds) > 0;
+  const isExamplesValid = examplesPerTable !== '' && Number(examplesPerTable) >= 0 && Number(examplesPerTable) <= 500;
+
   const handleSyncSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
@@ -88,15 +92,21 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
     const processedTags = syncTags.split(',').map(tag => tag.trim()).filter(tag => tag);
     const processedIgnoreTags = ignoreTags.split(',').map(tag => tag.trim()).filter(tag => tag);
 
+    const finalTimeoutSeconds = parseInt(timeoutSeconds, 10) || 300;
+    const axiosTimeoutMs = finalTimeoutSeconds * 1000;
+
     try {
       const response = await api.post("sync_vdbs", {
         vdbs: processedVdbs,
         tags: processedTags,
         tags_to_ignore: processedIgnoreTags,
         examples_per_table: examplesPerTable,
+        timeout_seconds: finalTimeoutSeconds,
         incremental,
         parallel
-      }, { timeout: syncTimeout });
+      }, {
+        timeout: axiosTimeoutMs
+      });
 
       if (response.status === 204) {
         if (incremental) {
@@ -164,11 +174,12 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
     } catch (error) {
       let errorMsg = 'An error occurred during synchronization.';
       if (isAxiosError(error) && error.code === 'ECONNABORTED') {
-        errorMsg = `The synchronization timeout has been exceeded (${syncTimeout}ms).`;
+        errorMsg = `The synchronization timeout has been exceeded (${finalTimeoutSeconds} seconds). The request was cancelled before completion. It is recommended to synchronize again to ensure no metadata is missing.`;
       } else {
         errorMsg = error.response?.data?.message || errorMsg;
       }
-      showToast(errorMsg, 'danger', 'Sync error');
+      const toastTitle = isAxiosError(error) && error.code === 'ECONNABORTED' ? 'Sync Timeout' : 'Sync Error';
+      showToast(errorMsg, 'danger', toastTitle, 10000);
     } finally {
       setIsLoading(false);
     }
@@ -280,7 +291,12 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
           <Button variant="light" onClick={handleClose}>
             Cancel
           </Button>
-          <Button variant="dark" type="submit" disabled={isLoading} form="sync-form">
+          <Button 
+              variant="dark" 
+              type="submit" 
+              disabled={isLoading || !isTimeoutValid || !isExamplesValid} 
+              form="sync-form"
+          >
             {isLoading ? (
               <>
                 <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" />
@@ -403,12 +419,32 @@ const VectorDBSyncModal = ({ show, syncTimeout, handleClose, syncedResources, on
                         <Form.Group className="mb-3">
                             <Form.Label>Examples per Table</Form.Label>
                             <Form.Control
-                            type="number"
-                            min="0"
-                            value={examplesPerTable}
-                            onChange={(e) => setExamplesPerTable(parseInt(e.target.value))}
+                                type="number"
+                                min="0"
+                                max="500"
+                                value={examplesPerTable}
+                                isInvalid={examplesPerTable !== '' && !isExamplesValid}
+                                onChange={(e) => setExamplesPerTable(e.target.value === '' ? '' : parseInt(e.target.value))}
                             />
+                            <Form.Control.Feedback type="invalid">
+                                Must be between 0 and 500.
+                            </Form.Control.Feedback>
                         </Form.Group>
+                    </div>
+                    <div className="col-md-6">
+                        <Form.Group className="mb-3">
+                          <Form.Label>Timeout (seconds)</Form.Label>
+                          <Form.Control
+                              type="number"
+                              min="1"
+                              value={timeoutSeconds}
+                              isInvalid={timeoutSeconds !== '' && Number(timeoutSeconds) <= 0}
+                              onChange={(e) => setTimeoutSeconds(e.target.value === '' ? '' : parseInt(e.target.value))}
+                          />
+                          <Form.Control.Feedback type="invalid">
+                              Must be greater than 0.
+                          </Form.Control.Feedback>
+                      </Form.Group>
                     </div>
                   </div>
                   <Form.Group className="mb-3">

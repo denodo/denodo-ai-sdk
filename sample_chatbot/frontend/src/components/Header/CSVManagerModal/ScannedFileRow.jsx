@@ -3,43 +3,26 @@ import PropTypes from 'prop-types';
 import Form from 'react-bootstrap/Form';
 import Button from 'react-bootstrap/Button';
 import Badge from 'react-bootstrap/Badge';
-import OverlayTrigger from 'react-bootstrap/OverlayTrigger';
-import Popover from 'react-bootstrap/Popover';
 
 const ScannedFileRow = ({ scannedFile, onAdd }) => {
   return (
-    <tr style={{ backgroundColor: '#fff9e6' }}>
+    <tr style={{ backgroundColor: '#fff9e6', verticalAlign: 'middle' }}>
       <td className="text-center">
         <Form.Check type="switch" checked={false} disabled title="Add this source first" />
       </td>
-      <td>
+      <td style={{ maxWidth: '260px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
         <strong>{scannedFile.source_name}</strong>
-        <OverlayTrigger
-          trigger="click"
-          placement="right"
-          rootClose
-          overlay={
-            <Popover>
-              <Popover.Header as="h3">File Path</Popover.Header>
-              <Popover.Body style={{ fontSize: '0.8em', wordBreak: 'break-all' }}>
-                {scannedFile.path}
-              </Popover.Body>
-            </Popover>
-          }
-        >
-          <Button variant="link" size="sm" className="p-0 ms-2" title="Show file path">
-            <i className="bi bi-info-circle text-secondary"></i>
-          </Button>
-        </OverlayTrigger>
       </td>
-      <td style={{ fontSize: '0.85em' }}>
-        <span className="text-muted fst-italic">-</span>
-      </td>
-      <td className="text-center">
+      <td>
         <Badge bg="warning" text="dark">
-          Scanned
+          <i className="bi bi-radar me-1" />Scanned
         </Badge>
       </td>
+      <td style={{ fontSize: '0.85em' }}>
+        <span className="text-muted fst-italic">Not yet vectorized</span>
+      </td>
+      <td className="text-center text-muted" style={{ fontSize: '0.85em' }}>—</td>
+      <td className="text-center text-muted" style={{ fontSize: '0.85em' }}>—</td>
       <td>
         <Button variant="outline-primary" size="sm" onClick={() => onAdd(scannedFile)}>
           Add

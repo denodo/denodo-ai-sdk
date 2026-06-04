@@ -9,44 +9,36 @@ import traceback
 from utils import denodo_tools
 from langchain.tools import ToolRuntime, tool
 from sample_chatbot.engine.context import UserContext
-from utils.denodo_tools import create_basic_auth_header, format_data_query_output, format_metadata_query_output
+from utils.denodo_tools import create_basic_auth_header, format_data_agent_output, format_metadata_search_output
 
 # =============================================================================
 # Knowledge Query Implementation
 # =============================================================================
 
-def _knowledge_query_impl(search_query, vector_store, k=5, document_size_limit_chars=10000, source_names=None):
+def _knowledge_query_impl(search_query, vector_store, collection, k=5, document_size_limit_chars=10000):
     """
-    Search the knowledge base (vector store) for relevant documents.
+    Search a single collection inside the knowledge base.
 
-    Args:
-        search_query: The query to search for
-        vector_store: The vector store to search in
-        k: Number of results to return
-        document_size_limit_chars: Max characters per document in results
-        source_names: Optional list of source names to filter by (database_name in metadata)
+    Returns a dict carrying the rendered answer plus collection metadata so the
+    UI can show provenance.
     """
     try:
-        # Build filter for source_names if provided
-        if source_names and len(source_names) > 0:
-            result = vector_store.search(
-                query=search_query,
-                k=k,
-                scores=False,
-                database_names=source_names
-            )
-        else:
-            result = vector_store.search(query=search_query, k=k, scores=False)
+        result = vector_store.search(
+            query=search_query,
+            k=k,
+            scores=False,
+            database_names=[collection],
+        )
 
-        information = [f"Result {i+1}: {document.page_content[:document_size_limit_chars]}\n" for i, document in enumerate(result)]
-        information = '\n'.join(information)
-        return {
-            "answer": information
-        }
+        blocks = [
+            f"<result_{i + 1}>\n{doc.page_content[:document_size_limit_chars]}\n</result_{i + 1}>"
+            for i, doc in enumerate(result)
+        ]
+        return {"answer": "\n\n".join(blocks)}
     except Exception as e:
         return {
             "error": f"Knowledge query failed: {e}",
-            "traceback": traceback.format_exc()
+            "traceback": traceback.format_exc(),
         }
 
 # =============================================================================
@@ -55,20 +47,21 @@ def _knowledge_query_impl(search_query, vector_store, k=5, document_size_limit_c
 # =============================================================================
 
 @tool(response_format="content_and_artifact")
-def data_query(
+def data_agent(
     runtime: ToolRuntime[UserContext],
-    natural_language_query: str,
+    request: str,
     limit: int = 0,
     plot: int = 0,
     plot_details: str = "",
 ):
-    """Query the Denodo Platform (which contains the user's data) in natural language.
+    """Communicates with the data agent to generate and execute a single VQL query.
+    The data agent does not have memory of previous requests or conversations. Every individual request to the data_agent must be self-contained, meaning it must not rely on the agent having recollection of previous requests.
 
     Args:
-        natural_language_query: Natural language query to search for the data in the user's Denodo instance. For example, 'number of total customers'.
-        limit: Maximum number of rows to return. If omitted, it defaults to the data_query limit configured for this session.
-        plot: Whether to plot the data. 1 for yes, 0 for no.
-        plot_details: Any extra details of the graph to generate. For example, 'bar chart of the number of customers by country'.
+        request: Request to generate a single VQL query from and return the VQL query, its explanation and the execution result. For example, 'count the number of unique customers in the organization.customers view'.
+        limit: Maximum number of rows to return. If omitted, it defaults to the data_agent's limit configured for this session.
+        plot: Whether to generate and also return a plot of the data. 1 for yes, 0 for no.
+        plot_details: Any extra details of the graph to generate. For example, 'bar chart of the number of customers by country in organization.customers view'.
     """
 
     # UI-level filters coming from the QuestionForm (set in ai_sdk_params)
@@ -81,8 +74,8 @@ def data_query(
     default_limit = (runtime.context.ai_sdk_params or {}).get("vql_execute_rows_limit")
     effective_limit = default_limit if limit in (None, 0) else limit
 
-    response = denodo_tools.data_query(
-        natural_language_query=natural_language_query,
+    response = denodo_tools.data_agent(
+        natural_language_query=request,
         api_host=runtime.context.api_host,
         auth=auth,
         vdp_database_names=runtime.context.vdp_database_names,
@@ -90,12 +83,13 @@ def data_query(
         plot=plot,
         plot_details=plot_details,
         limit=effective_limit,
-        custom_instructions=runtime.context.custom_instructions,
+        custom_instructions=runtime.context.ai_sdk_custom_instructions,
         verify_ssl=runtime.context.verify_ssl,
+        timeout=runtime.context.timeout,
         **(runtime.context.ai_sdk_params or {}),
     )
 
-    return format_data_query_output(response)
+    return format_data_agent_output(response)
 
 @tool(response_format="content_and_artifact")
 def deep_query(
@@ -115,14 +109,20 @@ def deep_query(
         api_host=runtime.context.api_host,
         auth=auth,
         verify_ssl=runtime.context.verify_ssl,
+        timeout=runtime.context.timeout,
         **(runtime.context.ai_sdk_params or {}),
     )
 
-    content = response.get("answer", "DeepQuery analysis failed, please check the additional information modal.")
+    if "answer" in response:
+        content = response["answer"]
+    else:
+        error_detail = response.get("detail") or response.get("error")
+        content = str(error_detail) if error_detail else "DeepQuery analysis failed, please check the additional information modal."
+
     return (content, response)
 
 @tool(response_format="content_and_artifact")
-def metadata_query(
+def metadata_search(
     runtime: ToolRuntime[UserContext],
     search_query: str,
     n_results: int = 5,
@@ -140,7 +140,7 @@ def metadata_query(
 
     auth = create_basic_auth_header(runtime.context.username, runtime.context.password)
 
-    response = denodo_tools.metadata_query(
+    response = denodo_tools.metadata_search(
         search_query=search_query,
         api_host=runtime.context.api_host,
         auth=auth,
@@ -148,30 +148,65 @@ def metadata_query(
         vdp_tag_names=runtime.context.vdp_tag_names,
         n_results=n_results,
         verify_ssl=runtime.context.verify_ssl,
+        timeout=runtime.context.timeout,
     )
 
-    return format_metadata_query_output(response)
+    return format_metadata_search_output(response)
 
 @tool(response_format="content_and_artifact")
-def knowledge_query(runtime: ToolRuntime[UserContext], search_query: str, k: int = 5):
-    """Search the user's documents in the knowledge base, stored in a vectorDB, with similarity search. By default, search the top 5 similar results.
+def knowledge_query(runtime: ToolRuntime[UserContext], search_query: str, collection: str, k: int = 5):
+    """Search a single collection in the user's knowledge base with similarity search.
 
     Args:
-        search_query: Natural language query to search for the knowledge base.
-        k: Maximum number of results to return.
+        search_query: Natural language query to search for in the collection.
+        collection: REQUIRED. The exact name of the collection to search, taken from the
+            list shown in extra_tools_guidance. To cover several collections, call this
+            tool once per collection.
+        k: Maximum number of results to return (default 5).
     """
     if not runtime.context.vector_store:
-        return "Knowledge base is not configured."
+        return (
+            "Knowledge base is not configured.",
+            {"error": "knowledge_base_not_configured"},
+        )
 
-    # Get active CSV sources for filtering (if any)
-    source_names = runtime.context.active_csv_sources if runtime.context.active_csv_sources else None
+    active = runtime.context.active_csv_sources or []
+    requested = (collection or "").strip()
+
+    if not requested:
+        return (
+            "The `collection` argument is required. Pick one of the active collections: "
+            f"{', '.join(active) if active else '(none active)'}.",
+            {"error": "collection_required", "active_collections": active},
+        )
+
+    if not active:
+        # No subscribed collections means the user has nothing to search. We
+        # MUST refuse — otherwise the LLM could be coaxed into naming someone
+        # else's private collection and reading it through the shared store.
+        return (
+            "You have no collections active for this chatbot. Open the Knowledge "
+            "Base Manager to activate one before asking a knowledge-base question.",
+            {"error": "no_collections_active", "active_collections": []},
+        )
+
+    if requested not in active:
+        return (
+            f"Collection '{requested}' is not in your active set. "
+            f"Active collections: {', '.join(active)}.",
+            {"error": "collection_not_active", "active_collections": active},
+        )
+
+    collection_description = (runtime.context.kb_collections or {}).get(requested, "")
 
     response = _knowledge_query_impl(
         search_query=search_query,
         vector_store=runtime.context.vector_store,
+        collection=requested,
         k=k,
-        source_names=source_names,
     )
+    response["collection_name"] = requested
+    response["collection_description"] = collection_description
 
     if 'error' in response:
         return (f"Knowledge query failed: {response.get('error', 'Unknown error')}", response)

@@ -50,16 +50,15 @@ const ProfileModal = ({
     setIsLoading(true);
     try {
       const dictString = localStorage.getItem(`${username}_custom_instructions_dict`);
-      let currentInstructions = '';
+      let instructionsPayload = {};
       if (dictString) {
         try {
-          const instructionsDict = JSON.parse(dictString);
-          currentInstructions = instructionsDict[currentAgentKey] || '';
+          instructionsPayload = JSON.parse(dictString);
         } catch (e) {}
       }
 
       const response = await api.post("update_custom_instructions", {
-        custom_instructions: currentInstructions,
+        custom_instructions: instructionsPayload,
         user_details: userDetails
       });
       
@@ -95,10 +94,10 @@ const ProfileModal = ({
             
             <Form.Group controlId="formUserDetails" className="mb-3">
               <Form.Label className="d-flex align-items-center">
-                User Details
+                What should the agents know about you?
                 <CustomTooltip 
                   id="tooltip-user-details" 
-                  content="This information is sent to the chatbot LLM to personalize the conversation based on your user profile."
+                  content="This information is sent to the agent to personalize the conversation. For example, you could ask about how many clients you have if your email was included in this field."
                 >
                   <i 
                     className="bi bi-info-circle ms-2" 

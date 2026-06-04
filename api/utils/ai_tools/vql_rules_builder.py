@@ -11,6 +11,7 @@ def build_vql_restrictions(prompt_parts):
         spatial_vql_prompt=prompts.SPATIAL_VQL_PROMPT,
         llm_vql_prompt=prompts.LLM_VQL_PROMPT,
         vector_vql_prompt=prompts.VECTOR_VQL_PROMPT,
+        metric_vql_prompt=prompts.METRIC_VQL_PROMPT,
         json_vql_prompt=prompts.JSON_VQL_PROMPT,
         xml_vql_prompt=prompts.XML_VQL_PROMPT,
         text_vql_prompt=prompts.TEXT_VQL_PROMPT,
@@ -19,14 +20,15 @@ def build_vql_restrictions(prompt_parts):
         window_vql_prompt=prompts.WINDOW_VQL_PROMPT,
     )
 
-def build_full_vql_restrictions():
+def build_full_vql_restrictions(can_use_llm: bool = False):
     return build_vql_restrictions(
         {
             "dates": 1,
             "arithmetic": 1,
             "spatial": 1,
-            "llm": 1,
+            "llm": 1 if can_use_llm else 0,
             "vector": 1,
+            "metric": 1,
             "json": 1,
             "xml": 1,
             "text": 1,

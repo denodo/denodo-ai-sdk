@@ -3,7 +3,7 @@ import logging
 import requests
 import traceback
 
-from api.utils.answer_question.serializers import (
+from utils.execution_result_helpers import (
     get_full_execution_result_rows,
 )
 
@@ -13,7 +13,7 @@ def create_basic_auth_header(username, password):
     encoded = base64.b64encode(credentials.encode("utf-8")).decode("utf-8")
     return f"Basic {encoded}"
 
-def make_ai_sdk_request(endpoint, payload, auth, method="POST", verify_ssl=False):
+def make_ai_sdk_request(endpoint, payload, auth, method="POST", verify_ssl=False, timeout=1200):
     """Helper function to make AI SDK requests with standardized error handling.
 
     Args:
@@ -22,6 +22,7 @@ def make_ai_sdk_request(endpoint, payload, auth, method="POST", verify_ssl=False
         auth: Authorization header value (e.g., "Basic xyz..." or "Bearer xyz...")
         method: HTTP method (POST or GET)
         verify_ssl: Whether to verify SSL certificates
+        timeout: Request timeout in seconds
     """
     headers = {"Authorization": auth}
 
@@ -32,7 +33,7 @@ def make_ai_sdk_request(endpoint, payload, auth, method="POST", verify_ssl=False
                 params=payload,
                 headers=headers,
                 verify=verify_ssl,
-                timeout=1200
+                timeout=timeout
             )
         else:
             response = requests.post(
@@ -40,7 +41,7 @@ def make_ai_sdk_request(endpoint, payload, auth, method="POST", verify_ssl=False
                 json=payload,
                 headers=headers,
                 verify=verify_ssl,
-                timeout=1200
+                timeout=timeout
             )
         response.raise_for_status()
         return response.json()
@@ -75,6 +76,7 @@ def deep_query(
     vdp_database_names=None,
     vdp_tag_names=None,
     allow_external_associations=True,
+    timeout=1200,
     **llm_params
 ):
     request_body = {
@@ -90,11 +92,11 @@ def deep_query(
     request_body.update(llm_params)
 
     endpoint = f'{api_host}/deepQuery'
-    response = make_ai_sdk_request(endpoint, request_body, auth, verify_ssl=verify_ssl)
+    response = make_ai_sdk_request(endpoint, request_body, auth, verify_ssl=verify_ssl, timeout=timeout)
 
     return response
 
-def metadata_query(
+def metadata_search(
     search_query,
     api_host,
     auth,
@@ -102,6 +104,7 @@ def metadata_query(
     vdp_tag_names=None,
     n_results=5,
     verify_ssl=False,
+    timeout=1200,
 ):
     request_body = {
         'question': search_query,
@@ -116,11 +119,11 @@ def metadata_query(
         request_body['vdp_tag_names'] = vdp_tag_names
 
     endpoint = f'{api_host}/answerQuestion'
-    response = make_ai_sdk_request(endpoint, request_body, auth, "GET", verify_ssl=verify_ssl)
+    response = make_ai_sdk_request(endpoint, request_body, auth, "GET", verify_ssl=verify_ssl, timeout=timeout)
 
     return response
 
-def data_query(
+def data_agent(
     natural_language_query,
     api_host,
     auth,
@@ -132,6 +135,7 @@ def data_query(
     limit=None,
     custom_instructions='',
     verify_ssl=False,
+    timeout=1200,
     **llm_params
 ):
     request_body = {
@@ -156,15 +160,15 @@ def data_query(
         request_body['vql_execute_rows_limit'] = int(limit)
 
     endpoint = f'{api_host}/answerQuestion'
-    response = make_ai_sdk_request(endpoint, request_body, auth, verify_ssl=verify_ssl)
+    response = make_ai_sdk_request(endpoint, request_body, auth, verify_ssl=verify_ssl, timeout=timeout)
 
     return response
 
-def _build_error_data_query_output(response):
+def _build_error_data_agent_output(response):
     content = f"Data query failed: {response.get('error', 'Unknown error')}"
     return (content, response)
 
-def _build_empty_data_query_content(response):
+def _build_empty_data_agent_content(response):
     content = f"""Response: {response.get("answer", "No answer was provided.")}"""
 
     sql_query = response.get("sql_query", "")
@@ -192,7 +196,7 @@ def _get_execution_result_views(response):
     }
 
 
-def _build_success_data_query_content(response):
+def _build_success_data_agent_content(response):
     execution_result_views = _get_execution_result_views(response)
     full_rows = execution_result_views["full_rows"]
     llm_rows = execution_result_views["llm_rows"]
@@ -228,7 +232,7 @@ def _append_graph_output(content, response):
 
     return content + f"\n\nGraph generation failed. Error: {raw_graph}"
 
-def _build_data_query_artifact(response):
+def _build_data_agent_artifact(response):
     return {
         "vql": response.get("sql_query", ""),
         "execution_result": response.get("execution_result", {}),
@@ -241,29 +245,29 @@ def _build_data_query_artifact(response):
         "llm_model": response.get("llm_model", ""),
     }
 
-def format_data_query_output(response, include_graph=True):
+def format_data_agent_output(response, include_graph=True):
     # CASE 1: No schema found/endpoint error => returns 'Data query failed' message
     if 'error' in response:
-        return _build_error_data_query_output(response)
+        return _build_error_data_agent_output(response)
 
     # CASE 2: Ambiguity detected => returns answer with the ambiguity message
     # CASE 3: Empty execution result => returns answer with the empty execution result message + sql_query + query_explanation
     if not response.get("sql_query") or not response.get("execution_result"):
-        content = _build_empty_data_query_content(response)
+        content = _build_empty_data_agent_content(response)
     else:
         # CASE 4: All ok => returns sql_query + execution_result + query_explanation
-        content = _build_success_data_query_content(response)
+        content = _build_success_data_agent_content(response)
 
     # Graph output is only relevant for UI clients (chatbot), not for MCP
     if include_graph:
         content = _append_graph_output(content, response)
 
-    artifact = _build_data_query_artifact(response)
+    artifact = _build_data_agent_artifact(response)
     return (content, artifact)
 
-def format_metadata_query_output(response):
+def format_metadata_search_output(response):
     if 'error' in response:
-        content = f"Metadata query failed: {response.get('error', 'Unknown error')}"
+        content = f"Metadata search failed: {response.get('error', 'Unknown error')}"
         artifact = response
         return (content, artifact)
 
@@ -305,10 +309,10 @@ def format_metadata_query_output(response):
     artifact = response
     return (content, artifact)
 
-def format_data_query_output_mcp(response):
-    content, _ = format_data_query_output(response, include_graph=False)
+def format_data_agent_output_mcp(response):
+    content, _ = format_data_agent_output(response, include_graph=False)
     return content
 
-def format_metadata_query_output_mcp(response):
-    content, _ = format_metadata_query_output(response)
+def format_metadata_search_output_mcp(response):
+    content, _ = format_metadata_search_output(response)
     return content

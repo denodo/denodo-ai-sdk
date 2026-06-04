@@ -14,11 +14,11 @@ class UserRequestLoggingMiddleware(AgentMiddleware):
     """Middleware that logs user requests with custom instructions."""
 
     def before_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
-        custom_instructions = runtime.context.custom_instructions
-        if custom_instructions:
-            logging.info(f"Processing request from user '{runtime.context.username}' with custom instructions: '{custom_instructions.strip()}'")
+        ai_sdk_ci = runtime.context.ai_sdk_custom_instructions
+        if ai_sdk_ci:
+            logging.info(f"Processing request from user '{runtime.context.username}' with AI SDK custom instructions: '{ai_sdk_ci.strip()}'")
         else:
-            logging.info(f"Processing request from user '{runtime.context.username}' with no custom instructions.")
+            logging.info(f"Processing request from user '{runtime.context.username}' with no AI SDK custom instructions.")
         return None
 
 class TrimConversationHistoryMiddleware(AgentMiddleware):

@@ -12,9 +12,9 @@ import "./QuestionForm.css";
 const baseToolOptions = [
   { id: 'auto', label: 'Auto (Default)', bg: '#6c757d', icon: 'bi-stars', iconColor: '#6c757d' }, 
   { id: 'deep_query', label: 'Deep Query', bg: 'linear-gradient(135deg, #ED342A 0%, #413581 100%)', icon: 'bi-magic', iconColor: '#7953aa' },
-  { id: 'data_query', label: 'Data Query', bg: '#0d6efd', icon: 'bi-database', iconColor: '#0d6efd' }, 
-  { id: 'metadata_query', label: 'Metadata Query', bg: '#20c997', icon: 'bi-code-slash', iconColor: '#20c997' }, 
-  { id: 'kb', label: 'Knowledge Base Query', bg: '#fd7e14', icon: 'bi-book', iconColor: '#fd7e14' }
+  { id: 'data_agent', label: 'Data Agent', bg: '#0d6efd', icon: 'bi-database', iconColor: '#0d6efd' }, 
+  { id: 'metadata_search', label: 'Metadata Search', bg: '#20c997', icon: 'bi-code-slash', iconColor: '#20c997' }, 
+  { id: 'knowledge_query', label: 'Knowledge Base Query', bg: '#fd7e14', icon: 'bi-book', iconColor: '#fd7e14' }
 ];
 
 const QuestionForm = ({ 
@@ -66,7 +66,7 @@ const QuestionForm = ({
 
   const toolOptions = baseToolOptions.filter(tool => {
     if (tool.id === 'deep_query') return config.enable_deep_query;
-    if (tool.id === 'kb') return config.unstructured_mode;
+    if (tool.id === 'knowledge_query') return config.unstructured_mode;
     return true;
   });
 
@@ -83,7 +83,7 @@ const QuestionForm = ({
   useEffect(() => {
     if (lastToolRequest) {
       if (lastToolRequest.name === 'deep_query' && !config.enable_deep_query) return;
-      if (lastToolRequest.name === 'kb' && !config.unstructured_mode) return;
+      if (lastToolRequest.name === 'knowledge_query' && !config.unstructured_mode) return;
 
       const matchedTool = baseToolOptions.find(tool => tool.id === lastToolRequest.name);
       const toolLabel = (matchedTool && matchedTool.label) || lastToolRequest.prettyName || lastToolRequest.name || "tool";

@@ -13,10 +13,10 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from sample_chatbot.engine.middleware import TrimConversationHistoryMiddleware, UserRequestLoggingMiddleware
 from sample_chatbot.engine.context import UserContext
-from sample_chatbot.engine.tools import data_query, deep_query, knowledge_query, metadata_query
-from sample_chatbot.utils.helpers import setup_user_details
+from sample_chatbot.engine.tools import data_agent, deep_query, knowledge_query, metadata_search
+from sample_chatbot.utils.helpers import setup_user_details, format_user_instructions_for_prompt
 from utils.langfuse import build_config, generate_langfuse_session_id
-from utils.utils import custom_tag_parser
+from utils.utils import custom_tag_parser, calculate_tokens, safe_str
 
 class ChatbotEngine:
     """
@@ -38,21 +38,23 @@ class ChatbotEngine:
         password,
         vector_store_provider,
         vector_store,
-        denodo_tables,
         message_history_limit=5,
         remove_first_n_messages=1,
         user_details="",
-        custom_instructions="",
+        ai_sdk_custom_instructions="",
+        chatbot_custom_instructions="",
         thread_id=None,
         enable_deepquery=True,
         deep_query_guidance="",
         extra_tools_guidance="",
-        data_query_limit_max=None,
+        data_agent_limit_max=None,
         verify_ssl=False,
         ai_sdk_params=None,
         auto_graph=True,
         kb_description="",
         active_csv_sources=None,
+        kb_collections=None,
+        timeout=1200,
     ):
         self.llm = llm.llm
         self.llm_model = f"{llm.provider_name}.{llm.model_name}"
@@ -64,30 +66,34 @@ class ChatbotEngine:
         self.api_host = api_host
         self.username = username
         self.password = password
-        self.denodo_tables = denodo_tables
         self.user_details = setup_user_details(user_details)
         self.enable_deepquery = enable_deepquery
         self.deep_query_guidance = deep_query_guidance
         self.extra_tools_guidance = extra_tools_guidance
-        self.data_query_limit_max = data_query_limit_max
+        self.data_agent_limit_max = data_agent_limit_max
         self.verify_ssl = verify_ssl
         self.ai_sdk_params = ai_sdk_params or {}
         self.auto_graph = auto_graph
         self.kb_description = kb_description
         self.active_csv_sources = active_csv_sources or []
+        self.kb_collections = kb_collections or {}
         self.session_id = generate_langfuse_session_id()
         self.thread_id = thread_id
+        self.ai_sdk_custom_instructions = (ai_sdk_custom_instructions or "").strip()
+        self.timeout = timeout
         self.user_context = UserContext(
             api_host=self.api_host,
             username=self.username,
             password=self.password,
-            custom_instructions=custom_instructions,
+            ai_sdk_custom_instructions=self.ai_sdk_custom_instructions,
             verify_ssl=self.verify_ssl,
             ai_sdk_params=self.ai_sdk_params,
+            timeout=self.timeout,
             vdp_database_names="",
             vdp_tag_names="",
             vector_store=self.vector_store,
             active_csv_sources=self.active_csv_sources,
+            kb_collections=self.kb_collections,
         )
 
         self.system_prompt = system_prompt
@@ -119,40 +125,41 @@ class ChatbotEngine:
 
         if self.auto_graph:
             graph_guidance_chunk = (
-                "- When deciding whether to request plots from the data_query tool, you can only request a plot of the data "
-                "if it has been explicitly requested by the user."
-            )
-        else:
-            graph_guidance_chunk = (
-                "- When deciding whether to request plots from the data_query tool, you may request a plot when the data would "
+                "- When deciding whether to request plots from the data_agent, you may request a plot when the data would "
                 "clearly benefit from a chart, but generating a plot takes a few seconds, so only do it when it will materially "
                 "help the user understand the data better."
             )
+        else:
+            graph_guidance_chunk = (
+                "- When deciding whether to request plots from the data_agent tool, you can only request a plot of the data "
+                "if it has been explicitly requested by the user."
+            )
 
         if self.vector_store and self.kb_description:
-            self.extra_tools_guidance += f"""You also have access to a knowledge_query tool to search the user's documents in the knowledge base, stored in a vectorDB.
-            The knowledge base contains the following types of documents:
+            self.extra_tools_guidance += f"""You also have access to a knowledge_query tool to search the user's knowledge base, stored in a vectorDB.
+            The knowledge base is organised into the following collections:
             {self.kb_description}
-            Use this knowledge base when the user is asking about anything related to those contents.
-
-            Since this is a vectorDB, it will only return results that are similar to the query you give it. You can call this tool as many times as you need to cover all scenarios."""
+            When the user's request is related to one or more of the collections above, you must use the knowledge_query tool to search the knowledge base to ground your answer.
+            You must pass the exact name of one collection from the list above as the 'collection' argument on every call to knowledge_query to filter results per collection. If the user's request spans more than one collection, call the tool once per collection.
+            Since this is a vectorDB, it will only return results that are similar to the query you give it. You can call this tool as many times as you need to cover all scenarios.
+            Whenever the results include URLs as sources, you must cite along your response the specific URLs you used for your answer by formatting them as markdown links (i.e, [1](url1), [2](url2)...)"""
         else:
             self.extra_tools_guidance = "There are no extra tools available."
 
         self.system_prompt = self.system_prompt.format(
             user_details=self.user_details,
-            denodo_tables=self.denodo_tables,
+            custom_instructions=format_user_instructions_for_prompt(chatbot_custom_instructions),
             tool_count_string=self.tool_count_string,
             deep_query_guidance=self.deep_query_guidance,
             deepquery_system_prompt_chunk=self.deepquery_system_prompt_chunk,
             deepquery_related_question_chunk=self.deepquery_related_question_chunk,
-            data_query_limit_max=self.data_query_limit_max,
+            data_agent_limit_max=self.data_agent_limit_max,
             graph_guidance_chunk=graph_guidance_chunk,
             extra_tools_guidance=f"<extra_tools_guidance>\n{self.extra_tools_guidance}\n</extra_tools_guidance>",
         )
 
         # Build agent tools set dynamically
-        self.tools = [data_query, metadata_query]
+        self.tools = [data_agent, metadata_search]
         if self.enable_deepquery:
             self.tools.append(deep_query)
         if self.vector_store:
@@ -204,6 +211,10 @@ class ChatbotEngine:
                         buffer += content
 
                 elif isinstance(message_chunk, ToolMessage):
+                    # Log tool calls (response tokens and truncated content)
+                    tool_tokens = calculate_tokens(str(message_chunk.content)) if message_chunk.content else 0
+                    logging.info(f"[TOOL RESPONSE] '{message_chunk.name}' (Tokens: {tool_tokens}) -> {safe_str(message_chunk.content, 200)}")
+
                     # Tool execution finished
                     yield {
                         "type": "tool_end",
@@ -218,6 +229,9 @@ class ChatbotEngine:
                 messages = model_update.get("messages", [])
                 for m in messages:
                     for tool_call in getattr(m, "tool_calls", []) or []:
+                        # Log tool calls (args)
+                        logging.info(f"[TOOL CALL] '{tool_call.get('name')}' Args: {tool_call.get('args')}")
+
                         yield {
                             "type": "tool_start",
                             "tool_name": tool_call.get("name"),
@@ -272,6 +286,10 @@ class ChatbotEngine:
         try:
             uuid_str = str(uuid.uuid4())  # Generate a new UUID for the query
 
+            # Log user question and tokens
+            question_tokens = calculate_tokens(str(query)) if query else 0
+            logging.info(f"[USER QUESTION] (Tokens: {question_tokens}) -> {safe_str(query)}")
+
             if tool:
                 query = f"{query}\n\nI want you to use the {tool} tool for this task."
 
@@ -318,13 +336,15 @@ class ChatbotEngine:
                 api_host=self.api_host,
                 username=self.username,
                 password=self.password,
-                custom_instructions=self.user_context.custom_instructions,
+                ai_sdk_custom_instructions=self.user_context.ai_sdk_custom_instructions,
                 verify_ssl=self.verify_ssl,
                 ai_sdk_params=effective_ai_sdk_params,
+                timeout=self.timeout,
                 vdp_database_names=vdp_database_names or "",
                 vdp_tag_names=vdp_tag_names or "",
                 vector_store=self.vector_store,
                 active_csv_sources=self.active_csv_sources,
+                kb_collections=self.kb_collections,
             )
 
             stream = self.agent.stream(
@@ -336,6 +356,10 @@ class ChatbotEngine:
 
             # Delegate processing to helper method to handle buffering and event generation
             aggregated_answer, related_questions, related_questions_deepquery = yield from self._process_stream_events(stream, uuid_str)
+
+            # Log response (truncated to 200 chars) and tokens
+            response_tokens = calculate_tokens(aggregated_answer) if aggregated_answer else 0
+            logging.info(f"[AGENT RESPONSE] (Tokens: {response_tokens}) -> {safe_str(aggregated_answer, 200)}")
 
             # Finalization
             yield {

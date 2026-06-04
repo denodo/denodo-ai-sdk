@@ -97,6 +97,33 @@ class UniformVectorStore:
                     index_name=self.index_name,
                     engine="faiss"
                 )
+        elif self.provider == "oracle":
+            import oracledb
+            from langchain_oracledb.vectorstores import OracleVS
+            from langchain_oracledb.vectorstores.oraclevs import DistanceStrategy
+
+            ORACLE_USERNAME = os.getenv("ORACLE_USERNAME")
+            ORACLE_PASSWORD = os.getenv("ORACLE_PASSWORD")
+            ORACLE_DSN = os.getenv("ORACLE_DSN")
+
+            if not all([ORACLE_USERNAME, ORACLE_PASSWORD, ORACLE_DSN]):
+                raise ValueError("ORACLE_USERNAME, ORACLE_PASSWORD, and ORACLE_DSN environment variables must be set.")
+
+            try:
+                connection = oracledb.connect(
+                    user=ORACLE_USERNAME,
+                    password=ORACLE_PASSWORD,
+                    dsn=ORACLE_DSN
+                )
+            except Exception as e:
+                raise ConnectionError(f"Failed to connect to Oracle Database: {e}")
+
+            self.client = OracleVS(
+                client=connection,
+                embedding_function=self.embeddings,
+                table_name=self.index_name,
+                distance_strategy=DistanceStrategy.COSINE,
+            )
         else:
             raise ValueError(f"Unsupported vector store provider: {self.provider}")
 
@@ -217,12 +244,12 @@ class UniformVectorStore:
         if scores:
             if self.provider == "opensearch":
                 return self.client.similarity_search_with_score(query, k=k, search_type="script_scoring", pre_filter=search_filter)
-            elif self.provider in ["chroma", "pgvector"]:
+            elif self.provider in ["chroma", "pgvector", "oracle"]:
                 return self.client.similarity_search_with_score(query, k=k, filter=search_filter)
         else:
             if self.provider == "opensearch":
                 return self.client.similarity_search(query, k=k, search_type="script_scoring", pre_filter=search_filter)
-            elif self.provider in ["chroma", "pgvector"]:
+            elif self.provider in ["chroma", "pgvector", "oracle"]:
                 return self.client.similarity_search(query, k=k, filter=search_filter)
 
     @log_params
@@ -242,14 +269,14 @@ class UniformVectorStore:
         if scores:
             if self.provider == "opensearch":
                 return self.client.similarity_search_with_score_by_vector(vector, k=k, search_type="script_scoring", pre_filter=search_filter)
-            elif self.provider == "pgvector":
+            elif self.provider in ["pgvector", "oracle"]:
                 return self.client.similarity_search_with_score_by_vector(vector, k=k, filter=search_filter)
             elif self.provider == "chroma":
                 return self.client.similarity_search_by_vector_with_relevance_scores(vector, k=k, filter=search_filter)
         else:
             if self.provider == "opensearch":
                 return self.client.similarity_search_by_vector(vector, k=k, search_type="script_scoring", pre_filter=search_filter)
-            elif self.provider in ["chroma", "pgvector"]:
+            elif self.provider in ["chroma", "pgvector", "oracle"]:
                 return self.client.similarity_search_by_vector(vector, k=k, filter=search_filter)
 
     @log_params
@@ -264,14 +291,14 @@ class UniformVectorStore:
             for db_name in database_names:
                 if self.provider == "opensearch":
                     or_conditions.append({"match": {"metadata.database_name": db_name}})
-                elif self.provider in ["chroma", "pgvector"]:
+                elif self.provider in ["chroma", "pgvector", "oracle"]:
                     or_conditions.append({"database_name": {"$eq": db_name}})
 
         if tag_names:
             for tag_name in tag_names:
                 if self.provider == "opensearch":
                     or_conditions.append({"match": {f"metadata.tag_{tag_name}": "1"}})
-                elif self.provider in ["chroma", "pgvector"]:
+                elif self.provider in ["chroma", "pgvector", "oracle"]:
                     or_conditions.append({f"tag_{tag_name}": {"$eq": "1"}})
 
         if not or_conditions:
@@ -281,7 +308,7 @@ class UniformVectorStore:
             if len(or_conditions) == 1:
                 return or_conditions[0] # If only one OR condition, return it directly
             return {"bool": {"should": or_conditions, "minimum_should_match": 1}}
-        elif self.provider in ["chroma", "pgvector"]:
+        elif self.provider in ["chroma", "pgvector", "oracle"]:
             if len(or_conditions) == 1:
                 return or_conditions[0] # If only one OR condition, return it directly
             return {"$or": or_conditions}
@@ -295,7 +322,7 @@ class UniformVectorStore:
             return {"terms": {
                 "metadata.view_name.keyword": view_names
             }}
-        elif self.provider in ["chroma", "pgvector"]:
+        elif self.provider in ["chroma", "pgvector", "oracle"]:
             return {"view_name": {"$in": view_names}}
         else:
             return None
@@ -372,7 +399,7 @@ class UniformVectorStore:
 
             return filter_query
 
-        elif self.provider in ['chroma', 'pgvector']:
+        elif self.provider in ['chroma', 'pgvector', 'oracle']:
             # If no additional filters, return a simple filter for view_ids
             if not has_additional_filters:
                 return {"view_id": {"$in": view_ids}}

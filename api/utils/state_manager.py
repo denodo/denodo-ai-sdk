@@ -104,7 +104,6 @@ def get_vector_store(
 def initialize_default_resources():
     """
     Initializes the default resources based on environment variables.
-    This function is called once at application startup.
     """
     logging.info("Pre-initializing default resources...")
 

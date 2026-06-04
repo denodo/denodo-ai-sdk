@@ -16,6 +16,7 @@ class UniformEmbeddings:
         "mistral",
         "nvidia",
         "googleaistudio",
+        "openrouter"
     ]
 
     def __init__(self, provider_name, model_name):
@@ -47,6 +48,8 @@ class UniformEmbeddings:
             self.setup_nvidia()
         elif self.provider_name.lower() == "googleaistudio":
             self.setup_google_ai_studio()
+        elif self.provider_name.lower() == "openrouter":
+            self.setup_openrouter()
         elif self.provider_name.lower().startswith("azure_"):
             logging.info(f"Provider '{self.provider_name}' detected as custom Azure-compatible provider.")
             logging.info("Expected environment variables for custom Azure provider:")
@@ -63,15 +66,13 @@ class UniformEmbeddings:
             logging.info(f"- {self.provider_name.upper()}_PROXY (optional)")
             self.setup_custom()
 
-        if ":" in self.model_name:
-            self.model = self.base_embeddings
-        else:
-            self.model = CacheBackedEmbeddings.from_bytes_store(
-                self.base_embeddings,
-                self.store,
-                namespace=self.model_name,
-                query_embedding_cache=True,
-            )
+        self.namespace = self.model_name.lstrip('/').replace('/', '_').replace('\\', '_').replace(':', '_')
+        self.model = CacheBackedEmbeddings.from_bytes_store(
+            self.base_embeddings,
+            self.store,
+            namespace=self.namespace,
+            query_embedding_cache=True,
+        )
 
     def setup_google_ai_studio(self):
         from langchain_google_genai import GoogleGenerativeAIEmbeddings
@@ -143,6 +144,7 @@ class UniformEmbeddings:
             "model": self.model_name,
             "openai_api_key": api_key,
             "check_embedding_ctx_length": False,
+            "chunk_size": 50,
         }
 
         if base_url is not None:
@@ -170,6 +172,29 @@ class UniformEmbeddings:
             kwargs["dimensions"] = int(dimensions)
 
         self.base_embeddings = OpenAIEmbeddings(**kwargs)
+
+
+    def setup_openrouter(self):
+        from langchain_openai import OpenAIEmbeddings
+
+        api_key = os.getenv('OPENROUTER_API_KEY')
+        base_url = os.getenv('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1')
+
+        if api_key is None:
+            raise ValueError("OPENROUTER_API_KEY environment variable not set.")
+
+        kwargs = {
+            "model": self.model_name,
+            "api_key": api_key,
+            "encoding_format": "float",
+            "check_embedding_ctx_length": False,
+        }
+
+        if base_url is not None:
+            kwargs["base_url"] = base_url
+
+        self.base_embeddings = OpenAIEmbeddings(**kwargs)
+
 
     def setup_azure(self):
         from langchain_openai import AzureOpenAIEmbeddings

@@ -9,7 +9,7 @@ from fastmcp.server.auth import RemoteAuthProvider
 from fastmcp.server.dependencies import get_http_headers
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from api.endpoints.answerQuestion import answerQuestionRequest, process_question
-from utils.denodo_tools import format_data_query_output_mcp, format_metadata_query_output_mcp
+from utils.denodo_tools import format_data_agent_output_mcp, format_metadata_search_output_mcp
 from utils.utils import filter_allowed_headers
 
 logger = logging.getLogger(__name__)
@@ -27,20 +27,24 @@ def get_mcp_app(host, port, root_path):
     MCP_AI_SDK_OIDC_AUDIENCE = os.getenv("MCP_AI_SDK_OIDC_AUDIENCE")
     MCP_AI_SDK_DCR_URL = os.getenv("MCP_AI_SDK_DCR_URL")
     LLM_RESPONSE_ROWS_LIMIT = int(os.getenv("LLM_RESPONSE_ROWS_LIMIT", "100"))
-    DATA_QUERY_TOOL_DESCRIPTION = f"""Query the user's database in Denodo in natural language to retrieve data.
-    For example, you can use this tool to answer questions like "how many new customers did we get last month?"
+    DATA_AGENT_TOOL_DESCRIPTION = f"""Communicates with the data agent to generate and execute a single VQL query.
+    The data agent does not have memory of previous requests or conversations. Every individual request to the data_agent must be self-contained, meaning it must not rely on the data agent having recollection of previous requests.
+
     Args:
-        question: Natural language question (e.g. "how many new customers did we get last month?")
-        limit: Maximum number of rows to return from the SQL execution result. Any integer between 1 and {LLM_RESPONSE_ROWS_LIMIT} can be set.
+        request: Request to generate a single VQL query from and return the VQL query, its explanation and the execution result. For example, 'count the number of unique customers in the organization.customers view'.
+        limit: Maximum number of rows to return from the VQL execution result. Any integer between 1 and {LLM_RESPONSE_ROWS_LIMIT} can be set.
         This limit is set to avoid LLM context saturation. However, you must be transparent with the user regarding this limit to avoid confusion.
         For example, if 100 rows are returned for new customers, is it because limit is set to 100 (and then there may be more new customers) or because there are actually 100 new customers?
     """
-    METADATA_QUERY_TOOL_DESCRIPTION = """Perform a similarity search in the user's database in Denodo and return the schema of the most similar tables.
-For example, it can be helpful to answer metadata questions like "what tables do we have related to X topic?",
-"what is the primary key of this table?", or "what associations does this table have?"
-Args:
-    search_query: Natural language query to search for the metadata of the tables (e.g. "tables related to loans")
-    n_results: Maximum number of metadata results to return.
+    METADATA_SEARCH_TOOL_DESCRIPTION = """This tool can perform a similarity search in the database and return the schema of the n_results (stick to the default of 5 if not specified) most similar views.
+        For example, it can be helpful to answer questions like:
+        - What views do we have related to X topic.
+        - What is the primary key of this table.
+        - What associations does this view have.
+
+    Args:
+        search_query: Natural language query to search for the metadata of the views in the user's Denodo instance. For example, 'views related to loans'.
+        n_results: Maximum number of results to return.
     """
 
     auth_provider = None
@@ -120,13 +124,13 @@ Args:
     # Keep the MCP tool docs in the decorator description instead of the docstring
     # so we can inject dynamic limits from environment variables when needed.
     @mcp.tool(
-        description=DATA_QUERY_TOOL_DESCRIPTION
+        description=DATA_AGENT_TOOL_DESCRIPTION
     )
-    async def data_query(
-        question: str,
+    async def data_agent(
+        request: str,
         limit: int = LLM_RESPONSE_ROWS_LIMIT,
     ):
-        logger.info(f"MCP request received - Mode: data, Question: {question}")
+        logger.info(f"MCP request received - Mode: data, Question: {request}")
 
         auth, custom_headers = _extract_auth()
 
@@ -134,7 +138,7 @@ Args:
             logger.debug("Processing request directly via process_question function")
 
             request = answerQuestionRequest(
-                question=question,
+                question=request,
                 mode="data",
                 verbose=False,
                 disclaimer=False,
@@ -145,15 +149,15 @@ Args:
             response_body = json.loads(response.body.decode())
 
             logger.info("MCP request completed successfully for mode: data")
-            return format_data_query_output_mcp(response_body)
+            return format_data_agent_output_mcp(response_body)
         except Exception as e:
-            logger.exception(f"Error processing MCP request - Mode: data, Question: {question}")
+            logger.exception(f"Error processing MCP request - Mode: data, Question: {request}")
             return f"Error fetching response: {str(e)}"
 
     @mcp.tool(
-        description=METADATA_QUERY_TOOL_DESCRIPTION
+        description=METADATA_SEARCH_TOOL_DESCRIPTION
     )
-    async def metadata_query(
+    async def metadata_search(
         search_query: str,
         n_results: int = 5,
     ):
@@ -175,7 +179,7 @@ Args:
             response_body = json.loads(response.body.decode())
 
             logger.info("MCP request completed successfully for mode: metadata")
-            return format_metadata_query_output_mcp(response_body)
+            return format_metadata_search_output_mcp(response_body)
         except Exception as e:
             logger.exception(f"Error processing MCP request - Mode: metadata, Question: {search_query}")
             return f"Error fetching response: {str(e)}"

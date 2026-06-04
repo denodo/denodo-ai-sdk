@@ -33,7 +33,8 @@ async def query_fixer(
     session_id=None,
     query_explanation='',
     sample_data=None,
-    vector_search_sample_data_k=3
+    vector_search_sample_data_k=3,
+    can_use_llm=False
 ):
     if error_categories is None:
         error_categories = []
@@ -51,7 +52,8 @@ async def query_fixer(
         error_log,
         error_categories,
         relevant_tables,
-        query_explanation
+        query_explanation,
+        can_use_llm
     )
 
     if not prompt:
@@ -88,7 +90,8 @@ async def query_reviewer(
     session_id=None,
     fixer_history=None,
     sample_data=None,
-    vector_search_sample_data_k=3
+    vector_search_sample_data_k=3,
+    can_use_llm=False
 ):
     if fixer_history is None:
         fixer_history = []
@@ -98,7 +101,7 @@ async def query_reviewer(
 
     schema = [table for table in vector_search_tables if table['view_name'] in vql_query.replace('"', '')]
     relevant_tables = format_schema_text(schema, [], sample_data, examples_per_table=vector_search_sample_data_k)
-    vql_rules = f"Here are the VQL generation rules:\n<vql_rules>\n{build_full_vql_restrictions()}\n</vql_rules>"
+    vql_rules = f"Here are the VQL generation rules:\n<vql_rules>\n{build_full_vql_restrictions(can_use_llm)}\n</vql_rules>"
 
     with get_usage_metadata_callback() as cb:
         response = await final_chain.ainvoke(
@@ -132,7 +135,7 @@ async def query_reviewer(
     return new_vql_query, fixer_history, _usage_tokens(cb)
 
 
-def _get_prompt_and_parameters(question, vql_query, error_log, error_categories, schema, query_explanation):
+def _get_prompt_and_parameters(question, vql_query, error_log, error_categories, schema, query_explanation, can_use_llm=False):
     error_handlers = {
         "LIMIT_SUBQUERY": (FIX_LIMIT_PROMPT, "LIMIT in subquery detected, fixing."),
         "LIMIT_OFFSET": (FIX_OFFSET_PROMPT, "LIMIT OFFSET detected, fixing."),
@@ -148,7 +151,7 @@ def _get_prompt_and_parameters(question, vql_query, error_log, error_categories,
         return QUERY_FIXER_PROMPT, {
             "query": vql_query,
             "query_error": error_log,
-            "vql_restrictions": build_full_vql_restrictions(),
+            "vql_restrictions": build_full_vql_restrictions(can_use_llm),
             "schema": schema,
             "question": question,
             "query_explanation": query_explanation

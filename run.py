@@ -21,7 +21,12 @@ from rich.console import Console
 from utils.runner_migration import run_migration_tool
 from utils.runner_demo import load_demo_data
 from utils.runner_display import print_header, PANEL_WIDTH
-from utils.runner_process import run_process, shutdown_gracefully, command_listener
+from utils.runner_process import (
+    spawn_services,
+    wait_for_services,
+    shutdown_gracefully,
+    command_listener,
+)
 from utils.utils import is_in_venv, validate_data_dir
 
 console = Console()
@@ -151,31 +156,36 @@ if __name__ == "__main__":
             processes_to_run.append("sample_chatbot")
 
         any_failures = False
-        for process_name in processes_to_run:
-            try:
-                process, log_thread = run_process(process_name, args)
-                if process_name == "api":
-                    processes.append(("API", process))
-                elif process_name == "sample_chatbot":
-                    processes.append(("chatbot", process))
-                log_threads.append(log_thread)
-            except TimeoutError:
-                # Display formatted error panel with debugging instructions
-                service_display_name = "AI SDK" if process_name == "api" else "Sample chatbot"
-                log_file_path = os.path.join(DATA_DIR, "logs", f"{process_name}.log") if DATA_DIR != "." else f"logs/{process_name}.log"
-                debug_command = f"python -m {process_name}.main"
 
-                console.print(Panel(
-                    f"[bold red]{service_display_name} failed to start within {args.timeout} seconds[/]\n\n"
-                    f"[white]Check the logs at [cyan]{log_file_path}[/cyan] for more details.[/]\n\n"
-                    f"[white]If that doesn't give any details, you can also run the module directly to debug the startup error:[/]\n"
-                    f"[yellow]{debug_command}[/]\n\n"
-                    f"[italic]Reminder: You should only execute this way to debug, not for execution purposes.[/]",
-                    title=f"[bold red]Startup Error - {service_display_name}[/]",
-                    border_style="red",
-                    width=PANEL_WIDTH
-                ))
-                any_failures = True
+        # Spawn all subprocesses concurrently so the API and the sample
+        # chatbot can warm up in parallel
+        specs = spawn_services(processes_to_run, args)
+        succeeded, failed = wait_for_services(specs, args)
+
+        display_name = {"api": "API", "sample_chatbot": "chatbot"}
+        for process_name, spec in succeeded:
+            processes.append((display_name.get(process_name, process_name), spec["process"]))
+            log_threads.append(spec["log_thread"])
+
+        for process_name, _spec in failed:
+            service_display_name = "AI SDK" if process_name == "api" else "Sample chatbot"
+            log_file_path = (
+                os.path.join(DATA_DIR, "logs", f"{process_name}.log")
+                if DATA_DIR != "." else f"logs/{process_name}.log"
+            )
+            debug_command = f"python -m {process_name}.main"
+
+            console.print(Panel(
+                f"[bold red]{service_display_name} failed to start within {args.timeout} seconds[/]\n\n"
+                f"[white]Check the logs at [cyan]{log_file_path}[/cyan] for more details.[/]\n\n"
+                f"[white]If that doesn't give any details, you can also run the module directly to debug the startup error:[/]\n"
+                f"[yellow]{debug_command}[/]\n\n"
+                f"[italic]Reminder: You should only execute this way to debug, not for execution purposes.[/]",
+                title=f"[bold red]Startup Error - {service_display_name}[/]",
+                border_style="red",
+                width=PANEL_WIDTH
+            ))
+            any_failures = True
 
         if args.background:
             if any_failures:
@@ -202,7 +212,8 @@ if __name__ == "__main__":
         while any(p[1].poll() is None for p in processes):
             for name, process in list(processes):
                 if process.poll() is not None:
-                    console.print(f"[yellow]{name} process ended unexpectedly.[/]")
+                    if not getattr(shutdown_gracefully, 'called', False):
+                        console.print(f"[yellow]{name} process ended unexpectedly.[/]")
                     processes.remove((name, process))
             time.sleep(1)
 

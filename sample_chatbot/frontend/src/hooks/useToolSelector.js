@@ -13,7 +13,7 @@ const useToolSelector = (config) => {
     
     return tools.filter(tool => {
       if (tool.name === 'deep_query' && !config?.enable_deep_query) return false;
-      if (tool.name === 'kb' && !config?.unstructured_mode) return false;
+      if (tool.name === 'knowledge_query' && !config?.unstructured_mode) return false;
       return true;
     });
   }, [config]);

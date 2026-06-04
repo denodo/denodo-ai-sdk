@@ -1,8 +1,25 @@
 .toolbox-container {
-  margin-bottom: 1rem;
-  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+  padding: 0.4rem;
   border: 1px solid #2D3E4B;
   border-radius: 0.25rem;
+}
+
+.toolbox-header-main {
+  flex: 1;
+  min-width: 0;
+  gap: 8px;
+}
+
+.toolbox-arg-preview {
+  font-size: 14px;
+  background-color: #fff;
+  color: #000;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
 .toolbox-container-error {

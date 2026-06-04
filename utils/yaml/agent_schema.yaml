@@ -30,7 +30,13 @@ properties:
     type: array
     items:
       type: string
-    description: "List of users allowed to access this agent. If not set (null or missing), everyone is allowed access. If set to an empty list, no one is allowed access."
+    description: "List of users allowed to access this agent. If neither allowed_users nor allowed_roles are set, everyone is allowed access."
+
+  allowed_roles:
+    type: array
+    items:
+      type: string
+    description: "List of roles allowed to access this agent. If neither allowed_users nor allowed_roles are set, everyone is allowed access. If both are set, access is granted if the user meets any of the conditions."
 
   settings:
     type: object
@@ -127,19 +133,26 @@ properties:
         type: array
         items:
           type: string
-        description: "Restricts the chatbot’s context scope to specific databases."
+        description: "Restricts the chatbot's context scope to specific databases."
       tags:
         type: array
         items:
           type: string
-        description: "Restricts the chatbot’s context scope to views that have the specified tags assigned"
+        description: "Restricts the chatbot's context scope to views that have the specified tags assigned"
 
-      #Custom instructions
-      custom_intructions:
-        type: string
-        description: "Default custom instructions to guide the specific behavior of this chatbot agent."
-      user_add_custom_instructions:
+      custom_instructions:
+        type: object
+        description: "Define custom instructions for both the agent and the AI SDK's tools."
+        properties:
+          chatbot:
+            type: string
+            description: "Instructions for the agent defined in this YAML. This will be injected into the agent system prompt."
+          ai_sdk:
+            type: string
+            description: "Instructions passed to the AI SDK's tools. The agent defined in this YAML will work with these tools to satisfy the user's requests."
+        additionalProperties: false
+      user_edit_instructions:
         type: boolean
-        description: "Allow users to add the custom instructions from the UI. If custom_istruction is set, the user instructions will be appended to them."
+        description: "Allow users to edit the custom instructions from the UI."
 
 additionalProperties: false

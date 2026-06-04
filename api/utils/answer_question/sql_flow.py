@@ -16,7 +16,8 @@ async def process_sql_category(
     timings,
     session_id=None,
     sample_data=None,
-    custom_headers=None
+    custom_headers=None,
+    can_use_llm=False
 ):
     with timing_context("llm_time", timings):
         vql_query, query_explanation, query_to_vql_tokens = await query_to_vql(
@@ -27,7 +28,8 @@ async def process_sql_category(
             custom_instructions=request.custom_instructions,
             vector_search_sample_data_k=request.vector_search_sample_data_k,
             session_id=session_id,
-            sample_data=sample_data
+            sample_data=sample_data,
+            can_use_llm=can_use_llm
         )
 
         if not vql_query:
@@ -40,7 +42,7 @@ async def process_sql_category(
                 raw_graph='',
                 timings=timings
             )
-            response['answer'] = 'No VQL query was generated because no relevant schema was found.'
+            response['answer'] = 'No VQL query could be generated with the provided schema.'
             return response
 
         vql_query, _, query_fixer_tokens = await query_fixer(
@@ -51,7 +53,8 @@ async def process_sql_category(
             session_id=session_id,
             vector_search_sample_data_k=request.vector_search_sample_data_k,
             vector_search_tables=vector_search_tables,
-            sample_data=sample_data
+            sample_data=sample_data,
+            can_use_llm=can_use_llm
         )
 
     max_attempts = 2
@@ -72,7 +75,8 @@ async def process_sql_category(
             fixer_history=fixer_history,
             sample_data=sample_data,
             llm=sql_gen_llm,
-            custom_headers=custom_headers
+            custom_headers=custom_headers,
+            can_use_llm=can_use_llm
         )
         vql_query = execution_attempt.vql_query
         execution_result = execution_attempt.execution_result
@@ -88,27 +92,23 @@ async def process_sql_category(
         if vql_query == 'OK':
             vql_query = original_vql_query
             break
-        if vql_status_code not in [499, 500]:
+        if vql_status_code not in [400, 499, 500]:
             break
 
         attempt += 1
 
-    if vql_status_code in [499, 500]:
-        if vql_query:
-            execution_result, vql_status_code, timings = await execute_query(
-                vql_query=vql_query,
-                auth=auth,
-                limit=request.vql_execute_rows_limit,
-                timings=timings,
-                custom_headers=custom_headers
-            )
-            if vql_status_code == 500 or (vql_status_code == 499 and original_vql_status_code == 499):
-                vql_query = original_vql_query
-                execution_result = original_execution_result
-                vql_status_code = original_vql_status_code
-        else:
-            vql_status_code = 500
-            execution_result = "No VQL query was generated."
+    if vql_status_code in [400, 499, 500]:
+        execution_result, vql_status_code, timings = await execute_query(
+            vql_query=vql_query,
+            auth=auth,
+            limit=request.vql_execute_rows_limit,
+            timings=timings,
+            custom_headers=custom_headers
+        )
+        if vql_status_code in [400, 500] or (vql_status_code == 499 and original_vql_status_code == 499):
+            vql_query = original_vql_query
+            execution_result = original_execution_result
+            vql_status_code = original_vql_status_code
 
     raw_graph, plot_data, request = handle_plotting(request=request, execution_result=execution_result)
 

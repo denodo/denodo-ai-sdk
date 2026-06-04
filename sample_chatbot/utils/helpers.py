@@ -8,28 +8,29 @@ import logging
 from io import BytesIO
 from PIL import Image, UnidentifiedImageError
 
-def setup_user_details(user_details, username=''):
+def setup_user_details(user_details):
     """
     Format user details for inclusion in prompts.
 
     Args:
         user_details: User-provided details string
-        username: User's username
 
     Returns:
-        Formatted string with user details
+        Formatted string with user details, or empty string if none
     """
-    if not user_details and not username:
+    user_detail_strings = (user_details or "").strip()
+    if not user_detail_strings:
         return ""
 
-    prefix = "These are the details about the user you are talking to:"
+    return f"""<user_details>
+{user_detail_strings}
+</user_details>"""
 
-    if username and user_details:
-        return f"{prefix} Username: {username}\n\n{user_details}"
-    elif username:
-        return f"{prefix} Username: {username}"
-    else:
-        return f"{prefix} {user_details}"
+def format_user_instructions_for_prompt(chatbot_custom_instructions):
+    text = (chatbot_custom_instructions or "").strip()
+    if not text:
+        return ""
+    return f"<user_instructions>\n{text}\n</user_instructions>"
 
 def check_env_variables(required_vars):
     """

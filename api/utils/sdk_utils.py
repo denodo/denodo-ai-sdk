@@ -1,27 +1,49 @@
+"""
+ Copyright (c) 2026. DENODO Technologies.
+ http://www.denodo.com
+ All rights reserved.
+
+ This software is the confidential and proprietary information of DENODO
+ Technologies ("Confidential Information"). You shall not disclose such
+ Confidential Information and shall use it only in accordance with the terms
+ of the license agreement you entered into with DENODO.
+"""
 import os
 import re
 import sys
+import json
 import random
 import inspect
 import logging
 import requests
+import aiohttp
+import asyncio
 import functools
 import traceback
-import pandas as pd
 
 from time import time
 from typing import Annotated
-from fastapi import HTTPException, Depends
+from fastapi import HTTPException, Depends, Request
 from fastapi.security import HTTPBasic, HTTPBearer, HTTPBasicCredentials, HTTPAuthorizationCredentials
 from contextlib import contextmanager
 from langchain_core.documents.base import Document
 
 from utils.data_catalog import get_views_metadata_documents
 from utils.schema_catalog import SchemaCatalog
-from utils.utils import schema_summary, prepare_schema, flatten_list, prepare_sample_data_schema, calculate_tokens, current_endpoint
+from utils.utils import schema_summary, prepare_schema, flatten_list, prepare_sample_data_schema, calculate_tokens, current_endpoint, filter_allowed_headers
 
 security_basic = HTTPBasic(auto_error=False)
 security_bearer = HTTPBearer(auto_error=False)
+
+def get_custom_request_headers(request: Request):
+    """
+    FastAPI dependency that extracts forwardable custom headers from the
+    incoming request, based on FORWARD_CUSTOM_HEADERS. Lives here (not in
+    utils.utils) because the `Request` annotation must be available at
+    function-definition time, and we keep fastapi out of utils.utils so
+    the sample chatbot's import graph stays fastapi-free.
+    """
+    return filter_allowed_headers(request.headers)
 
 def add_tokens(token_set1, token_set2):
     return {key: token_set1[key] + token_set2[key] for key in ['input_tokens', 'output_tokens', 'total_tokens']}
@@ -44,8 +66,8 @@ def timing_context(name, timings):
     for key, value in timings.items():
         timings[key] = round(value, 2)
 
-def readable_tables(relevant_tables, column_description_char_limit = None):
-    return SchemaCatalog.from_vector_search_tables(relevant_tables).render_selector_schema(column_description_char_limit)
+def readable_tables(relevant_tables, column_description_char_limit=None, table_description_char_limit=None):
+    return SchemaCatalog.from_vector_search_tables(relevant_tables).render_selector_schema(column_description_char_limit, table_description_char_limit)
 
 def match_nested_parentheses(text):
     def find_closing_paren(s, start):
@@ -124,6 +146,7 @@ def prepare_vql(vql):
 
     forbidden_functions = [
         'LENGTH',
+        'LISTAGG',
         'CHAR_LENGTH',
         'CHARACTER_LENGTH',
         'CURRENT_TIME',
@@ -184,6 +207,7 @@ def generate_vql_restrictions(
     spatial_vql_prompt = '',
     llm_vql_prompt = '',
     vector_vql_prompt = '',
+    metric_vql_prompt = '',
     json_vql_prompt = '',
     xml_vql_prompt = '',
     text_vql_prompt = '',
@@ -200,6 +224,7 @@ def generate_vql_restrictions(
         "spatial": spatial_vql_prompt,
         "llm": llm_vql_prompt,
         "vector": vector_vql_prompt,
+        "metric": metric_vql_prompt,
         "json": json_vql_prompt,
         "xml": xml_vql_prompt,
         "text": text_vql_prompt,
@@ -282,14 +307,14 @@ def handle_endpoint_error(endpoint_name):
                 return func(*args, **kwargs)
             except requests.exceptions.HTTPError as he:
                 if he.response.status_code == 401:
-                    raise HTTPException(status_code=401, detail="Unauthorized")
+                    raise HTTPException(status_code=401, detail="Unauthorized") from he
                 else:
                     error_details = {
                         'error': str(he),
                         'traceback': traceback.format_exc()
                     }
                     logging.error(f"HTTP Error in {endpoint_name}: {error_details}")
-                    raise HTTPException(status_code=he.response.status_code, detail=error_details)
+                    raise HTTPException(status_code=he.response.status_code, detail=error_details) from he
             except HTTPException as hex:
                 # Log the HTTPException but pass it through
                 logging.error(f"HTTPException in {endpoint_name}: {str(hex.detail)}")
@@ -300,7 +325,7 @@ def handle_endpoint_error(endpoint_name):
                     'traceback': traceback.format_exc()
                 }
                 logging.error(f"Error in {endpoint_name}: {error_details}")
-                raise HTTPException(status_code=500, detail=error_details)
+                raise HTTPException(status_code=500, detail=error_details) from e
 
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):
@@ -311,14 +336,25 @@ def handle_endpoint_error(endpoint_name):
             except requests.exceptions.HTTPError as he:
                 if he.response.status_code == 401:
                     logging.error(f"Authentication error in {endpoint_name}: {str(he)}")
-                    raise HTTPException(status_code=401, detail="Unauthorized")
+                    raise HTTPException(status_code=401, detail="Unauthorized") from he
                 else:
                     error_details = {
                         'error': str(he),
                         'traceback': traceback.format_exc()
                     }
                     logging.error(f"HTTP Error in {endpoint_name}: {error_details}")
-                    raise HTTPException(status_code=he.response.status_code, detail=error_details)
+                    raise HTTPException(status_code=he.response.status_code, detail=error_details) from he
+            except aiohttp.ClientResponseError as he:
+                if he.status == 401:
+                    logging.error(f"Authentication error in {endpoint_name}: {str(he)}")
+                    raise HTTPException(status_code=401, detail="Unauthorized") from he
+                else:
+                    error_details = {
+                        'error': str(he),
+                        'traceback': traceback.format_exc()
+                    }
+                    logging.error(f"HTTP Error in {endpoint_name}: {error_details}")
+                    raise HTTPException(status_code=he.status, detail=error_details) from he
             except HTTPException as hex:
                 # Log the HTTPException but pass it through
                 logging.error(f"HTTPException in {endpoint_name}: {str(hex.detail)}")
@@ -329,7 +365,7 @@ def handle_endpoint_error(endpoint_name):
                     'traceback': traceback.format_exc()
                 }
                 logging.error(f"Error in {endpoint_name}: {error_details}")
-                raise HTTPException(status_code=500, detail=error_details)
+                raise HTTPException(status_code=500, detail=error_details) from e
 
         # Choose the appropriate wrapper based on whether the function is a coroutine
         if inspect.iscoroutinefunction(func):
@@ -391,6 +427,8 @@ async def stats_about_data(data, unique_values_limit = 20):
     return str(info)
 
 def dataframe_stats(df, unique_values_limit=20):
+    import pandas as pd
+
     info = {
         "num_rows": len(df),
         "num_columns": len(df.columns),
@@ -442,24 +480,74 @@ def authenticate(
     else:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-def check_metadata_user_permission(auth):
+def check_feature_permission(auth, permissions_data, users_env_var, roles_env_var):
     """
-    Check if the authenticated user is allowed to use metadata endpoints
-    based on AI_SDK_ALLOWED_METADATA_USERS.
-    If the property is set, only listed Basic Auth users are allowed;
-    OAuth/Bearer users are denied since their identity cannot be verified against the list.
-    If the property is not set, all authenticated users are allowed.
+    Check if the authenticated user is allowed to use a specific feature.
+    - If DM >= 9.4.1: Checks against allowed roles and allowed users.
+      Supports both Basic Auth and OAuth.
+    - If DM <= 9.4.1: Fallbacks to previous behavior, checking
+      only allowed users and requiring Basic Auth.
+    - If neither property is set, all authenticated users are allowed.
     """
-    allowed_users_raw = os.getenv("AI_SDK_ALLOWED_METADATA_USERS")
-    if not allowed_users_raw:
+    allowed_users_raw = os.getenv(users_env_var)
+    allowed_roles_raw = os.getenv(roles_env_var)
+
+    if not allowed_users_raw and not allowed_roles_raw:
         return True
-    if isinstance(auth, tuple):
-        username = auth[0]
+
+    if not permissions_data:
+        if not allowed_users_raw or not isinstance(auth, tuple):
+            return False
         allowed_users = [u.strip() for u in allowed_users_raw.split(",") if u.strip()]
-        return username in allowed_users
+        return auth[0] in allowed_users
+
+    if permissions_data.get("isAdmin", False):
+        return True
+
+    username = permissions_data.get("username", "")
+    legacy_endpoint = permissions_data.get("legacyEndpoint", False)
+
+    if allowed_roles_raw:
+        if not legacy_endpoint:
+            allowed_roles = [r.strip() for r in allowed_roles_raw.split(",") if r.strip()]
+
+            if any(has_role(permissions_data, role) for role in allowed_roles):
+                return True
+
+    if allowed_users_raw:
+        allowed_users = [u.strip() for u in allowed_users_raw.split(",") if u.strip()]
+        current_username = username if username != "unknown" else (auth[0] if isinstance(auth, tuple) else None)
+
+        if current_username and current_username in allowed_users:
+            return True
+
     return False
 
-def process_metadata_source(
+
+def check_metadata_user_permission(auth, permissions_data=None):
+    """
+    Check if the authenticated user is allowed to use metadata endpoints.
+    """
+    return check_feature_permission(
+        auth,
+        permissions_data,
+        users_env_var="AI_SDK_ALLOWED_METADATA_USERS",
+        roles_env_var="AI_SDK_ALLOWED_METADATA_ROLES"
+    )
+
+
+def check_deepquery_user_permission(auth, permissions_data=None):
+    """
+    Check if the authenticated user is allowed to use the DeepQuery endpoint.
+    """
+    return check_feature_permission(
+        auth,
+        permissions_data,
+        users_env_var="AI_SDK_ALLOWED_DEEPQUERY_USERS",
+        roles_env_var="AI_SDK_ALLOWED_DEEPQUERY_ROLES"
+    )
+
+async def process_metadata_source(
     source_type,
     source_name,
     request,
@@ -467,7 +555,7 @@ def process_metadata_source(
     vector_store,
     sample_data_vector_store,
     tagged_views=None,
-    incremental=True,
+    incremental=False,
     tags_to_ignore=None,
     custom_headers=None
 ):
@@ -481,6 +569,9 @@ def process_metadata_source(
         auth: Authentication credentials
         vector_store: Vector store for metadata
         sample_data_vector_store: Vector store for sample data
+        tagged_views: List of views with the requested tag
+        incremental: Whether to do incremental sync
+        tags_to_ignore: List of tags to exclude from vectorization
         custom_headers: Custom headers to forward to the Data Marketplace
 
     Returns:
@@ -521,17 +612,17 @@ def process_metadata_source(
         raise ValueError(f"Invalid source type: {source_type}")
 
     # Get metadata documents
-    result, delete_view_ids, detagged_view_ids, data_usage_errors = get_views_metadata_documents(**kwargs)
+    result, delete_view_ids, detagged_view_ids, data_usage_errors = await get_views_metadata_documents(**kwargs)
 
     # Handle view deletions if needed
     if delete_view_ids and vector_store:
-        vector_store.delete_by_view_id(view_ids = delete_view_ids)
+        await asyncio.to_thread(vector_store.delete_by_view_id, view_ids=delete_view_ids)
         if sample_data_vector_store:
-            sample_data_vector_store.delete_by_view_id(view_ids = delete_view_ids)
+            await asyncio.to_thread(sample_data_vector_store.delete_by_view_id, view_ids=delete_view_ids)
 
     # Handle detagged views if needed
     if detagged_view_ids and source_type == 'TAG' and vector_store:
-        handle_detagged_views(
+        await handle_detagged_views(
             detagged_view_ids=detagged_view_ids,
             tag_name=source_name,
             vector_store=vector_store,
@@ -583,7 +674,8 @@ def process_metadata_source(
         # Add to vector store if provided
         if vector_store:
             views = flatten_list(prepare_schema(db_schema, request.embeddings_token_limit))
-            vector_store.add_views(
+            await asyncio.to_thread(
+                vector_store.add_views,
                 views=views,
                 parallel=request.parallel,
                 source_type=source_type,
@@ -596,7 +688,8 @@ def process_metadata_source(
         # Add sample data if enabled
         if sample_data_vector_store:
             views = flatten_list(prepare_sample_data_schema(db_schema))
-            sample_data_vector_store.add_views(
+            await asyncio.to_thread(
+                sample_data_vector_store.add_views,
                 views=views,
                 parallel=request.parallel,
                 source_type=source_type,
@@ -658,7 +751,7 @@ def is_non_conflicting_doc(doc, databases_to_delete, tags_to_delete, last_update
 
         return db_match
 
-def delete_by_db_or_tag(vector_store, sample_data_vector_store, vdp_database_names, vdp_tag_names, delete_conflicting, allowed_view_ids=None):
+async def delete_by_db_or_tag(vector_store, sample_data_vector_store, vdp_database_names, vdp_tag_names, delete_conflicting, allowed_view_ids=None):
     """
     Deletes views based on database/tag names.
     """
@@ -667,13 +760,14 @@ def delete_by_db_or_tag(vector_store, sample_data_vector_store, vdp_database_nam
     more_results_left = True
 
     while more_results_left:
-        results = vector_store.search_batched(
-                vector=vector_store.search_vector,
-                k=K_BATCH_SIZE,
-                database_names=vdp_database_names,
-                tag_names=vdp_tag_names,
-                view_ids=allowed_view_ids
-            )
+        results = await asyncio.to_thread(
+            vector_store.search_batched,
+            vector=vector_store.search_vector,
+            k=K_BATCH_SIZE,
+            database_names=vdp_database_names,
+            tag_names=vdp_tag_names,
+            view_ids=allowed_view_ids
+        )
 
         if not results:
             break
@@ -696,24 +790,25 @@ def delete_by_db_or_tag(vector_store, sample_data_vector_store, vdp_database_nam
                 document_ids_to_delete.add(doc_id)
 
         if document_ids_to_delete:
-            vector_store.delete(ids=list(document_ids_to_delete))
+            await asyncio.to_thread(vector_store.delete, ids=list(document_ids_to_delete))
 
         if view_ids_to_delete:
             total_deleted_ids += len(view_ids_to_delete)
             if sample_data_vector_store:
-                sample_data_vector_store.delete_by_view_id(view_ids=list(view_ids_to_delete))
+                await asyncio.to_thread(sample_data_vector_store.delete_by_view_id, view_ids=list(view_ids_to_delete))
 
         more_results_left = len(results) == K_BATCH_SIZE
 
     if total_deleted_ids > 0:
-        vector_store.remove_from_last_update(
+        await asyncio.to_thread(
+            vector_store.remove_from_last_update,
             database_names=vdp_database_names,
             tag_names=vdp_tag_names
         )
 
     return total_deleted_ids
 
-def get_by_db_or_tag(
+async def get_by_db_or_tag(
     vector_store,
     vdp_database_names,
     vdp_tag_names,
@@ -743,7 +838,8 @@ def get_by_db_or_tag(
     while True:
         if current_k > max_results_limit:
             logging.warning(f"K limit ({max_results_limit}) reached. Returning partial results.")
-            all_results = vector_store.search_by_vector(
+            all_results = await asyncio.to_thread(
+                vector_store.search_by_vector,
                 vector=vector_store.search_vector,
                 k=max_results_limit,
                 database_names=vdp_database_names,
@@ -751,7 +847,8 @@ def get_by_db_or_tag(
             )
             break
 
-        results = vector_store.search_by_vector(
+        results = await asyncio.to_thread(
+            vector_store.search_by_vector,
             vector=vector_store.search_vector,
             k=current_k,
             database_names=vdp_database_names,
@@ -777,6 +874,8 @@ def get_by_db_or_tag(
     return list(unique_view_ids)
 
 def execution_result_to_dataframe(data):
+    import pandas as pd
+
     # Initialize an empty list to store row data
     rows = []
 
@@ -811,12 +910,12 @@ def execution_result_to_dataframe(data):
 
     return df
 
-def handle_detagged_views(
+async def handle_detagged_views(
     detagged_view_ids,
     tag_name,
     vector_store,
     sample_data_vector_store,
-    incremental=True
+    incremental=False
 ):
     """
     Processes a list of detagged view IDs for a specific tag.
@@ -831,7 +930,12 @@ def handle_detagged_views(
 
     for view_id in detagged_view_ids:
         # Fetch all documents/chunks associated with this view_id
-        docs = vector_store.search_by_vector(vector=vector_store.search_vector, k=100, view_ids=[view_id])
+        docs = await asyncio.to_thread(
+            vector_store.search_by_vector,
+            vector=vector_store.search_vector,
+            k=100,
+            view_ids=[view_id]
+        )
         if not docs:
             continue
 
@@ -854,9 +958,9 @@ def handle_detagged_views(
             conflicting_docs_to_update.extend(docs)
 
     if view_ids_to_delete:
-        vector_store.delete_by_view_id(view_ids=view_ids_to_delete)
+        await asyncio.to_thread(vector_store.delete_by_view_id, view_ids=view_ids_to_delete)
         if sample_data_vector_store:
-            sample_data_vector_store.delete_by_view_id(view_ids=view_ids_to_delete)
+            await asyncio.to_thread(sample_data_vector_store.delete_by_view_id, view_ids=view_ids_to_delete)
 
     if conflicting_docs_to_update:
         documents_to_reindex = []
@@ -875,7 +979,11 @@ def handle_detagged_views(
 
         if documents_to_reindex:
             ids_for_upsert = [doc.id for doc in documents_to_reindex]
-            vector_store.client.add_documents(documents=documents_to_reindex, ids=ids_for_upsert)
+            await asyncio.to_thread(
+                vector_store.client.add_documents,
+                documents=documents_to_reindex,
+                ids=ids_for_upsert
+            )
 
 def get_user_synced_resources(vector_store, allowed_view_ids_str):
     """
@@ -954,3 +1062,72 @@ def get_user_synced_resources(vector_store, allowed_view_ids_str):
             filtered_partial_resources["partial_tags_by_tag"][tag_name] = valid_tags
 
     return filtered_last_update, filtered_partial_resources
+
+def has_role(permissions_data, target_role):
+    if not permissions_data:
+        return False
+
+    is_admin = permissions_data.get("isAdmin", False)
+    user_roles = permissions_data.get("roles", [])
+
+    return is_admin or target_role in user_roles
+
+def check_llm_permission(permissions_data):
+    if not permissions_data:
+        return False
+
+    if permissions_data.get("legacyEndpoint", False):
+        return True
+
+    return has_role(permissions_data, "use_large_language_model")
+
+def filter_restricted_view_data(view_json, security_info):
+    if not security_info:
+        return view_json
+
+    filtered_json = view_json.copy()
+
+    if security_info.get("hasRowRestrictions", False):
+        if 'schema' in filtered_json:
+            for col in filtered_json['schema']:
+                col.pop('sample_data', None)
+
+    restricted_columns = security_info.get("restrictedColumns", [])
+    if restricted_columns:
+        restricted_set = set([col.lower() for col in restricted_columns])
+        if 'schema' in filtered_json:
+            filtered_json['schema'] = [
+                col for col in filtered_json['schema']
+                if col.get('columnName', '').lower() not in restricted_set
+            ]
+
+    return filtered_json
+
+def parse_view_document(doc, filter_associations=False, valid_view_ids=None, security_info=None):
+    view_json = json.loads(doc.metadata['view_json'])
+    view_text = doc.page_content
+    warnings = []
+
+    if filter_associations:
+        view_json = filter_non_allowed_associations(view_json, valid_view_ids or [])
+
+    if security_info:
+        view_json = filter_restricted_view_data(view_json, security_info)
+
+        has_row_restrictions = security_info.get("hasRowRestrictions", False)
+        has_col_restrictions = bool(security_info.get("restrictedColumns"))
+
+        if has_row_restrictions:
+            warnings.append("Sample data removed from schema due to user row restrictions.")
+
+        if has_col_restrictions:
+            view_text = None
+            warnings.append("Original 'view_text' hidden and schema filtered due to user column restrictions.")
+
+    return {
+        "view_text": view_text,
+        "view_name": doc.metadata['view_name'],
+        "view_json": view_json,
+        "view_id": doc.metadata.get('view_id', ''),
+        "warnings": warnings
+    }

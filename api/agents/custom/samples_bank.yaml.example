@@ -15,8 +15,8 @@ settings:
   deepquery_enabled: true
   reporting_enabled: true
   feedback_enabled: false
-  unstructured_mode: false
-  user_edit_llm: false
+  unstructured_mode: true
+  user_edit_llm: true
   auto_graph: true
   filters_enabled: true
 
@@ -46,4 +46,10 @@ settings:
   databases:
     - "samples_bank"
 
-  user_add_custom_instructions: false
+  custom_instructions:
+    ai_sdk: >-
+      Always return the loan officer associated with a loan when returning information about a loan.
+    chatbot: >-
+      Answer in a concise banking-analyst tone.
+
+  user_edit_instructions: true

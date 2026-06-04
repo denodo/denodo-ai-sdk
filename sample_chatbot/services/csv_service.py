@@ -97,7 +97,7 @@ class CSVService:
             "error": preview.get("error")
         }
 
-    def generate_description(self, llm, file_path, delimiter=None, allow_temp=False):
+    def generate_description(self, llm, file_path, delimiter=None, allow_temp=False, vectorized_columns=None):
         """
         Generate a description for a CSV file using LLM.
 
@@ -121,7 +121,7 @@ class CSVService:
             logger.debug(f"[CSVService] Auto-detected delimiter: '{delimiter}'")
 
         logger.info("[CSVService] Invoking LLM for description generation")
-        description = generate_csv_description(llm, file_path, delimiter)
+        description = generate_csv_description(llm, file_path, delimiter, vectorized_columns=vectorized_columns)
         logger.debug(f"[CSVService] Generated description ({len(description)} chars)")
 
         return {

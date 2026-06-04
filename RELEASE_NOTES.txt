@@ -1,3 +1,66 @@
+version 1.2 - 20260603
+----------------------
+
+- Improved usage of FLATTEN in VQL prompts
+- Added display of the tool request inside tool blocks in the chatbot UI
+- Updated query fixer detection to also trigger on 400 status codes
+- Clarified custom OpenAI-compatible API configuration in the documentation
+- Optimized the chatbot system prompt for greater independence and reduced token usage, and renamed the data_query tool to data_agent
+- Allowed enabling/disabling the CHATBOT_UNSTRUCTURED_MODE feature based on users/roles
+- Improved vector VQL prompts for similarity search
+- Added a configurable timeout for chatbot requests
+- Fixed DeepQuery failing with an AttributeError when max_analysis_loops was set too low
+- Expanded LIMIT VQL usage in prompts
+- Brought the samples_bank benchmark dataset up to date with the new augmented CSVs
+- Fixed AI SDK failing to start when the embeddings model name started with "/"
+- Added support for obligatory fields in VQL generation
+- Updated the LangChain connector and renamed the ChatOllama max_tokens parameter to num_predict
+- Updated metadata mode to use the VQL representation for answering questions
+- Added support for Oracle 23ai as a vector database
+- Updated the metrics prompt with tighter aggregate and metric view restrictions
+- Allowed configuring which roles/users can use DeepQuery
+- Removed unnecessary dependencies from requirements.txt
+
+version 1.2-beta - 20260526
+----------------------
+
+- Enhanced Knowledge Base Manager with private collections, selectable vectorized columns, per-collection search, and CSV download
+- Updated requirements.txt to resolve Python CVEs
+- Open external sample chatbot links in a new tab
+- Fixed bug where CHATBOT_AUTO_GRAPH logic was inverted, causing automatic graphs to generate when disabled
+- Added OpenRouter as a supported embeddings provider
+- Return AI SDK version from /getAISDKInfo
+- Removed VQL protected words from prompts
+- Improved AI SDK and sample chatbot startup speed through lazy imports and asynchronous resource initialization
+- Clarified configuration comments to avoid implying that only service account credentials are supported for Google provider
+- Enabled OpenAI Responses API by default for OpenAI provider
+- Added vector_search_table_description_char_limit configuration parameter (default 1000)
+- Added support for Excel format in Download Execution result feature
+- Added LISTAGG to forbidden function list in prepare_vql
+- Implemented LRU in-memory cache for permission view ID requests
+- Added support to generate queries using metric views
+- Allow configuring which roles can sync/delete content from the vector database
+- Improved generation of VQL queries from natural language to account for VDP vector search enhancements
+- Exposed extra field properties in query to VQL prompt
+- Added client disconnection awareness to AI SDK endpoints
+- Updated schema representation to use sourceType instead of type
+- Set incremental mode to false by default
+- Implemented logging and token counting for tool calls in the sample chatbot
+- Allow configuring which roles can access specific custom chatbots
+- Restricted access to views and AI functions based on permissions returned by the Data Marketplace
+
+version 1.2-alpha - 20260430
+----------------------
+
+- Reduced default thinking model from gpt-5.2-xhigh to gpt-5.2-medium
+- Removed transformers dependency and upgraded other libraries to their latest versions to resolve CVEs
+- Include authenticated username in logs
+- Fixed a bug where the tokens the query fixer would use were not being counted correctly
+- Fixed a bug where Ctrl+C to exit the AI SDK would hang in Windows with multiple workers
+- Enhanced samples_bank dataset schema to align with AI-ready semantic layer standards
+- Removed user views from chatbot system prompt
+- Introduced custom instructions for the general chatbot and custom agents, separate from those in the AI SDK
+
 version 1.1.1 - 20260415
 ----------------------
 

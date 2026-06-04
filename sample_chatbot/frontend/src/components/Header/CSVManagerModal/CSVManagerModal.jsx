@@ -6,64 +6,102 @@ import Spinner from 'react-bootstrap/Spinner';
 import Alert from 'react-bootstrap/Alert';
 import Table from 'react-bootstrap/Table';
 import api from '../../../api/client';
-import { saveCSVConfigs } from './utils';
 import AddCSVForm from './AddCSVForm';
 import SourceRow from './SourceRow';
 import ScannedFileRow from './ScannedFileRow';
 
-const CSVManagerModal = ({ show, handleClose, onSourcesChange, selectedChatbot }) => {
+const emptyNewCSV = {
+  file: null,
+  description: '',
+  delimiter: ';',
+  path: null,
+  sourceName: null,
+  vectorizedColumns: [],
+  private: false
+};
+
+const CSVManagerModal = ({ show, handleClose, hasActiveConversation = false, selectedChatbot }) => {
+  const agentName = selectedChatbot?.name || 'General Chat';
   const [sources, setSources] = useState([]);
   const [scannedFiles, setScannedFiles] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [newCSV, setNewCSV] = useState({
-    file: null,
-    description: '',
-    delimiter: ';',
-    path: null,
-    sourceName: null
-  });
+  const [newCSV, setNewCSV] = useState(emptyNewCSV);
   const [isAdding, setIsAdding] = useState(false);
   const [preview, setPreview] = useState(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [isGeneratingDescription, setIsGeneratingDescription] = useState(false);
   const [editingSource, setEditingSource] = useState(null);
   const [editingDescription, setEditingDescription] = useState('');
+  const [currentUsername, setCurrentUsername] = useState('');
+  const [currentUserIsAdmin, setCurrentUserIsAdmin] = useState(false);
+  const [downloadingSources, setDownloadingSources] = useState(() => new Set());
+  const [deletingSources, setDeletingSources] = useState(() => new Set());
+  const [togglingPrivateSources, setTogglingPrivateSources] = useState(() => new Set());
+  // Tracks whether the user has made any change to sources during this
+  // open-session of the modal. Used to decide whether to warn on close
+  // that changes won't apply to an ongoing conversation.
+  const [hasChanges, setHasChanges] = useState(false);
+  const [showCloseWarning, setShowCloseWarning] = useState(false);
 
-  const syncActiveCsvsDict = useCallback((updatedSourcesList) => {
-    const username = localStorage.getItem('current_user');
-    if (!username) return;
+  // Flip the dirty flag whenever a mutation succeeds, so we know on close
+  // whether to warn that changes won't apply to the ongoing conversation.
+  const notifySourcesChanged = useCallback(() => {
+    setHasChanges(true);
+  }, []);
 
-    const agentKey = selectedChatbot && !selectedChatbot.isGlobal ? selectedChatbot.id : 'global';
-    
-    const dictString = localStorage.getItem(`${username}_active_csvs_dict`);
-    let dict = {};
-    if (dictString) {
-      try { dict = JSON.parse(dictString); } catch (e) {}
+  // Reset dirty state every time the modal is opened.
+  useEffect(() => {
+    if (show) {
+      setHasChanges(false);
+      setShowCloseWarning(false);
     }
+  }, [show]);
 
-    dict[agentKey] = updatedSourcesList.filter(s => s.active).map(s => s.source_name);
-    localStorage.setItem(`${username}_active_csvs_dict`, JSON.stringify(dict));
-  }, [selectedChatbot]);
+  // Intercept the Close button / backdrop dismiss: if the user made changes
+  // and there's an ongoing conversation, show the warning first.
+  const requestClose = () => {
+    if (hasChanges && hasActiveConversation) {
+      // Close the Knowledge Base Manager underneath and surface the warning
+      // on its own so the user only sees one modal at a time.
+      handleClose();
+      setShowCloseWarning(true);
+      return;
+    }
+    handleClose();
+  };
 
-  // Fetch sources when modal opens
+  const confirmCloseWarning = () => {
+    setShowCloseWarning(false);
+  };
+
+  const addBusy = (setter, name) =>
+    setter((prev) => {
+      const next = new Set(prev);
+      next.add(name);
+      return next;
+    });
+  const removeBusy = (setter, name) =>
+    setter((prev) => {
+      const next = new Set(prev);
+      next.delete(name);
+      return next;
+    });
+
+  useEffect(() => {
+    setCurrentUsername(localStorage.getItem('current_user') || '');
+  }, [show]);
+
   const fetchSources = useCallback(async () => {
     if (!show) return;
     setIsLoading(true);
     setError(null);
     try {
-      const response = await api.get("csv/list");
+      const response = await api.get('csv/list');
       if (response.data.success) {
-        const fetchedSources = response.data.sources || [];
-        setSources(fetchedSources);
-
-        // Update localStorage
-        const username = localStorage.getItem('current_user');
-        if (username) {
-          saveCSVConfigs(username, fetchedSources);
-          syncActiveCsvsDict(fetchedSources);
-        }
+        setSources(response.data.sources || []);
+        setCurrentUserIsAdmin(!!response.data.current_user_is_admin);
       }
     } catch (err) {
       setError('Failed to load CSV sources');
@@ -71,124 +109,119 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange, selectedChatbot }
     } finally {
       setIsLoading(false);
     }
-  }, [show, syncActiveCsvsDict]);
+  }, [show]);
 
-  // Fetch scanned files from sample_data/unstructured folder
   const fetchScannedFiles = useCallback(async () => {
     if (!show) return;
     try {
-      const response = await api.get("csv/scan");
+      const response = await api.get('csv/scan');
       if (response.data.success) {
-        // Filter out files that are already added as sources
         const sourceNames = new Set(sources.map((s) => s.source_name));
-        const newScanned = (response.data.files || []).filter(
-          (f) => !sourceNames.has(f.source_name)
-        );
-        setScannedFiles(newScanned);
+        setScannedFiles((response.data.files || []).filter((f) => !sourceNames.has(f.source_name)));
       }
     } catch (err) {
       console.error('Error scanning CSV files:', err);
     }
   }, [show, sources]);
 
-  useEffect(() => {
-    fetchSources();
-  }, [fetchSources]);
+  useEffect(() => { fetchSources(); }, [fetchSources]);
+  useEffect(() => { fetchScannedFiles(); }, [fetchScannedFiles]);
 
-  useEffect(() => {
-    fetchScannedFiles();
-  }, [fetchScannedFiles]);
-
-  // Toggle source active status
   const handleToggleActive = async (sourceName, currentActive) => {
-    // Check if source has a description before allowing activation
     const source = sources.find((s) => s.source_name === sourceName);
     if (!currentActive && source && !source.description?.trim()) {
-      setError('Cannot activate source without a description. Please add a description first.');
+      setError('Cannot activate source without a description.');
       return;
     }
-
     try {
-      const response = await api.post("csv/activate", {
-        source_name: sourceName,
-        active: !currentActive
-      });
+      const response = await api.post('csv/activate', { source_name: sourceName, active: !currentActive });
       if (response.data.success) {
-        const updatedSources = sources.map((s) =>
-          s.source_name === sourceName ? { ...s, active: !currentActive } : s
-        );
-        setSources(updatedSources);
-
-        // Update localStorage
-        const username = localStorage.getItem('current_user');
-        if (username) {
-          saveCSVConfigs(username, updatedSources);
-          syncActiveCsvsDict(updatedSources);
-        }
-        if (onSourcesChange) onSourcesChange();
+        setSources((prev) => prev.map((s) => s.source_name === sourceName ? { ...s, active: !currentActive } : s));
+        notifySourcesChanged();
       }
     } catch (err) {
       setError(`Failed to toggle source: ${err.response?.data?.error || err.message}`);
     }
   };
 
-  // Delete a source
   const handleDelete = async (sourceName, deleteFile = false) => {
-    const confirmMessage = `Are you sure you want to delete "${sourceName}"?${
-      deleteFile ? ' The CSV file will also be deleted.' : ''
-    }`;
-    if (!window.confirm(confirmMessage)) {
-      return;
-    }
+    if (deletingSources.has(sourceName)) return;
+    const confirmMessage = `Are you sure you want to delete "${sourceName}"? This removes it for all users of this chatbot.${deleteFile ? ' The CSV file will also be deleted.' : ''}`;
+    if (!window.confirm(confirmMessage)) return;
+    addBusy(setDeletingSources, sourceName);
     try {
-      const response = await api.delete(`csv/delete/${sourceName}`, {
-        data: { delete_file: deleteFile }
-      });
+      const response = await api.delete(`csv/delete/${sourceName}`, { data: { delete_file: deleteFile } });
       if (response.data.success) {
-        const updatedSources = sources.filter((s) => s.source_name !== sourceName);
-        setSources(updatedSources);
-
-        // Update localStorage
-        const username = localStorage.getItem('current_user');
-        if (username) {
-          saveCSVConfigs(username, updatedSources);
-          syncActiveCsvsDict(updatedSources);
-        }
-        if (onSourcesChange) onSourcesChange();
+        setSources((prev) => prev.filter((s) => s.source_name !== sourceName));
+        notifySourcesChanged();
       }
     } catch (err) {
       setError(`Failed to delete source: ${err.response?.data?.error || err.message}`);
+    } finally {
+      removeBusy(setDeletingSources, sourceName);
     }
   };
 
-  // Update description
-  const handleUpdateDescription = async (sourceName) => {
-    if (!editingDescription.trim()) {
-      setError('Description cannot be empty');
-      return;
-    }
+  const handleTogglePrivate = async (sourceName, nextPrivate) => {
+    if (togglingPrivateSources.has(sourceName)) return;
+    addBusy(setTogglingPrivateSources, sourceName);
     try {
-      const response = await api.post("csv/update_description", {
+      const response = await api.post('csv/set_private', { source_name: sourceName, private: nextPrivate });
+      if (response.data.success) {
+        setSources((prev) => prev.map((s) =>
+          s.source_name === sourceName ? { ...s, private: nextPrivate } : s
+        ));
+        notifySourcesChanged();
+      }
+    } catch (err) {
+      setError(`Failed to update visibility: ${err.response?.data?.error || err.message}`);
+    } finally {
+      removeBusy(setTogglingPrivateSources, sourceName);
+    }
+  };
+
+  const handleDownload = async (sourceName) => {
+    if (downloadingSources.has(sourceName)) return;
+    setDownloadingSources((prev) => {
+      const next = new Set(prev);
+      next.add(sourceName);
+      return next;
+    });
+    try {
+      const response = await api.get(`csv/download/${sourceName}`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'text/csv' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${sourceName}_with_embeddings.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(`Failed to download CSV: ${err.response?.data?.error || err.message}`);
+    } finally {
+      setDownloadingSources((prev) => {
+        const next = new Set(prev);
+        next.delete(sourceName);
+        return next;
+      });
+    }
+  };
+
+  const handleUpdateDescription = async (sourceName) => {
+    if (!editingDescription.trim()) { setError('Description cannot be empty'); return; }
+    try {
+      const response = await api.post('csv/update_description', {
         source_name: sourceName,
         description: editingDescription.trim()
       });
       if (response.data.success) {
-        setSources((prev) =>
-          prev.map((s) =>
-            s.source_name === sourceName ? { ...s, description: editingDescription.trim() } : s
-          )
-        );
-        // Update localStorage
-        const username = localStorage.getItem('current_user');
-        if (username) {
-          const updatedSources = sources.map((s) =>
-            s.source_name === sourceName ? { ...s, description: editingDescription.trim() } : s
-          );
-          saveCSVConfigs(username, updatedSources);
-        }
+        setSources((prev) => prev.map((s) =>
+          s.source_name === sourceName ? { ...s, description: editingDescription.trim() } : s
+        ));
         setEditingSource(null);
         setEditingDescription('');
-        if (onSourcesChange) onSourcesChange();
+        notifySourcesChanged();
       }
     } catch (err) {
       setError(`Failed to update description: ${err.response?.data?.error || err.message}`);
@@ -205,26 +238,19 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange, selectedChatbot }
     setEditingDescription('');
   };
 
-  // Open add form with scanned file data pre-populated
   const handleAddScannedFile = async (scannedFile) => {
     setIsLoadingPreview(true);
     setShowAddForm(true);
-    setNewCSV({
-      file: null,
-      description: '',
-      delimiter: ';',
-      path: scannedFile.path,
-      sourceName: scannedFile.source_name
-    });
-
-    // Auto-preview the scanned file by path
+    setNewCSV({ ...emptyNewCSV, path: scannedFile.path, sourceName: scannedFile.source_name });
     try {
-      const response = await api.post("csv/preview", {
-        path: scannedFile.path
-      });
+      const response = await api.post('csv/preview', { path: scannedFile.path });
       if (response.data.success) {
         setPreview(response.data);
-        setNewCSV((prev) => ({ ...prev, delimiter: response.data.delimiter }));
+        setNewCSV((prev) => ({
+          ...prev,
+          delimiter: response.data.delimiter,
+          vectorizedColumns: response.data.columns || []
+        }));
       }
     } catch (err) {
       setError(`Failed to preview CSV: ${err.response?.data?.error || err.message}`);
@@ -233,29 +259,27 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange, selectedChatbot }
     }
   };
 
-  // Generate description using AI
   const handleGenerateDescription = async () => {
     if (!newCSV.file && !newCSV.path) return;
-
     setIsGeneratingDescription(true);
     try {
       let response;
+      const vectorizedColumns = newCSV.vectorizedColumns || [];
       if (newCSV.path) {
-        // Path-based (scanned file)
-        response = await api.post("csv/generate_description", {
+        response = await api.post('csv/generate_description', {
           path: newCSV.path,
-          delimiter: newCSV.delimiter
+          delimiter: newCSV.delimiter,
+          vectorized_columns: vectorizedColumns
         });
       } else {
-        // File upload
         const formData = new FormData();
         formData.append('file', newCSV.file);
         formData.append('delimiter', newCSV.delimiter);
-        response = await api.post("csv/generate_description", formData, {
+        formData.append('vectorized_columns', JSON.stringify(vectorizedColumns));
+        response = await api.post('csv/generate_description', formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
       }
-
       if (response.data.success) {
         setNewCSV((prev) => ({ ...prev, description: response.data.description }));
       }
@@ -266,15 +290,12 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange, selectedChatbot }
     }
   };
 
-  // Add new CSV source
   const handleAddSource = async (e) => {
     e.preventDefault();
-    if (!newCSV.file && !newCSV.path) {
-      setError('Please select a CSV file');
-      return;
-    }
-    if (!newCSV.description) {
-      setError('Description is required');
+    if (!newCSV.file && !newCSV.path) { setError('Please select a CSV file'); return; }
+    if (!newCSV.description) { setError('Description is required'); return; }
+    if (!newCSV.vectorizedColumns || newCSV.vectorizedColumns.length === 0) {
+      setError('Select at least one column to vectorize');
       return;
     }
 
@@ -282,43 +303,38 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange, selectedChatbot }
     setError(null);
     try {
       let response;
+      const vectorizedColumnsJson = JSON.stringify(newCSV.vectorizedColumns);
       if (newCSV.path) {
-        // Path-based (scanned file)
-        response = await api.post("csv/add", {
+        response = await api.post('csv/add', {
           path: newCSV.path,
           source_name: newCSV.sourceName,
           description: newCSV.description,
           delimiter: newCSV.delimiter,
           auto_detect_delimiter: false,
-          auto_generate_description: false
+          auto_generate_description: false,
+          vectorized_columns: newCSV.vectorizedColumns,
+          private: currentUserIsAdmin ? !!newCSV.private : true
         });
       } else {
-        // File upload
         const formData = new FormData();
         formData.append('file', newCSV.file);
         formData.append('description', newCSV.description);
         formData.append('delimiter', newCSV.delimiter);
         formData.append('auto_detect_delimiter', 'false');
         formData.append('auto_generate_description', 'false');
-        response = await api.post("csv/add", formData, {
+        formData.append('vectorized_columns', vectorizedColumnsJson);
+        formData.append('private', (currentUserIsAdmin ? !!newCSV.private : true) ? 'true' : 'false');
+        response = await api.post('csv/add', formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
       }
 
       if (response.data.success) {
-        // Refresh the list
         await fetchSources();
-        // Reset form
-        setNewCSV({
-          file: null,
-          description: '',
-          delimiter: ';',
-          path: null,
-          sourceName: null
-        });
+        setNewCSV(emptyNewCSV);
         setPreview(null);
         setShowAddForm(false);
-        if (onSourcesChange) onSourcesChange();
+        notifySourcesChanged();
       }
     } catch (err) {
       setError(`Failed to add CSV: ${err.response?.data?.error || err.message}`);
@@ -327,24 +343,25 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange, selectedChatbot }
     }
   };
 
-  // Handle file selection - auto-preview immediately
   const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (file?.name.endsWith('.csv')) {
-      setNewCSV((prev) => ({ ...prev, file }));
+      setNewCSV((prev) => ({ ...prev, file, sourceName: file.name.replace(/\.csv$/, '') }));
       setPreview(null);
       setIsLoadingPreview(true);
-
-      // Auto-preview the file
       try {
         const formData = new FormData();
         formData.append('file', file);
-        const response = await api.post("csv/preview", formData, {
+        const response = await api.post('csv/preview', formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
         if (response.data.success) {
           setPreview(response.data);
-          setNewCSV((prev) => ({ ...prev, delimiter: response.data.delimiter }));
+          setNewCSV((prev) => ({
+            ...prev,
+            delimiter: response.data.delimiter,
+            vectorizedColumns: response.data.columns || []
+          }));
         }
       } catch (err) {
         setError(`Failed to preview CSV: ${err.response?.data?.error || err.message}`);
@@ -360,19 +377,14 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange, selectedChatbot }
   const handleCancelAddForm = () => {
     setShowAddForm(false);
     setPreview(null);
-    setNewCSV({
-      file: null,
-      description: '',
-      delimiter: ';',
-      path: null,
-      sourceName: null
-    });
+    setNewCSV(emptyNewCSV);
   };
 
   const hasNoData = sources.length === 0 && scannedFiles.length === 0;
 
   return (
-    <Modal show={show} onHide={handleClose} centered size="xl" dialogClassName="modal-90w">
+    <>
+    <Modal show={show} onHide={requestClose} centered size="xl" dialogClassName="modal-90w">
       <Modal.Header closeButton data-bs-theme="light">
         <Modal.Title>Knowledge Base Manager</Modal.Title>
       </Modal.Header>
@@ -383,7 +395,17 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange, selectedChatbot }
           </Alert>
         )}
 
-        {/* Add New CSV Form */}
+        <Alert variant="primary" className="mb-3 py-2">
+          <small>
+            <i className="bi bi-info-circle me-1" />
+            You are configuring the knowledge base for <strong>{agentName}</strong>.
+            <strong> Active</strong> toggles apply <strong>only to this chatbot</strong> — the
+            same collection can be active in some chatbots and inactive in others.
+            Uploading, deleting and changing <strong>Public/Private</strong> visibility apply to
+            every chatbot.
+          </small>
+        </Alert>
+
         {showAddForm ? (
           <AddCSVForm
             newCSV={newCSV}
@@ -392,6 +414,7 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange, selectedChatbot }
             isLoadingPreview={isLoadingPreview}
             isGeneratingDescription={isGeneratingDescription}
             isAdding={isAdding}
+            currentUserIsAdmin={currentUserIsAdmin}
             onSubmit={handleAddSource}
             onCancel={handleCancelAddForm}
             onFileChange={handleFileChange}
@@ -408,11 +431,8 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange, selectedChatbot }
           </Button>
         )}
 
-        {/* Sources List */}
         {isLoading && !showAddForm && (
-          <div className="text-center p-4">
-            <Spinner animation="border" />
-          </div>
+          <div className="text-center p-4"><Spinner animation="border" /></div>
         )}
 
         {!isLoading && hasNoData && (
@@ -427,29 +447,34 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange, selectedChatbot }
               <tr>
                 <th style={{ width: '70px' }}>Active</th>
                 <th>Name</th>
-                <th>Description</th>
                 <th style={{ width: '130px' }}>Status</th>
-                <th style={{ width: '100px' }}>Actions</th>
+                <th>Description</th>
+                <th style={{ width: '120px' }}>Owner</th>
+                <th style={{ width: '140px' }}>Uploaded</th>
+                <th style={{ width: '200px' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {/* Configured sources */}
               {sources.map((source) => (
                 <SourceRow
                   key={source.source_name}
                   source={source}
+                  currentUsername={currentUsername}
                   editingSource={editingSource}
                   editingDescription={editingDescription}
                   onToggleActive={handleToggleActive}
                   onDelete={handleDelete}
+                  onDownload={handleDownload}
+                  isDownloading={downloadingSources.has(source.source_name)}
+                  isDeleting={deletingSources.has(source.source_name)}
+                  isTogglingPrivate={togglingPrivateSources.has(source.source_name)}
+                  onTogglePrivate={handleTogglePrivate}
                   onStartEditing={handleStartEditing}
                   onUpdateDescription={handleUpdateDescription}
                   onCancelEditing={handleCancelEditing}
                   setEditingDescription={setEditingDescription}
                 />
               ))}
-
-              {/* Scanned files (not yet added) */}
               {scannedFiles.map((scannedFile) => (
                 <ScannedFileRow
                   key={`scanned-${scannedFile.source_name}`}
@@ -463,28 +488,47 @@ const CSVManagerModal = ({ show, handleClose, onSourcesChange, selectedChatbot }
 
         <Alert variant="info" className="mb-3 py-2">
           <small>
-            <strong>Note:</strong> Active sources are used when answering knowledge base queries.
-            Toggle sources on/off to control which CSVs are searched.
-            <br />
-            Files in <code>sample_chatbot/sample_data/unstructured</code> are automatically scanned
-            and shown here. To make them usable by the chatbot, please write a useful description
-            and add them.
+            <strong>Note:</strong> Files in <code>sample_chatbot/sample_data/unstructured</code> are scanned automatically and shown
+            as "Scanned" until someone adds them.
           </small>
         </Alert>
       </Modal.Body>
       <Modal.Footer>
-        <Button variant="light" onClick={handleClose}>
-          Close
+        <Button variant="light" onClick={requestClose}>Close</Button>
+      </Modal.Footer>
+    </Modal>
+
+    <Modal
+      show={showCloseWarning}
+      onHide={() => setShowCloseWarning(false)}
+      centered
+      backdrop="static"
+    >
+      <Modal.Header closeButton data-bs-theme="light">
+        <Modal.Title>Knowledge base changed</Modal.Title>
+      </Modal.Header>
+      <Modal.Body style={{ color: '#495057', fontSize: '1.05rem' }}>
+        The changes you made won't apply to your current conversation.
+        Please start a new conversation for the changes to take effect.
+      </Modal.Body>
+      <Modal.Footer className="border-0 pt-0">
+        <Button
+          variant="primary"
+          onClick={confirmCloseWarning}
+          style={{ fontWeight: 500 }}
+        >
+          OK
         </Button>
       </Modal.Footer>
     </Modal>
+    </>
   );
 };
 
 CSVManagerModal.propTypes = {
   show: PropTypes.bool.isRequired,
   handleClose: PropTypes.func.isRequired,
-  onSourcesChange: PropTypes.func,
+  hasActiveConversation: PropTypes.bool,
   selectedChatbot: PropTypes.object
 };
 

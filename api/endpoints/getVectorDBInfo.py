@@ -20,8 +20,8 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from api.utils import state_manager
 from api.utils.sdk_utils import get_user_synced_resources, handle_endpoint_error, check_metadata_user_permission, authenticate
-from utils.data_catalog import get_allowed_view_ids, DataCatalogAuthError
-from utils.utils import get_custom_request_headers
+from utils.data_catalog import get_user_permissions, DataCatalogAuthError
+from api.utils.sdk_utils import get_custom_request_headers
 
 router = APIRouter()
 
@@ -61,16 +61,18 @@ async def getVectorDBInfo(
     the current user has permissions for.
     """
     try:
-        allowed_view_ids = await get_allowed_view_ids(auth=auth, custom_headers=custom_headers)
-        allowed_view_ids_str = [str(vid) for vid in allowed_view_ids]
+        permissions_data = await get_user_permissions(auth=auth, custom_headers=custom_headers)
+        views_details = permissions_data.get("viewsPermissions", [])
+        allowed_view_ids_str = [str(view["viewId"]) for view in views_details]
     except DataCatalogAuthError as e:
         raise HTTPException(status_code=401, detail=f"Authentication failed during getVectorDBInfo: {str(e)}") from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get user permissions from Data Marketplace: {str(e)}") from e
 
+    user_sync_permissions = check_metadata_user_permission(auth, permissions_data)
+
     if not allowed_view_ids_str:
         logging.info("getVectorDBInfo: User has no allowed view IDs.")
-        user_sync_permissions = check_metadata_user_permission(auth)
         return JSONResponse(content={
             "syncedResources": {},
             "partialResources": {},
@@ -93,7 +95,6 @@ async def getVectorDBInfo(
             vector_store=vector_store,
             allowed_view_ids_str=allowed_view_ids_str
         )
-        user_sync_permissions = check_metadata_user_permission(auth)
         return JSONResponse(content={
             "syncedResources": filtered_synced_resources,
             "partialResources": filtered_partial_resources,

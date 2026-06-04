@@ -9,7 +9,7 @@ from flask_login import login_user, logout_user, login_required, current_user
 from sample_chatbot.config import get_config, get_agents_metadata_by_user
 from sample_chatbot.services.user_store import user_store
 from sample_chatbot.utils.ai_sdk_client import (
-    get_user_views,
+    get_user_access_info,
     get_synced_resources,
     get_ai_sdk_info,
     filter_synced_resources,
@@ -26,24 +26,24 @@ def login():
     username = data.get('username')
     password = data.get('password')
     user_details = data.get('user_details', '')
-    custom_instructions = data.get('custom_instructions', '')
+    custom_instructions = data.get('custom_instructions')
 
     if not username or not password:
         return jsonify({"success": False, "message": "Username and password are required"}), 400
 
-    status, response_data = get_user_views(
+    status, access_info = get_user_access_info(
         api_host=config.ai_sdk_host,
         username=username,
         password=password,
-        query="tables",
         verify_ssl=config.ai_sdk_verify_ssl
     )
 
     if status != 200:
-        if status == 401:
-            return jsonify({"success": False, "message": "Invalid credentials"}), 401
-        else:
-            return jsonify({"success": False, "message": response_data}), status
+        return jsonify({"success": False, "message": access_info}), status
+
+    roles = access_info.get("roles", [])
+    is_admin = access_info.get("is_admin", False)
+    legacy_permissions_endpoint = access_info.get("legacy_permissions_endpoint", False)
 
     synced_resources, partial_resources, user_sync_permissions = get_synced_resources(
         api_host=config.ai_sdk_host,
@@ -65,26 +65,17 @@ def login():
     user.ai_sdk_info = ai_sdk_info
     user.user_sync_permissions = user_sync_permissions
     user.thread_id = str(username)
+    user.roles = roles
+    user.is_admin = is_admin
+    user.legacy_permissions_endpoint = legacy_permissions_endpoint
 
-    if response_data:
-        user.denodo_tables = (
-            "Here are some of the tables available in the user's Denodo instance:\n- " +
-            "\n- ".join(response_data) +
-            "\n\nThis is not an exhaustive list, you can use the metadata_query tool to query more."
-        )
-    else:
-        user.denodo_tables = (
-            "No tables where found in the user's Denodo instance. Either the user has no views, "
-            "the connection is failing or they do not have enough permissions."
-        )
-
-    if user_details or custom_instructions:
-        user.user_details = user_details
-        user.custom_instructions = custom_instructions
-        user.set_custom_instructions()
+    if custom_instructions is not None or user_details:
+        user.set_custom_instructions(user_details, custom_instructions)
 
     login_user(user)
-    logging.info(f"[Auth] Login successful for user: {username}")
+    logging.info(f"[Auth] Login successful for user: {username} | Roles: {roles} | Global admin: {is_admin} | Legacy DM: {legacy_permissions_endpoint}")
+
+    can_use_deepquery = ai_sdk_info.get("can_use_deepquery", True)
 
     return jsonify({
         "success": True,
@@ -92,15 +83,24 @@ def login():
         "partialResources": partial_resources,
         "userSyncPermissions": user_sync_permissions,
         "globalEnabled": True,
-        "agents": get_agents_metadata_by_user(username),
+        "agents": get_agents_metadata_by_user(username, roles=roles, is_admin=is_admin, legacy_permissions_endpoint=legacy_permissions_endpoint),
         "config": {
-            "can_add_custom_instructions": config.user_add_custom_instructions,
+            "can_edit_instructions": config.user_edit_instructions,
             "chatbot_feedback": config.feedback_enabled,
-            "unstructured_mode": config.unstructured_mode,
+            "unstructured_mode": config.is_unstructured_mode_allowed_for_user(
+                username=username,
+                roles=roles,
+                is_admin=is_admin,
+                legacy_permissions_endpoint=legacy_permissions_endpoint
+            ),
             "llm_response_rows_limit": config.llm_response_rows_limit,
             "user_edit_llm": config.user_edit_llm,
             "filters_enabled": config.filters_enabled,
-            "enable_deep_query": config.deepquery_enabled,
+            "enable_deep_query": config.deepquery_enabled if can_use_deepquery else False,
+            "default_custom_instructions": {
+                "ai_sdk": config.custom_instructions_ai_sdk,
+                "chatbot": config.custom_instructions_chatbot,
+            },
         }
     }), 200
 
@@ -126,63 +126,38 @@ def change_agent():
     data = request.json
     agent_id = data.get('id')
     user_details = data.get('user_details', '')
-    custom_instructions = data.get('custom_instructions', '')
+    custom_instructions = data.get('custom_instructions')
     active_csvs = data.get('active_csvs')
     llm_settings = data.get('llm_settings', {})
 
     agent_config = get_config(agent_id)
 
-    if agent_config.allowed_users is not None and current_user.id not in agent_config.allowed_users:
+    if not agent_config.is_user_allowed(
+        username=current_user.id,
+        roles=current_user.roles,
+        is_admin=current_user.is_admin,
+        legacy_permissions_endpoint=current_user.legacy_permissions_endpoint
+    ):
         return jsonify({"success": False, "message": "User is not allowed to use this agent"}), 403
 
-
-    current_user.set_agent_config(agent_config)
-
-    status, response_data = get_user_views(
-        api_host=agent_config.ai_sdk_host,
-        username=current_user.id,
-        password=current_user.password,
-        query="tables",
-        verify_ssl=agent_config.ai_sdk_verify_ssl,
-        tags=agent_config.tags,
-        databases=agent_config.databases
-    )
-
-    if status != 200:
-        return jsonify({"success": False, "message": response_data}), status
-
-    current_user.thread_id = str(current_user.id) + '-' + str(agent_config.id)
+    if current_user.agent_id != agent_config.id:
+        current_user.set_agent_config(agent_config)
+        current_user.thread_id = str(current_user.id) + '-' + str(agent_config.id)
 
     try:
         current_user.update_llm_preferences(llm_settings)
     except ValueError as e:
         return jsonify({"success": False, "message": f"Invalid LLM settings: {str(e)}"}), 400
 
-    if response_data:
-        current_user.denodo_tables = (
-            "Here are some of the tables available in the user's Denodo instance:\n- " +
-            "\n- ".join(response_data) +
-            "\n\nThis is not an exhaustive list, you can use the metadata_query tool to query more."
-        )
-    else:
-        current_user.denodo_tables = (
-            "No tables where found in the user's Denodo instance. Either the user has no views, "
-            "the connection is failing or they do not have enough permissions."
-        )
+    if user_details:
+        current_user.user_details = user_details
+        current_user.chatbot = None
 
-    if user_details or custom_instructions:
-        custom_instructions = custom_instructions if agent_config.user_add_custom_instructions else ''
-        current_user.set_custom_instructions(user_details, custom_instructions)
+    if custom_instructions is not None and agent_config.user_edit_instructions:
+        current_user.merge_custom_instructions_for_agent(agent_config.id, custom_instructions)
 
     if active_csvs is not None:
-        valid_active_csvs = [src for src in active_csvs if src in current_user.csv_sources]
-        current_user.active_csv_sources = valid_active_csvs
-
-        for src in current_user.csv_sources:
-            current_user.csv_sources[src]['active'] = (src in valid_active_csvs)
-
-        current_user._update_csv_description()
-        current_user.chatbot = None
+        current_user.set_active_csvs(active_csvs)
 
     filtered_synced = current_user.synced_resources
     filtered_partial = current_user.partial_resources
@@ -199,18 +174,29 @@ def change_agent():
             allowed_tags=agent_config.tags
         )
 
+    can_use_deepquery = current_user.ai_sdk_info.get("can_use_deepquery", True) if current_user.ai_sdk_info else True
+
     return jsonify({
         "success": True,
         "message": f"Agent switched to {agent_id}",
         "syncedResources": filtered_synced,
         "partialResources": filtered_partial,
         "config": {
-            "can_add_custom_instructions": agent_config.user_add_custom_instructions,
+            "can_edit_instructions": agent_config.user_edit_instructions,
             "chatbot_feedback": agent_config.feedback_enabled,
-            "unstructured_mode": agent_config.unstructured_mode,
+            "unstructured_mode": agent_config.is_unstructured_mode_allowed_for_user(
+                username=current_user.id,
+                roles=current_user.roles,
+                is_admin=current_user.is_admin,
+                legacy_permissions_endpoint=current_user.legacy_permissions_endpoint
+            ),
             "llm_response_rows_limit": agent_config.llm_response_rows_limit,
             "user_edit_llm": agent_config.user_edit_llm,
             "filters_enabled": agent_config.filters_enabled,
-            "enable_deep_query": agent_config.deepquery_enabled,
+            "enable_deep_query": agent_config.deepquery_enabled if can_use_deepquery else False,
+            "default_custom_instructions": {
+                "ai_sdk": agent_config.custom_instructions_ai_sdk,
+                "chatbot": agent_config.custom_instructions_chatbot,
+            },
         }
     }), 200

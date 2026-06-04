@@ -18,13 +18,13 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException
 
-from utils.data_catalog import get_allowed_view_ids, DataCatalogAuthError
+from utils.data_catalog import get_user_permissions, DataCatalogAuthError
 from api.utils import state_manager
 from api.utils.sdk_utils import (
     handle_endpoint_error, authenticate, delete_by_db_or_tag,
     check_metadata_user_permission
 )
-from utils.utils import get_custom_request_headers
+from api.utils.sdk_utils import get_custom_request_headers
 
 router = APIRouter()
 
@@ -60,16 +60,18 @@ async def deleteMetadata(
 
     This behavior ensures that only views that unambiguously match the deletion criteria are removed, while preserving any entries that may be linked to other synchronized sources.
     """
-    if not check_metadata_user_permission(auth):
-        raise HTTPException(status_code=403, detail="You do not have authorization to use the vectorization endpoints.")
-
     try:
-        allowed_view_ids = await get_allowed_view_ids(auth=auth, custom_headers=custom_headers)
-        allowed_view_ids = [str(view_id) for view_id in allowed_view_ids]
+        permissions_data = await get_user_permissions(auth=auth, custom_headers=custom_headers)
+        views_details = permissions_data.get("viewsPermissions", [])
+        allowed_view_ids = [str(view["viewId"]) for view in views_details]
     except DataCatalogAuthError as e:
         raise HTTPException(status_code=401, detail=f"Authentication failed during deleteMetadata: {str(e)}") from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Retrieving allowed view IDs from Denodo Data Marketplace failed: {str(e)}") from e
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve permissions: {str(e)}") from e
+
+    if not check_metadata_user_permission(auth, permissions_data):
+        logging.warning("[Security] User unauthorized attempt to use deleteMetadata.")
+        raise HTTPException(status_code=403, detail="You do not have authorization to use the vectorization endpoints.")
 
     vdp_database_names = [db.strip() for db in endpoint_request.vdp_database_names.split(',') if db]
     vdp_tag_names = [tag.strip() for tag in endpoint_request.vdp_tag_names.split(',') if tag]
@@ -95,7 +97,7 @@ async def deleteMetadata(
         raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
 
     try:
-        total_deleted_ids = delete_by_db_or_tag(
+        total_deleted_ids = await delete_by_db_or_tag(
             vector_store=vector_store,
             sample_data_vector_store=sample_data_vector_store,
             vdp_database_names=vdp_database_names,
@@ -106,7 +108,7 @@ async def deleteMetadata(
 
     except Exception as e:
         logging.error(f"Error during metadata deletion: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete metadata: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete metadata: {e}") from e
 
     if total_deleted_ids == 0:
         return Response(status_code=204, content=None)

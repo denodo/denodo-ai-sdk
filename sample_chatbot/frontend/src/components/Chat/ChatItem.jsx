@@ -135,7 +135,14 @@ const ChatItem = ({
              return (
                 <Card.Text>
                     <div className="markdown-container">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                                a: ({node, ...props}) => (
+                                    <a {...props} target="_blank" rel="noopener noreferrer" />
+                                )
+                            }}
+                        >
                             {result.result}
                         </ReactMarkdown>
                     </div>

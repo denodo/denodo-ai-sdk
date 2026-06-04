@@ -21,8 +21,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from api.utils import ai_tools
 from api.utils import answer_question
 from api.utils import state_manager
-from api.utils.sdk_utils import timing_context, handle_endpoint_error, generate_session_id, authenticate
-from utils.utils import get_custom_request_headers
+from api.utils.sdk_utils import timing_context, handle_endpoint_error, generate_session_id, authenticate, check_llm_permission
+from api.utils.sdk_utils import get_custom_request_headers
 
 router = APIRouter()
 
@@ -75,8 +75,12 @@ class streamAnswerQuestionRequest(BaseModel):
         description="Maximum number of views to consider in total, including associations of the initial vector_search_k results."
     )
     vector_search_column_description_char_limit: int = Field(
-        default = 200,
-        description="Maximum characters of table or column descriptions used when filtering how many views to keep. Not applied during vector search or VQL generation (those use full descriptions). Refer to the docs for when this trimming is applied."
+        default=200,
+        description="Maximum characters of column descriptions used when filtering how many views to keep. Not applied during vector search or VQL generation (those use full descriptions). Refer to the docs for when this trimming is applied."
+    )
+    vector_search_table_description_char_limit: int = Field(
+        default=1000,
+        description="Maximum characters of table descriptions used when filtering how many views to keep. Not applied during vector search or VQL generation (those use full descriptions). Refer to the docs for when this trimming is applied."
     )
     mode: Literal["default", "data", "metadata"] = Field(default = "default")
     disclaimer: bool = True
@@ -192,7 +196,7 @@ async def process_stream_question(request_data: streamAnswerQuestionRequest, aut
         logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
 
-    vector_search_tables, sample_data, timings, error_message = await ai_tools.get_relevant_tables(
+    vector_search_tables, sample_data, timings, error_message, permissions_data = await ai_tools.get_relevant_tables(
         query=request_data.question,
         vector_store=vector_store,
         sample_data_vector_store=sample_data_vector_store,
@@ -230,6 +234,7 @@ async def process_stream_question(request_data: streamAnswerQuestionRequest, aut
             custom_instructions=request_data.custom_instructions,
             session_id=session_id,
             column_description_char_limit=request_data.vector_search_column_description_char_limit,
+            table_description_char_limit=request_data.vector_search_table_description_char_limit,
             check_ambiguity=request_data.check_ambiguity,
             markdown_response=request_data.markdown_response,
         )
@@ -252,7 +257,8 @@ async def process_stream_question(request_data: streamAnswerQuestionRequest, aut
             session_id=session_id,
             sample_data=sample_data,
             chat_llm=llm,
-            sql_gen_llm=llm
+            sql_gen_llm=llm,
+            can_use_llm=check_llm_permission(permissions_data)
         )
     elif category == "METADATA":
         response = answer_question.process_metadata_category(

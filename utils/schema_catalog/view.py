@@ -38,11 +38,57 @@ class SchemaColumn:
 
         return description
 
+    def _catalog_type_display(self, force_type=None):
+        """Denodo type display.
+
+        Uses the VQL data type and falls back to sourceType when type is missing.
+        Compound data types (whose sourceType is STRUCT or ARRAY) are rendered with
+        the source type as a prefix tag, i.e. [STRUCT] <register_alias> or
+        [ARRAY] <array_alias>.
+        """
+        if force_type:
+            return str(self._column_data.get(force_type)).strip()
+
+        type_text = self._column_data.get('type')
+        type_text = str(type_text).strip() if type_text is not None else ''
+
+        source_type = self._column_data.get('sourceType')
+        source_type = str(source_type).strip() if source_type is not None else ''
+
+        if source_type.upper() in ('STRUCT', 'ARRAY') and type_text:
+            return f"[{source_type.upper()}] {type_text}"
+
+        if type_text:
+            return type_text
+        if source_type:
+            return source_type
+        return 'unknown'
+
+    def _vql_extra_property_brackets(self):
+        raw = self._column_data.get('extraProperties')
+        if raw is None or not isinstance(raw, dict) or not raw:
+            return []
+        brackets = []
+        for key in sorted(raw.keys(), key=str):
+            name = str(key).strip()
+            if not name:
+                continue
+            value = raw[key]
+            if value is None or value == '':
+                continue
+            value_text = str(value).replace('\n', ' ').strip()
+            if not value_text:
+                continue
+            brackets.append(f"[{name}: {value_text}]")
+        return brackets
+
     def render_plain_line(self, include_descriptions=True, description_limit=None):
         column_name = self._column_data.get('columnName', '').replace('"', '').replace("'", "")
-        column_type = self._column_data.get('type', 'unknown')
+        column_type = self._catalog_type_display()
         logical_name = self._normalized_logical_name()
         description = self._normalized_description()
+        column_organization = self._column_data.get('columnOrganization')
+        obligatory = self._column_data.get('obligatory', False)
 
         if not include_descriptions:
             description = None
@@ -50,32 +96,53 @@ class SchemaColumn:
         if description_limit and description and len(description) > description_limit:
             description = f"{description[:description_limit]}... (truncated)"
 
+        parts = [f"- {column_name} ({column_type})"]
+
+        flags = []
+        if column_organization == "metric":
+            flags.append("METRIC")
+        if obligatory:
+            flags.append("OBLIGATORY")
+
+        if flags:
+            parts.extend([f"[{flag}]" for flag in flags])
+
         if logical_name is not None and description is not None:
-            return f"- {column_name} ({column_type}) → {logical_name}: {description}"
-        if logical_name is None and description is not None:
-            return f"- {column_name} ({column_type}) → {description}"
-        if logical_name is not None and description is None:
-            return f"- {column_name} ({column_type}) → {logical_name}"
-        return f"- {column_name} ({column_type})"
+            parts.append(f"→ {logical_name}: {description}")
+        elif logical_name is None and description is not None:
+            parts.append(f"→ {description}")
+        elif logical_name is not None and description is None:
+            parts.append(f"→ {logical_name}")
+
+        return " ".join(parts)
 
     def render_vql_line(self, sample_values=None, examples_per_table=3):
         name = self._column_data.get('columnName', 'unnamed')
-        column_type = self._column_data.get('type', 'unknown')
+        column_type = self._catalog_type_display()
         logical_name = self._normalized_logical_name()
         description = self._normalized_description()
         primary_key = self._column_data.get('primaryKey', False)
         nullable = self._column_data.get('nullable', True)
+        obligatory = self._column_data.get('obligatory', False)
+        column_organization = self._column_data.get('columnOrganization')
         examples = sample_values if sample_values is not None else self._column_data.get('sample_data', [])
 
         flags = []
+        if column_organization == "dimension":
+            flags.append("DIMENSION")
+        elif column_organization == "metric":
+            flags.append("METRIC")
         if primary_key:
             flags.append("PK")
         if not nullable:
             flags.append("NOT NULL")
+        if obligatory:
+            flags.append("OBLIGATORY")
 
         parts = [f"- {name} ({column_type})"]
         if flags:
-            parts.append(f"[{' '.join(flags)}]")
+            parts.extend([f"[{flag}]" for flag in flags])
+        parts.extend(self._vql_extra_property_brackets())
         if logical_name is not None and description is not None:
             parts.append(f"→ {logical_name}: {description if description.endswith('.') else description + '.'}")
         elif logical_name is None and description is not None:
@@ -165,21 +232,40 @@ class SchemaTable:
         database_name, _ = split_table_name(self.get_name())
         return database_name
 
+    def is_metric_view(self):
+        return self._view_data.get('subtype') == 'metric'
+
+    def has_vector_column(self):
+        for column in self._view_data.get('schema', []):
+            if 'vector' in SchemaColumn(column)._catalog_type_display(force_type='type').lower():
+                return True
+        return False
+
     def get_association_ids(self):
         association_ids = []
         for association in self._view_data.get('associations', []):
             association_ids.append(str(association['table_id']))
         return association_ids
 
-    def _render_plain_text(self, include_associations=False, include_descriptions=True, description_limit=None, present_tables=None):
+    def _render_plain_text(
+        self,
+        include_associations=False,
+        include_descriptions=True,
+        column_description_limit=None,
+        table_description_limit=None,
+        present_tables=None,
+        include_table_type=False
+    ):
         present_tables = present_tables or []
         lines = [f"Table: {self.get_name()}"]
+        if include_table_type and self.is_metric_view():
+            lines.append("Type: METRIC")
 
         table_description = self._view_data.get('description', '')
         if include_descriptions and table_description and table_description.strip():
             table_description = table_description.replace("\n", " ").strip()
-            if description_limit and len(table_description) > description_limit:
-                table_description = f"{table_description[:description_limit]}... (truncated)"
+            if table_description_limit and len(table_description) > table_description_limit:
+                table_description = f"{table_description[:table_description_limit]}... (truncated)"
             lines.append(f"Description: {table_description}")
 
         lines.append("Columns:")
@@ -187,7 +273,7 @@ class SchemaTable:
             lines.append(
                 SchemaColumn(column).render_plain_line(
                     include_descriptions=include_descriptions,
-                    description_limit=description_limit
+                    description_limit=column_description_limit
                 )
             )
 
@@ -210,17 +296,24 @@ class SchemaTable:
         # Description: <description>
         # Columns:
         # - <column_name> (<type>)
+        # - <column_name> (<type>) [METRIC]
         # - <column_name> (<type>) → <description>
         # - <column_name> (<type>) → <logical_name>
         # - <column_name> (<type>) → <logical_name>: <description>
-        return self._render_plain_text(include_associations=False, include_descriptions=True)
+        return self._render_plain_text(
+            include_associations=False,
+            include_descriptions=True,
+            include_table_type=False
+        )
 
-    def render_selector_text(self, column_description_char_limit=None, present_tables=None):
+    def render_selector_text(self, column_description_char_limit=None, table_description_char_limit=None, present_tables=None):
         # Selector grammar:
         # Table: <database>.<view>
+        # Type: METRIC
         # Description: <description>
         # Columns:
         # - <column_name> (<type>)
+        # - <column_name> (<type>) [METRIC] [OBLIGATORY]
         # - <column_name> (<type>) → <description> ... (truncated)
         # - <column_name> (<type>) → <logical_name>
         # - <column_name> (<type>) → <logical_name>: <description> ... (truncated)
@@ -230,16 +323,21 @@ class SchemaTable:
         return self._render_plain_text(
             include_associations=True,
             include_descriptions=column_description_char_limit is not None and column_description_char_limit > 0,
-            description_limit=column_description_char_limit,
-            present_tables=present_tables
+            column_description_limit=column_description_char_limit,
+            table_description_limit=table_description_char_limit,
+            present_tables=present_tables,
+            include_table_type=True
         )
 
     def render_vql_text(self, sample_data=None, present_tables=None, examples_per_table=3):
         # VQL grammar:
         # # Table: "<database>"."<view>"
+        # ## Type: Metric
         # ## Description: <description>
         # ## Columns:
-        # - <column_name> (<type>) [PK] [NOT NULL]
+        # - <column_name> (<type>) [DIMENSION]
+        # - <column_name> (<type>) [METRIC]
+        # - <column_name> (<type>) [PK] [NOT NULL] [OBLIGATORY] [<extra_key>: <extra_val>] ...
         # - <column_name> (<type>) → <logical_name>
         # - <column_name> (<type>) → <logical_name>: <description>.
         # - <column_name> (<type>) → <logical_name>. sample values: a, b, c
@@ -255,6 +353,8 @@ class SchemaTable:
         quoted_table_name = f'"{database_name}"."{view_name}"' if database_name else f'"{view_name}"'
 
         lines.append(f"# Table: {quoted_table_name}")
+        if self.is_metric_view():
+            lines.append("## Type: Metric")
         if table_description:
             lines.append(f"## Description: {table_description}")
         lines.append("## Columns:")

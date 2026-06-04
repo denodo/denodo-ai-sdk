@@ -9,7 +9,6 @@ import Sidebar from "./components/Sidebar/Sidebar";
 import useSDK from "./hooks/useSDK";
 import LoginPage from "./components/LoginPage/LoginPage";
 import { chatReducer, actionTypes } from "./reducers/chatReducer";
-import { getStoredCSVConfigs, saveCSVConfigs } from "./components/Header/CSVManagerModal/utils";
 import { Modal, Button, Spinner } from "react-bootstrap";
 import { useConfig } from "./contexts/ConfigContext";
 import api from "./api/client";
@@ -154,38 +153,6 @@ const App = () => {
           }
         }
 
-        // Restore CSV sources from localStorage after login
-        const storedCSVConfigs = getStoredCSVConfigs(userInformation.username);
-        if (storedCSVConfigs && storedCSVConfigs.length > 0) {
-          try {
-            const csvDictString = localStorage.getItem(`${userInformation.username}_active_csvs_dict`);
-            let globalActive = [];
-            if (csvDictString) {
-              try { globalActive = JSON.parse(csvDictString)['global'] || []; } catch(e){}
-            }
-
-            const configsToRestore = storedCSVConfigs.map(c => ({
-              ...c,
-              active: globalActive.includes(c.source_name)
-            }));
-
-            const restoreResponse = await api.post("csv/restore", {
-              csv_configs: configsToRestore 
-            });
-            if (restoreResponse.data.success) {
-              if (restoreResponse.data.failed.length > 0 || restoreResponse.data.skipped.length > 0) {
-                const failedNames = restoreResponse.data.failed.map(f => f.source_name);
-                const skippedNames = restoreResponse.data.skipped.map(s => s.source_name);
-                const validConfigs = storedCSVConfigs.filter(c => 
-                  !failedNames.includes(c.source_name) && !skippedNames.includes(c.source_name)
-                );
-                saveCSVConfigs(userInformation.username, validConfigs);
-              }
-            }
-          } catch (error_) {
-            console.error('Error restoring CSV sources:', error_);
-          }
-        }
       } else {
         const errorMessage = response.data.message || 'Invalid credentials. Please try again.';
         alert(errorMessage);
@@ -205,24 +172,6 @@ const App = () => {
     }
   };
 
-  const handleCSVSourcesChange = useCallback(async () => {
-    // Refresh CSV sources from server
-    try {
-      const response = await api.get("csv/list");
-      if (response.data.success) {
-        // Update localStorage
-        const username = localStorage.getItem('current_user');
-        if (username) {
-          saveCSVConfigs(username, response.data.sources || []);
-        }
-      }
-    } catch (err) {
-      console.error('Error refreshing CSV sources:', err);
-    }
-    // Also clear chat to reload with new knowledge base
-    handleClearResults();
-  }, []);
-
   const handleSelectChatbotClick = (bot) => {
     if (selectedChatbot?.id === bot.id) return;
 
@@ -241,16 +190,18 @@ const App = () => {
       const savedUserDetails = localStorage.getItem(`${currentUser}_user_details`) || '';
       const agentKey = bot.isGlobal ? 'global' : bot.id;
       
-      let savedCustomInstructions = '';
+      let savedCustomInstructions = null;
       const instDictString = localStorage.getItem(`${currentUser}_custom_instructions_dict`);
       if (instDictString) {
-        try { savedCustomInstructions = JSON.parse(instDictString)[agentKey] || ''; } catch(e) {}
-      }
-
-      let activeCsvs = [];
-      const csvDictString = localStorage.getItem(`${currentUser}_active_csvs_dict`);
-      if (csvDictString) {
-        try { activeCsvs = JSON.parse(csvDictString)[agentKey] || []; } catch(e) {}
+        try {
+          const d = JSON.parse(instDictString);
+          const raw = d[agentKey];
+          if (typeof raw === 'string') {
+            savedCustomInstructions = raw;
+          } else if (raw && typeof raw === 'object') {
+            savedCustomInstructions = raw;
+          }
+        } catch(e) {}
       }
 
       let chatbotLlmSettings = null;
@@ -265,11 +216,10 @@ const App = () => {
         try { aiSdkSettings = JSON.parse(sdkDictString)[agentKey] || null; } catch(e) {}
       }
 
-      const payload = { 
+      const payload = {
         id: bot.id,
         user_details: savedUserDetails,
         custom_instructions: savedCustomInstructions,
-        active_csvs: activeCsvs,
         llm_settings: {}
       };
 
@@ -355,7 +305,7 @@ const App = () => {
           partialResources={partialResources}
           userSyncPermissions={userSyncPermissions}
           onResourcesUpdate={handleResourcesUpdate}
-          onCSVSourcesChange={handleCSVSourcesChange}
+          hasActiveConversation={results.length > 0}
           toggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
           isSidebarOpen={isSidebarOpen}
           selectedChatbot={selectedChatbot}

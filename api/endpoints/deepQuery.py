@@ -22,8 +22,13 @@ from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from api.deepquery.main import process_analysis
 from fastapi import APIRouter, Depends, HTTPException
-from api.utils.sdk_utils import handle_endpoint_error, authenticate
-from utils.utils import get_custom_request_headers
+from utils.data_catalog import get_user_permissions, DataCatalogAuthError
+from api.utils.sdk_utils import (
+    handle_endpoint_error,
+    authenticate,
+    get_custom_request_headers,
+    check_deepquery_user_permission
+)
 
 router = APIRouter()
 
@@ -99,8 +104,18 @@ async def deep_query_post(
     """Process a a complex analysis question using deepQuery. This endpoint returns the analysis answer along with metadata that can be used for report generation
     in a separate endpoint call to generateDeepQueryReport.
     """
-
     start_time = time.time()
+
+    try:
+        permissions_data = await get_user_permissions(auth=auth, custom_headers=custom_headers)
+    except DataCatalogAuthError as e:
+        raise HTTPException(status_code=401, detail=f"Authentication failed during deepQuery: {str(e)}") from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve permissions: {str(e)}") from e
+
+    if not check_deepquery_user_permission(auth, permissions_data):
+        logging.warning("[Security] User unauthorized attempt to use deepQuery.")
+        raise HTTPException(status_code=403, detail="You do not have authorization to use the DeepQuery feature. Contact your administrator.")
 
     try:
         # Planning always uses thinking LLM (from request parameters)
@@ -142,7 +157,7 @@ async def deep_query_post(
         logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
 
-    vector_search_tables, sample_data, timings, error_message = await ai_tools.get_relevant_tables(
+    vector_search_tables, sample_data, _, _, _ = await ai_tools.get_relevant_tables(
         query=endpoint_request.question,
         vector_store=vector_store,
         sample_data_vector_store=sample_data_vector_store,

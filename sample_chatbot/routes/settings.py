@@ -17,14 +17,13 @@ def get_frontend_config():
 
     config = get_config(agent_id)
 
-    from sample_chatbot.engine import TOOL_DEFINITIONS
+    from sample_chatbot.engine.context import TOOL_DEFINITIONS
 
     frontend_config = {
         "has_ai_sdk_credentials": config.has_ai_sdk_credentials,
         "allow_sync": config.allow_sync,
         "chatbot_feedback": config.effective_feedback_enabled,
         "unstructured_mode": config.unstructured_mode,
-        "sync_timeout": config.sync_vdbs_timeout,
         "user_edit_llm": config.user_edit_llm,
         "enable_deep_query": config.deepquery_enabled,
         "chatbot_tools": [
@@ -33,6 +32,7 @@ def get_frontend_config():
                 "pretty_name": tool_cfg["pretty_name"],
                 "aliases": tool_cfg["aliases"],
                 "optional": tool_cfg["optional"],
+                "tool_public_text_key": tool_cfg["tool_public_text_key"],
             }
             for name, tool_cfg in TOOL_DEFINITIONS.items()
         ],
@@ -48,6 +48,12 @@ def get_frontend_config():
     if config.data_marketplace_url:
         frontend_config["data_marketplace_url"] = config.data_marketplace_url.rstrip('/')
 
+    frontend_config["default_custom_instructions"] = {
+        "ai_sdk": config.custom_instructions_ai_sdk,
+        "chatbot": config.custom_instructions_chatbot,
+    }
+    frontend_config["can_edit_instructions"] = config.user_edit_instructions
+
     return jsonify(frontend_config)
 
 @settings_bp.route('/api/update_custom_instructions', methods=['POST'])
@@ -55,7 +61,7 @@ def get_frontend_config():
 def update_custom_instructions():
     """Update user's custom instructions and profile."""
     data = request.json
-    custom_instructions = data.get('custom_instructions', '')
+    custom_instructions = data.get('custom_instructions')
     user_details = data.get('user_details', '')
 
     current_user.set_custom_instructions(user_details, custom_instructions)
@@ -106,6 +112,10 @@ def get_llm_settings():
         "check_ambiguity": current_user.check_ambiguity,
         "ai_sdk_info": current_user.ai_sdk_info,
         "chatbot_deepquery": config.deepquery_enabled,
+        "default_custom_instructions": {
+            "ai_sdk": config.custom_instructions_ai_sdk,
+            "chatbot": config.custom_instructions_chatbot,
+        },
     }), 200
 
 

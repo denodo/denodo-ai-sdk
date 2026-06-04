@@ -4,15 +4,16 @@ Functions for CSV file handling, parsing, and document preparation for vector st
 
 import os
 import csv
+import json
 import logging
 import random
 
+from langchain_core.documents.base import Document
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from utils import langfuse
-from utils.utils import custom_tag_parser
-from langchain_community.document_loaders.csv_loader import CSVLoader
+from utils.utils import custom_tag_parser, calculate_tokens
 from sample_chatbot.engine.prompts import GENERATE_CSV_DESCRIPTION
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -28,7 +29,6 @@ ALLOWED_CSV_ROOTS = (
     UPLOADS_PATH,
     os.path.join(SAMPLE_CHATBOT_ROOT, "sample_data", "unstructured"),
 )
-
 
 def _is_allowed_csv_path(csv_file_path):
     resolved_path = os.path.realpath(csv_file_path)
@@ -111,7 +111,8 @@ def get_csv_preview(csv_file_path, delimiter=';', num_rows=5, random_sample=Fals
         logging.error(f"Error reading CSV preview: {e}")
         return {"columns": [], "rows": [], "error": str(e)}
 
-def generate_csv_description(llm, csv_file_path, delimiter=';', num_rows=5, session_id=None):
+def generate_csv_description(llm, csv_file_path, delimiter=';', num_rows=5, session_id=None,
+                             vectorized_columns=None):
     """
     Generate a description of the CSV file using the LLM based on the first N rows.
 
@@ -121,6 +122,9 @@ def generate_csv_description(llm, csv_file_path, delimiter=';', num_rows=5, sess
         delimiter: CSV delimiter character
         num_rows: Number of rows to use for context
         session_id: Optional Langfuse session ID for tracing
+        vectorized_columns: Optional list of columns to include in the preview shown
+            to the LLM. When provided, the description is generated from those columns
+            only, matching what will actually be embedded.
 
     Returns:
         Generated description string
@@ -132,13 +136,17 @@ def generate_csv_description(llm, csv_file_path, delimiter=';', num_rows=5, sess
             logging.warning(f"[csv_utils] Empty CSV or could not read: {csv_file_path}")
             return "Empty CSV file or could not read contents."
 
-        # Build a text representation of the CSV preview
-        columns = preview["columns"]
+        all_columns = preview["columns"]
         rows = preview["rows"]
+
+        if vectorized_columns:
+            columns = [c for c in vectorized_columns if c in all_columns] or all_columns
+        else:
+            columns = all_columns
 
         preview_text = f"Columns: {', '.join(columns)}\n\nSample rows:\n"
         for i, row in enumerate(rows, 1):
-            row_text = " | ".join([f"{k}: {v}" for k, v in row.items()])
+            row_text = " | ".join([f"{k}: {row.get(k, '')}" for k in columns])
             preview_text += f"Row {i}: {row_text}\n"
 
         # Build the chain using raw LLM from UniformLLM wrapper
@@ -198,55 +206,152 @@ def validate_csv_path(csv_file_path, allow_temp=False):
     except Exception as e:
         return False, f"Cannot read file: {str(e)}"
 
-def csv_to_documents(csv_file, delimiter=";", quotechar='"', source_name=None):
-    """
-    Convert a CSV file to LangChain documents.
+def _build_page_content(row, vectorized_columns):
+    """`colA: val, colB: val` over the user-selected columns."""
+    return ", ".join(f"{c}: {row.get(c, '')}" for c in vectorized_columns)
 
-    Each document gets a unique ID based on source_name and row index to allow
-    multiple CSV sources to coexist in a single vector store.
+def csv_to_documents(csv_file, delimiter=";", quotechar='"', source_name=None,
+                     vectorized_columns=None, embeddings=None):
+    """
+    Convert a CSV file to LangChain documents and pre-embed each row.
+
+    Each document gets a unique ID `{source_name}_{row_index}` so multiple
+    CSV sources can coexist in one shared vector store, and every original
+    column value is preserved in metadata so the CSV can be reconstructed for
+    download (including the embedding column).
 
     Args:
         csv_file: Path to the CSV file
         delimiter: CSV delimiter character
         quotechar: CSV quote character
-        source_name: Name to use as database_name in metadata (used for filtering)
+        source_name: Name used as database_name in metadata (filter key)
+        vectorized_columns: list of columns whose values build page_content.
+            If None or empty, all columns are used.
+        embeddings: optional embeddings model. When provided, each row's
+            embedding is computed up-front and stored in metadata as a string
+            so it can later be exported with the CSV.
 
     Returns:
-        List of documents or False on failure
+        List of Document, or False on failure.
     """
-    logging.debug(f"[csv_utils] Converting CSV to documents: {csv_file}")
-    loader = CSVLoader(
-        file_path=csv_file,
-        csv_args={
-            "delimiter": delimiter,
-            "quotechar": quotechar,
-        },
-        encoding="utf-8"
-    )
 
-    documents = loader.load()
+    rows = []
+    with open(csv_file, encoding="utf-8") as f:
+        reader = csv.DictReader(f, delimiter=delimiter, quotechar=quotechar)
+        columns = list(reader.fieldnames or [])
+        for row in reader:
+            rows.append({k: ("" if v is None else v) for k, v in row.items()})
 
-    if len(documents) == 0:
+    if not rows:
         logging.error(f"[csv_utils] No data was found in the CSV file: {csv_file}")
         return False
 
-    # Use source_name if provided, otherwise derive from filename
     if not source_name:
         filename = os.path.basename(csv_file)
         source_name = os.path.splitext(filename)[0]
 
-    # Create unique document IDs: {source_name}_{row_index}
-    # This allows multiple CSV sources to coexist in a single vector store
-    for i, document in enumerate(documents):
+    if not vectorized_columns:
+        vectorized_columns = columns
+    else:
+        # Drop columns that aren't actually in the CSV — they'd just be empty.
+        vectorized_columns = [c for c in vectorized_columns if c in columns]
+        if not vectorized_columns:
+            vectorized_columns = columns
+
+    documents = []
+    for i, row in enumerate(rows):
         doc_id = f"{source_name}_{i}"
-        document.id = doc_id
-        document.metadata['view_name'] = str(i)
-        document.metadata['view_id'] = doc_id
-        document.metadata['document_id'] = doc_id
-        document.metadata['database_name'] = source_name
+        page_content = _build_page_content(row, vectorized_columns)
+        documents.append(Document(
+            id=doc_id,
+            page_content=page_content,
+            metadata={
+                "view_name": str(i),
+                "view_id": doc_id,
+                "document_id": doc_id,
+                "database_name": source_name,
+                "row_id": i,
+                "row": json.dumps(row, ensure_ascii=False),
+                "vectorized_columns": json.dumps(vectorized_columns),
+            },
+        ))
+
+    page_content_tokens = [calculate_tokens(d.page_content) for d in documents]
+    logging.info(f"[csv_utils] Min tokens: {min(page_content_tokens)}, Max tokens: {max(page_content_tokens)}, Average tokens: {round(sum(page_content_tokens) / len(page_content_tokens), 0)} for {len(documents)} documents in {csv_file}")
+    if embeddings is not None:
+        # Pre-embed so we can later export the vector alongside the CSV. The
+        # subsequent add_documents will hit the embeddings cache, so this is
+        # not a double cost.
+        vectors = embeddings.embed_documents([d.page_content for d in documents])
+        for d, v in zip(documents, vectors):
+            d.metadata["vector"] = str(v)
 
     logging.info(f"[csv_utils] Converted CSV to {len(documents)} documents (source: {source_name})")
     return documents
+
+def fetch_collection_documents(vector_store, source_name, num_rows):
+    """
+    Pull every document of a collection back out of the vector store.
+
+    Uses exhaustive view_id batching so it works past `search_batched`'s
+    similarity top-k cap.
+    """
+    BATCH = 25000
+    out = []
+    for start in range(0, num_rows, BATCH):
+        ids = [f"{source_name}_{i}" for i in range(start, min(start + BATCH, num_rows))]
+        out.extend(vector_store.search_by_vector(
+            vector_store.search_vector,
+            k=len(ids),
+            view_ids=ids,
+        ))
+    return out
+
+def collection_to_csv_bytes(vector_store, source_name, num_rows):
+    """
+    Reconstruct the original CSV from stored row metadata and append an
+    `embedding` column from the per-row stored vector.
+
+    Returns CSV bytes (UTF-8) ready to send over HTTP.
+    """
+    import io
+
+    docs = fetch_collection_documents(vector_store, source_name, num_rows)
+
+    by_row = {}
+    columns_order = None
+    for d in docs:
+        row_json = d.metadata.get("row")
+        if not row_json:
+            continue
+        try:
+            row = json.loads(row_json)
+        except ValueError:
+            continue
+        if columns_order is None:
+            columns_order = list(row.keys())
+        row_id = d.metadata.get("row_id")
+        if row_id is None:
+            try:
+                row_id = int(d.metadata.get("view_name"))
+            except (TypeError, ValueError):
+                continue
+        row["embedding"] = d.metadata.get("vector", "")
+        by_row[int(row_id)] = row
+
+    if not by_row:
+        return b""
+
+    if columns_order is None:
+        columns_order = []
+    fieldnames = columns_order + ["embedding"]
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for row_id in sorted(by_row.keys()):
+        writer.writerow(by_row[row_id])
+    return buf.getvalue().encode("utf-8")
 
 def get_safe_source_name(source_name):
     """

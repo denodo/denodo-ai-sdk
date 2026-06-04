@@ -101,10 +101,10 @@ class SchemaCatalog:
     def to_view_jsons(self):
         return [view.to_dict() for view in self.views]
 
-    def render_selector_schema(self, column_description_char_limit=None):
+    def render_selector_schema(self, column_description_char_limit=None, table_description_char_limit=None):
         present_tables = [view.get_name() for view in self.views]
         return "".join(
-            view.render_selector_text(column_description_char_limit, present_tables)
+            view.render_selector_text(column_description_char_limit, table_description_char_limit, present_tables)
             for view in self.views
         )
 
@@ -152,6 +152,22 @@ class SchemaCatalog:
             }
             for view in self.views
         ]
+
+    def selected_tables_have_vector_column(self, selected_table_names):
+        if not selected_table_names:
+            views = self.views
+        else:
+            table_lookup = {view.get_name(): view for view in self.views}
+            views = [table_lookup[name] for name in selected_table_names if name in table_lookup]
+        return any(view.has_vector_column() for view in views)
+
+    def selected_tables_include_metric_view(self, selected_table_names):
+        if not selected_table_names:
+            views = self.views
+        else:
+            table_lookup = {view.get_name(): view for view in self.views}
+            views = [table_lookup[name] for name in selected_table_names if name in table_lookup]
+        return any(view.is_metric_view() for view in views)
 
     def to_embedding_documents(self, embeddings_token_limit=0):
         documents = []

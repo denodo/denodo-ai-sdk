@@ -13,9 +13,9 @@ import os
 import json
 import base64
 import logging
-import requests
 import aiohttp
 import asyncio
+from async_lru import alru_cache
 from utils.utils import timed, log_params
 from utils.schema_catalog import SchemaCatalog
 
@@ -24,15 +24,19 @@ DATA_MARKETPLACE_VERIFY_SSL = os.getenv('DATA_MARKETPLACE_VERIFY_SSL', '0') == '
 DATA_MARKETPLACE_SERVER_ID = int(os.getenv('DATA_MARKETPLACE_SERVER_ID', 1))
 DATA_MARKETPLACE_METADATA_URL = f"{DATA_MARKETPLACE_URL}public/api/askaquestion/data"
 DATA_MARKETPLACE_EXECUTION_URL = f"{DATA_MARKETPLACE_URL}public/api/askaquestion/execute"
-DATA_MARKETPLACE_PERMISSIONS_URL = f"{DATA_MARKETPLACE_URL}public/api/views/allowed-identifiers"
+DATA_MARKETPLACE_ALLOWED_VIEWS_URL = f"{DATA_MARKETPLACE_URL}public/api/views/allowed-identifiers"
+DATA_MARKETPLACE_USER_PERMISSIONS_URL = f"{DATA_MARKETPLACE_URL}public/api/ai-sdk/user-permissions"
 DATA_MARKETPLACE_INCREMENTAL_UPDATE_URL = f"{DATA_MARKETPLACE_URL}public/api/ai-sdk/configuration"
+ENABLE_PERMISSIONS_CACHE = os.getenv("AI_SDK_PERMISSIONS_CACHE", "1") == "1"
+CACHE_MAX_SIZE = int(os.getenv("AI_SDK_PERMISSIONS_CACHE_MAX_SIZE", "1000"))
+CACHE_TTL = int(os.getenv("AI_SDK_PERMISSIONS_CACHE_TTL", "300"))
 
 class DataCatalogAuthError(Exception):
     """Custom exception for Data Marketplace authentication failures."""
     pass
 
 @timed
-def get_views_metadata_documents(
+async def get_views_metadata_documents(
     auth,
     tag_name=None,
     database_name=None,
@@ -47,7 +51,7 @@ def get_views_metadata_documents(
     view_prefix_filter='',
     view_suffix_filter='',
     tagged_views=None,
-    incremental=True,
+    incremental=False,
     tags_to_ignore=None,
     views_per_request=50,
     custom_headers=None
@@ -57,17 +61,24 @@ def get_views_metadata_documents(
     Handles both legacy and paginated API versions automatically.
 
     Args:
-        database_name: Name of the database to query (mutually exclusive with tag_name)
         auth: Either (username, password) tuple for basic auth or OAuth token string
+        tag_name: Name of the tag to query (mutually exclusive with database_name)
+        database_name: Name of the database to query (mutually exclusive with tag_name)
         examples_per_table: Number of example rows to fetch per table (0 to disable)
         table_associations: Whether to include table associations
         table_descriptions: Whether to include descriptions
         table_column_descriptions: Whether to include column descriptions
         filter_tables: List of tables to exclude (default: None)
-        tag_name: Name of the tag to query (mutually exclusive with database_name)
         server_id: Server identifier
         verify_ssl: Whether to verify SSL certificates (default: DATA_MARKETPLACE_VERIFY_SSL)
-        metadata_url: Data Marketplace metadata URL (default: DATA_MARKETPLACE_METADATA_URL)
+        last_update_timestamp_ms: Epoch timestamp in milliseconds used during incremental loading to fetch only views modified after this date
+        view_prefix_filter: String used to filter and include only views whose names start with this prefix
+        view_suffix_filter: String used to filter and include only views whose names end with this suffix
+        tagged_views: List of views with the requested tag
+        incremental: Whether to do incremental sync
+        tags_to_ignore: List of tags to exclude from vectorization
+        views_per_request: Maximum number of views to query in a single request
+        custom_headers: Custom HTTP headers to forward
 
     Returns:
         Parsed metadata JSON response
@@ -121,7 +132,7 @@ def get_views_metadata_documents(
 
         return data
 
-    def make_request(data):
+    async def make_request(data, session):
         headers = {'Content-Type': 'application/json'}
         if isinstance(auth, tuple):
             headers['Authorization'] = calculate_basic_auth_authorization_header(*auth)
@@ -132,78 +143,95 @@ def get_views_metadata_documents(
             headers.update(custom_headers)
 
         # 1. Make request and raise any connection/HTTP errors
-        response = requests.post(
+        async with session.post(
             f"{DATA_MARKETPLACE_METADATA_URL}?serverId={server_id}",
             json=data,
             headers=headers,
-            verify=verify_ssl
-        )
-        response.raise_for_status()
+            ssl=verify_ssl
+        ) as response:
 
-        # 2. Try to parse JSON response
-        try:
-            json_response = response.json()
-        except ValueError as e:
-            logging.error(f"Failed to parse JSON response: {str(e)}")
-            raise ValueError(f"Invalid JSON response from server: {response.text}")
+            response_text = await response.text()
 
-        # 3. Validate response structure
-        if not isinstance(json_response, list) and 'viewsDetails' not in json_response:
-            error_msg = f"Unexpected response format from server: {response.text}"
-            logging.error(error_msg)
-            raise ValueError(error_msg)
+            if response.status >= 400:
+                try:
+                    error_response = json.loads(response_text)
+                    error_message = str(error_response.get('message', 'Data Marketplace did not return further details'))
+                except (json.JSONDecodeError, AttributeError):
+                    error_message = response_text
 
-        return json_response
+                raise aiohttp.ClientResponseError(
+                    request_info=response.request_info,
+                    history=response.history,
+                    status=response.status,
+                    message=error_message,
+                    headers=response.headers
+                )
+
+            # 2. Try to parse JSON response
+            try:
+                json_response = json.loads(response_text)
+            except ValueError as e:
+                logging.error(f"Failed to parse JSON response: {str(e)}")
+                raise ValueError(f"Invalid JSON response from server: {response_text}") from e
+
+            # 3. Validate response structure
+            if not isinstance(json_response, list) and 'viewsDetails' not in json_response:
+                error_msg = f"Unexpected response format from server: {response_text}"
+                logging.error(error_msg)
+                raise ValueError(error_msg)
+
+            return json_response
 
     try:
         # Initial request without pagination to detect DC API version
-        initial_response = make_request(prepare_request_data(limit=views_per_request, offset=0))
+        async with aiohttp.ClientSession() as session:
+            initial_response = await make_request(prepare_request_data(limit=views_per_request, offset=0), session)
 
-        # If it's a list, it's the old DC API (<9.1.0)
-        if not isinstance(initial_response, list):
-            views = initial_response.get('viewsDetails', initial_response)
-            delete_view_ids.extend(initial_response.get('deletedViewIdentifiers', []))
+            # If it's a list, it's the old DC API (<9.1.0)
+            if not isinstance(initial_response, list):
+                views = initial_response.get('viewsDetails', initial_response)
+                delete_view_ids.extend(initial_response.get('deletedViewIdentifiers', []))
 
-            if 'dataUsageErrors' in initial_response:
-                data_usage_errors.extend(initial_response['dataUsageErrors'])
+                if 'dataUsageErrors' in initial_response:
+                    data_usage_errors.extend(initial_response['dataUsageErrors'])
 
-            if incremental and data_mode == 'TAG':
-                detagged_view_ids.extend(initial_response.get('detaggedViewIdentifiers', []))
+                if incremental and data_mode == 'TAG':
+                    detagged_view_ids.extend(initial_response.get('detaggedViewIdentifiers', []))
 
-            total_views = len(views)
-            logging.info(f"Total views retrieved: {total_views}")
+                total_views = len(views)
+                logging.info(f"Total views retrieved: {total_views}")
 
-            # If we got less than views_per_request views we can exit
-            if total_views < views_per_request:
-                logging.info(f"Retrieved {total_views} views in single request. No pagination needed")
-                all_views = views
+                # If we got less than views_per_request views we can exit
+                if total_views < views_per_request:
+                    logging.info(f"Retrieved {total_views} views in single request. No pagination needed")
+                    all_views = views
+                else:
+                    # We're dealing with the new API version - need to paginate
+                    logging.info("Dealing with the pagination API. Making requests with pagination.")
+                    all_views = views
+                    offset = views_per_request
+
+                    while True:
+                        data = prepare_request_data(offset=offset, limit=views_per_request)
+                        page_response = await make_request(data, session)
+                        page_views = page_response.get('viewsDetails', page_response)
+
+                        if 'dataUsageErrors' in page_response:
+                            data_usage_errors.extend(page_response['dataUsageErrors'])
+
+                        logging.info(f"Received response for request with offset {offset} and limit {views_per_request}.")
+                        if not page_views:
+                            break
+
+                        all_views.extend(page_views)
+                        offset += views_per_request
+                        logging.info(f"Retrieved {len(all_views)} views so far.")
+
+                        if len(page_views) < views_per_request:
+                            logging.info(f"Received less than {views_per_request} views. Stopping pagination.")
+                            break
             else:
-                # We're dealing with the new API version - need to paginate
-                logging.info("Dealing with the pagination API. Making requests with pagination.")
-                all_views = views
-                offset = views_per_request
-
-                while True:
-                    data = prepare_request_data(offset=offset, limit=views_per_request)
-                    page_response = make_request(data)
-                    page_views = page_response.get('viewsDetails', page_response)
-
-                    if 'dataUsageErrors' in page_response:
-                        data_usage_errors.extend(page_response['dataUsageErrors'])
-
-                    logging.info(f"Received response for request with offset {offset} and limit {views_per_request}.")
-                    if not page_views:
-                        break
-
-                    all_views.extend(page_views)
-                    offset += views_per_request
-                    logging.info(f"Retrieved {len(all_views)} views so far.")
-
-                    if len(page_views) < views_per_request:
-                        logging.info(f"Received less than {views_per_request} views. Stopping pagination.")
-                        break
-        else:
-            all_views = initial_response
+                all_views = initial_response
 
         if not incremental and data_mode == 'TAG' and tagged_views is not None:
             current_view_ids = {view['id'] for view in all_views if 'id' in view}
@@ -243,13 +271,11 @@ def get_views_metadata_documents(
 
         return processed_views, list(set(delete_view_ids)), list(set(detagged_view_ids)), data_usage_errors
 
-    except requests.HTTPError as e:
-        error_response = json.loads(e.response.text)
-        error_message = str(error_response.get('message', 'Data Marketplace did not return further details'))
-        logging.error("Data Marketplace views metadata request failed: %s", error_message)
+    except aiohttp.ClientResponseError as e:
+        logging.error("Data Marketplace views metadata request failed: %s", e.message)
         raise
 
-    except requests.RequestException as e:
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         logging.error("Failed to connect to the server: %s", str(e))
         raise
 
@@ -356,18 +382,20 @@ async def execute_vql(vql, auth, limit, truncate_vectors=True, execution_url=DAT
 async def get_allowed_view_ids(
     auth,
     server_id=DATA_MARKETPLACE_SERVER_ID,
-    permissions_url=DATA_MARKETPLACE_PERMISSIONS_URL,
+    permissions_url=DATA_MARKETPLACE_ALLOWED_VIEWS_URL,
     verify_ssl=DATA_MARKETPLACE_VERIFY_SSL,
     custom_headers=None
 ):
     """
     Retrieve allowed view IDs for all views accessible to the user.
+    This is the legacy permissions method.
 
     Args:
         auth: Either (username, password) tuple for basic auth or OAuth token string
         server_id: The server ID (default is DATA_MARKETPLACE_SERVER_ID)
-        permissions_url: The Data Marketplace permissions URL
+        permissions_url: The Data Marketplace legacy permissions URL
         verify_ssl: Whether to verify SSL certificates
+        custom_headers: Optional custom headers to include in the request
 
     Returns:
         List of unique allowed view IDs across all accessible views
@@ -420,6 +448,151 @@ async def get_allowed_view_ids(
         logging.error(f"Get allowed view IDs from Data Marketplace failed: {str(e)}")
         raise
 
+async def _fetch_user_permissions_from_dm(
+    auth,
+    data_mode,
+    database_name,
+    tag_name,
+    server_id,
+    permissions_url,
+    verify_ssl,
+    custom_headers
+):
+    headers = {
+        'accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': (
+            calculate_basic_auth_authorization_header(*auth)
+            if isinstance(auth, tuple)
+            else f'Bearer {auth}'
+        )
+    }
+
+    if custom_headers:
+        headers.update(custom_headers)
+
+    data = {"dataMode": data_mode}
+    if data_mode == "DATABASE" and database_name:
+        data["databaseName"] = database_name
+    elif data_mode == "TAG" and tag_name:
+        data["tagName"] = tag_name
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{permissions_url}?serverId={server_id}",
+                json=data,
+                headers=headers,
+                ssl=verify_ssl
+            ) as response:
+                response.raise_for_status()
+                permissions_data = await response.json()
+
+                if not isinstance(permissions_data, dict):
+                    raise ValueError("Unexpected get_user_permissions response format: expected a dictionary")
+
+                permissions_data["legacyEndpoint"] = False
+                return permissions_data
+
+    except aiohttp.ClientResponseError as e:
+        if e.status == 401:
+            msg = "Authentication failed: Invalid credentials for Data Marketplace."
+            logging.error(msg)
+            raise DataCatalogAuthError(msg) from e
+
+        elif e.status == 404: # For Data Marketplace <= 9.4.1
+            logging.info("New user permissions endpoint not found (404). Falling back to legacy get_allowed_view_ids endpoint.")
+
+            legacy_view_ids = await get_allowed_view_ids(
+                auth=auth,
+                server_id=server_id,
+                permissions_url=DATA_MARKETPLACE_ALLOWED_VIEWS_URL,
+                verify_ssl=verify_ssl,
+                custom_headers=custom_headers
+            )
+
+            fallback_username = auth[0] if isinstance(auth, tuple) else "unknown"
+
+            return {
+                "legacyEndpoint": True,
+                "username": fallback_username,
+                "isAdmin": False,
+                "roles": [],
+                "viewsPermissions": [
+                    {
+                        "viewId": vid,
+                        "hasRowRestrictions": False,
+                        "restrictedColumns": []
+                    } for vid in legacy_view_ids
+                ]
+            }
+
+        else:
+            msg = f"Get user permissions from Data Marketplace failed: HTTP Error {e.status} - {e.message}"
+            logging.error(msg)
+            raise
+    except (aiohttp.ClientError, ValueError) as e:
+        logging.error(f"Get user permissions from Data Marketplace failed: {str(e)}")
+        raise
+
+@alru_cache(maxsize=CACHE_MAX_SIZE, ttl=CACHE_TTL)
+async def _get_cached_user_permissions(
+    auth, data_mode, database_name, tag_name, server_id, permissions_url, verify_ssl, custom_headers_frozen
+):
+    logging.info("Permissions not found in cache. Fetching permissions from Data Marketplace.")
+    custom_headers = dict(custom_headers_frozen) if custom_headers_frozen else None
+    return await _fetch_user_permissions_from_dm(
+        auth, data_mode, database_name, tag_name, server_id, permissions_url, verify_ssl, custom_headers
+    )
+
+@log_params
+@timed
+async def get_user_permissions(
+    auth,
+    data_mode="ALL",
+    database_name=None,
+    tag_name=None,
+    server_id=DATA_MARKETPLACE_SERVER_ID,
+    permissions_url=DATA_MARKETPLACE_USER_PERMISSIONS_URL,
+    verify_ssl=DATA_MARKETPLACE_VERIFY_SSL,
+    custom_headers=None,
+):
+    """
+    Retrieve user permissions, roles, global admin status, and specific view restrictions.
+    Falls back to the legacy allowed-identifiers endpoint if the new one is not available (DM <= 9.4.1).
+    Results are cached automatically if AI_SDK_PERMISSIONS_CACHE is 1.
+
+    Args:
+        auth: Either (username, password) tuple for basic auth or OAuth token string
+        data_mode: The scope of the request ('ALL', 'DATABASE', or 'TAG')
+        database_name: The database name if data_mode is 'DATABASE'
+        tag_name: The tag name if data_mode is 'TAG'
+        server_id: The server ID (default is DATA_MARKETPLACE_SERVER_ID)
+        permissions_url: The Data Marketplace user permissions URL
+        verify_ssl: Whether to verify SSL certificates
+        custom_headers: Optional custom headers to include in the request
+
+    Returns:
+        A dictionary containing:
+        - legacyEndpoint (bool)
+        - username (str)
+        - isAdmin (bool)
+        - roles (list)
+        - viewsPermissions (list of dicts with viewId, hasRowRestrictions, restrictedColumns)
+    """
+    if not ENABLE_PERMISSIONS_CACHE:
+        logging.info("Permissions cache is disabled. Fetching permissions from Data Marketplace.")
+        return await _fetch_user_permissions_from_dm(
+            auth, data_mode, database_name, tag_name, server_id, permissions_url, verify_ssl, custom_headers
+        )
+
+    logging.info("Checking permissions cache...")
+    custom_headers_frozen = frozenset(custom_headers.items()) if custom_headers else frozenset()
+
+    return await _get_cached_user_permissions(
+        auth, data_mode, database_name, tag_name, server_id, permissions_url, verify_ssl, custom_headers_frozen
+    )
+
 # This method calculates the authorization header for the Data Catalog REST API
 def calculate_basic_auth_authorization_header(user, password):
     user_pass = user + ':' + password
@@ -471,7 +644,7 @@ def parse_execution_json(json_response):
     return parsed_data
 
 @timed
-def activate_incremental(
+async def activate_incremental(
     auth,
     enabled=True,
     server_id=DATA_MARKETPLACE_SERVER_ID,
@@ -511,26 +684,61 @@ def activate_incremental(
     }
 
     try:
-        response = requests.post(
-            f"{DATA_MARKETPLACE_INCREMENTAL_UPDATE_URL}?serverId={server_id}",
-            json=data,
-            headers=headers,
-            verify=verify_ssl
-        )
-        response.raise_for_status()
-        logging.info(f"Incremental metadata updates {'enabled' if enabled else 'disabled'} successfully")
-        return response.status_code, f"Incremental metadata updates {'enabled' if enabled else 'disabled'} successfully"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{DATA_MARKETPLACE_INCREMENTAL_UPDATE_URL}?serverId={server_id}",
+                json=data,
+                headers=headers,
+                ssl=verify_ssl
+            ) as response:
+                response_text = await response.text()
 
-    except requests.HTTPError as e:
-        try:
-            error_response = json.loads(e.response.text)
-            error_message = str(error_response.get('message', 'Data Marketplace did not return further details'))
-        except (json.JSONDecodeError, AttributeError):
-            error_message = f"HTTP Error: {e.response.status_code} - {str(e)}"
-        logging.error(f"Failed to configure incremental metadata updates: {error_message}")
-        return e.response.status_code, error_message
+                if response.status >= 400:
+                    try:
+                        error_response = json.loads(response_text)
+                        error_message = str(error_response.get('message', 'Data Marketplace did not return further details'))
+                    except (json.JSONDecodeError, AttributeError):
+                        error_message = f"HTTP Error {response.status}: {response_text}"
+                    logging.error(f"Failed to configure incremental metadata updates: {error_message}")
+                    return response.status, error_message
 
-    except requests.RequestException as e:
+                logging.info(f"Incremental metadata updates {'enabled' if enabled else 'disabled'} successfully")
+                return response.status, f"Incremental metadata updates {'enabled' if enabled else 'disabled'} successfully"
+
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         error_message = f"Failed to connect to the server: {str(e)}"
         logging.error(error_message)
         return 500, error_message
+
+@log_params
+@timed
+async def get_username_from_denodo(
+    auth,
+    server_id=DATA_MARKETPLACE_SERVER_ID,
+    verify_ssl=DATA_MARKETPLACE_VERIFY_SSL,
+    custom_headers=None
+):
+    """
+    Fallback method to extract the username querying Denodo directly.
+    Useful when the provided auth is an opaque OAuth token.
+    """
+    vql = "SELECT getsession('user') as username"
+
+    status, response = await execute_vql(
+        vql=vql,
+        auth=auth,
+        limit=1,
+        server_id=server_id,
+        verify_ssl=verify_ssl,
+        custom_headers=custom_headers
+    )
+
+    if status == 200 and isinstance(response, dict):
+        try:
+            row_1 = response.get('Row 1', [])
+            if row_1 and len(row_1) > 0:
+                return row_1[0].get('value')
+        except Exception as e:
+            logging.info(f"Failed to parse getsession response: {e}")
+
+    return None

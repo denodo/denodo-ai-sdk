@@ -20,15 +20,11 @@ import tiktoken
 import functools
 import contextvars
 
-from fastapi import Request
 from time import time
 from uuid import uuid4
-from boto3 import Session
 from datetime import datetime
 from functools import wraps
-from botocore.session import get_session
 from langchain_core.documents.base import Document
-from botocore.credentials import RefreshableCredentials
 from utils.schema_catalog import SchemaCatalog, SchemaTable
 
 # ContextVar to store the current endpoint name
@@ -64,29 +60,31 @@ def validate_data_dir():
     os.environ["AI_SDK_DATA_DIR"] = data_dir
     return data_dir
 
+def safe_str(value, max_chars=None):
+    """Converts to string, flattens newlines and truncates if longer than max_chars (unless max_chars is None)."""
+    if value is None:
+        return ""
+    str_value = str(value)
+    str_value = str_value.replace('\n', ' ').replace('\r', '').strip()
+    if max_chars is not None and len(str_value) > max_chars:
+        return str_value[:max_chars] + '... (truncated)'
+    return str_value
+
 def log_params(func=None, *, truncate_input_chars=500, truncate_output_chars=500):
     if func is None:
         return functools.partial(log_params, truncate_input_chars=truncate_input_chars, truncate_output_chars=truncate_output_chars)
 
-    def _safe_str(value, max_chars):
-        """Converts to string, flattens newlines and truncates if longer than max_chars (unless max_chars is None)."""
-        str_value = str(value)
-        str_value = str_value.replace('\n', ' ').replace('\r', '').strip()
-        if max_chars is not None and len(str_value) > max_chars:
-            return str_value[:max_chars] + '...'
-        return str_value
-
     def _format_input_arg(key, value):
         if key == "auth":
             return f"{key}=<redacted>"
-        return f"{key}={_safe_str(value, truncate_input_chars)}"
+        return f"{key}={safe_str(value, truncate_input_chars)}"
 
     def _format_output_result(result):
         if isinstance(result, (list, tuple)):
             max_items = 20
             items_to_show = result[:max_items]
 
-            formatted_items = [_safe_str(item, truncate_output_chars) for item in items_to_show]
+            formatted_items = [safe_str(item, truncate_output_chars) for item in items_to_show]
 
             if len(result) > max_items:
                 formatted_items.append(f"... and {len(result) - max_items} more")
@@ -95,7 +93,7 @@ def log_params(func=None, *, truncate_input_chars=500, truncate_output_chars=500
                 return "(" + ", ".join(formatted_items) + ")"
             else:
                 return "[" + ", ".join(formatted_items) + "]"
-        return _safe_str(result, truncate_output_chars)
+        return safe_str(result, truncate_output_chars)
 
     def _build_params_str(args, kwargs):
         return ", ".join(
@@ -366,13 +364,6 @@ def filter_allowed_headers(headers_dict):
     allowed_headers = [h.strip().lower() for h in os.getenv("FORWARD_CUSTOM_HEADERS", "").split(",") if h.strip()]
     return {k: v for k, v in headers_dict.items() if k.lower() in allowed_headers}
 
-def get_custom_request_headers(request: Request):
-    """
-    Dependency function to extract custom headers from the incoming FastAPI Request
-    based on the FORWARD_CUSTOM_HEADERS environment variable.
-    """
-    return filter_allowed_headers(request.headers)
-
 def get_custom_headers_from_env(provider_name):
     """
     Retrieves custom headers from environment variables for a given provider.
@@ -407,6 +398,8 @@ class RefreshableBotoSession:
         self.session_ttl = session_ttl
 
     def __get_session_credentials(self):
+        from boto3 import Session
+
         if self.access_key and self.secret_key:
             session = Session(
                 aws_access_key_id=self.access_key,
@@ -444,7 +437,11 @@ class RefreshableBotoSession:
 
         return credentials
 
-    def refreshable_session(self) -> Session:
+    def refreshable_session(self):
+        from boto3 import Session
+        from botocore.session import get_session
+        from botocore.credentials import RefreshableCredentials
+
         refreshable_credentials = RefreshableCredentials.create_from_metadata(
             metadata = self.__get_session_credentials(),
             refresh_using = self.__get_session_credentials,

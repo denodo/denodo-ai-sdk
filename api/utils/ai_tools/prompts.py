@@ -6,6 +6,8 @@ from api.prompts import vql_generation
 from api.prompts import vql_rules
 
 QUERY_TO_VQL_PROMPT = vql_generation.query_to_vql.QUERY_TO_VQL
+PROCESS_STEP_NORMAL_PROMPT = vql_generation.query_to_vql.PROCESS_STEP_NORMAL
+PROCESS_STEP_OBLIGATORY_PROMPT= vql_generation.query_to_vql.PROCESS_STEP_OBLIGATORY
 
 ANSWER_VIEW_PROMPT = response.answer_view.ANSWER_VIEW
 RELATED_QUESTIONS_PROMPT = response.related_questions.RELATED_QUESTIONS
@@ -31,6 +33,7 @@ ARITHMETIC_VQL_PROMPT = vql_rules.arithmetic_vql.ARITHMETIC_VQL
 SPATIAL_VQL_PROMPT = vql_rules.spatial_vql.SPATIAL_VQL
 LLM_VQL_PROMPT = vql_rules.llm_vql.LLM_VQL
 VECTOR_VQL_PROMPT = vql_rules.vector_vql.VECTOR_VQL
+METRIC_VQL_PROMPT = vql_rules.metric_vql.METRIC_VQL
 JSON_VQL_PROMPT = vql_rules.json_vql.JSON_VQL
 XML_VQL_PROMPT = vql_rules.xml_vql.XML_VQL
 TEXT_VQL_PROMPT = vql_rules.text_vql.TEXT_VQL

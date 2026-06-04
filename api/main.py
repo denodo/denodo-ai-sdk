@@ -1,22 +1,32 @@
+"""
+ Copyright (c) 2025. DENODO Technologies.
+ http://www.denodo.com
+ All rights reserved.
+
+ This software is the confidential and proprietary information of DENODO
+ Technologies ("Confidential Information"). You shall not disclose such
+ Confidential Information and shall use it only in accordance with the terms
+ of the license agreement you entered into with DENODO.
+"""
 import os
+import asyncio
 import logging
 import uvicorn
 import warnings
-import platform
 from contextlib import asynccontextmanager
 
 from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_offline import FastAPIOffline as FastAPI
 
-from dotenv import load_dotenv
+from api import config
 
-load_dotenv('api/utils/sdk_config.env')
+from api.middleware import logging_context_middleware, RequestCancelledMiddleware
+from api.utils import state_manager
+from utils.logging_utils import get_logging_config
+from utils.version import AI_SDK_VERSION
 
-from api.utils import state_manager  # noqa: E402
-from api.utils.sdk_utils import check_env_variables, test_data_catalog_connection # noqa: E402
-from api.endpoints import (  # noqa: E402
+from api.endpoints import (
     deepQuery,
     getMetadata,
     deleteMetadata,
@@ -30,21 +40,8 @@ from api.endpoints import (  # noqa: E402
     answerMetadataQuestion,
     answerQuestionUsingViews,
     generateDeepQueryReport,
+    getUserPermissions
 )
-from utils.logging_utils import get_logging_config, transaction_id_var # noqa: E402
-from utils.utils import normalize_root_path, format_comma_separated_list, generate_transaction_id, validate_data_dir # noqa: E402
-from utils.version import AI_SDK_VERSION # noqa: E402
-
-DATA_DIR = validate_data_dir()
-
-required_vars = [
-    "AI_SDK_DATA_MARKETPLACE_URL",
-    "LLM_PROVIDER",
-    "LLM_MODEL",
-    "EMBEDDINGS_PROVIDER",
-    "EMBEDDINGS_MODEL",
-    "VECTOR_STORE"
-]
 
 log_config = get_logging_config()
 logging.config.dictConfig(log_config)
@@ -52,109 +49,23 @@ logging.config.dictConfig(log_config)
 # Ignore warnings
 warnings.filterwarnings("ignore")
 
-# Load and check configuration variables
-check_env_variables(required_vars)
-
 # Suppress matplotlib font warnings for graph generation
 logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
 
 # Suppress Chroma warnings related to embedding deletion
 logging.getLogger('chromadb').setLevel(logging.ERROR)
 
-AI_SDK_HOST = os.getenv("AI_SDK_HOST", "0.0.0.0")
-AI_SDK_PORT = int(os.getenv("AI_SDK_PORT", 8008))
-AI_SDK_ROOT_PATH = normalize_root_path(os.getenv("AI_SDK_ROOT_PATH", ""))
-AI_SDK_WORKERS = int(os.getenv("AI_SDK_WORKERS", '1'))
-AI_SDK_SSL_KEY = os.getenv("AI_SDK_SSL_KEY")
-AI_SDK_SSL_CERT = os.getenv("AI_SDK_SSL_CERT")
-AI_SDK_LLM_PROVIDER = os.getenv("LLM_PROVIDER")
-AI_SDK_LLM_MODEL = os.getenv("LLM_MODEL")
-AI_SDK_LLM_TEMPERATURE = os.getenv("LLM_TEMPERATURE")
-AI_SDK_LLM_MAX_TOKENS = os.getenv("LLM_MAX_TOKENS")
-AI_SDK_THINKING_LLM_PROVIDER = os.getenv("THINKING_LLM_PROVIDER")
-AI_SDK_THINKING_LLM_MODEL = os.getenv("THINKING_LLM_MODEL")
-THINKING_MODEL_AVAILABLE = bool(
-    AI_SDK_THINKING_LLM_PROVIDER and AI_SDK_THINKING_LLM_MODEL
-)
-AI_SDK_EMBEDDINGS_PROVIDER = os.getenv("EMBEDDINGS_PROVIDER")
-AI_SDK_EMBEDDINGS_MODEL = os.getenv("EMBEDDINGS_MODEL")
-AI_SDK_VECTOR_STORE_PROVIDER = os.getenv("VECTOR_STORE")
-AI_SDK_DATA_MARKETPLACE_URL = os.getenv("AI_SDK_DATA_MARKETPLACE_URL")
-AI_SDK_DATA_MARKETPLACE_VERIFY_SSL = bool(int(os.getenv("DATA_MARKETPLACE_VERIFY_SSL", 0)))
-AI_SDK_CHECK_AMBIGUITY = bool(int(os.getenv("CHECK_AMBIGUITY", "1")))
-AI_SDK_ALLOWED_METADATA_USERS = os.getenv("AI_SDK_ALLOWED_METADATA_USERS")
-AI_SDK_FORWARD_CUSTOM_HEADERS = os.getenv("FORWARD_CUSTOM_HEADERS")
-
-if THINKING_MODEL_AVAILABLE:
-    AI_SDK_THINKING_LLM_TEMPERATURE = os.getenv("THINKING_LLM_TEMPERATURE")
-    AI_SDK_THINKING_LLM_MAX_TOKENS = os.getenv("THINKING_LLM_MAX_TOKENS")
-    AI_SDK_DEEPQUERY_EXECUTION_MODEL = os.getenv("DEEPQUERY_EXECUTION_MODEL")
-    AI_SDK_DEEPQUERY_DEFAULT_ROWS = os.getenv("DEEPQUERY_DEFAULT_ROWS")
-    AI_SDK_DEEPQUERY_MAX_ANALYSIS_LOOPS = os.getenv("DEEPQUERY_MAX_ANALYSIS_LOOPS")
-    AI_SDK_DEEPQUERY_MAX_REPORTING_LOOPS = os.getenv("DEEPQUERY_MAX_REPORTING_LOOPS")
-else:
-    AI_SDK_THINKING_LLM_TEMPERATURE = None
-    AI_SDK_THINKING_LLM_MAX_TOKENS = None
-    AI_SDK_DEEPQUERY_EXECUTION_MODEL = None
-    AI_SDK_DEEPQUERY_DEFAULT_ROWS = None
-    AI_SDK_DEEPQUERY_MAX_ANALYSIS_LOOPS = None
-    AI_SDK_DEEPQUERY_MAX_REPORTING_LOOPS = None
-
-# Set this for the tokenizers
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-def log_ai_sdk_parameters():
-    ai_sdk_params = {
-        "OS": platform.platform(),
-        "AI SDK Host": AI_SDK_HOST,
-        "AI SDK Port": AI_SDK_PORT,
-        "AI SDK Root Path": AI_SDK_ROOT_PATH or "/",
-        "AI SDK Version": AI_SDK_VERSION,
-        "AI SDK Data Dir (logs, cache, reports...)": DATA_DIR,
-        "AI SDK Workers": AI_SDK_WORKERS,
-        "Using SSL": bool(AI_SDK_SSL_KEY and AI_SDK_SSL_CERT),
-        "LLM Model": f"{AI_SDK_LLM_PROVIDER}/{AI_SDK_LLM_MODEL} (temp={AI_SDK_LLM_TEMPERATURE}, max_tokens={AI_SDK_LLM_MAX_TOKENS})",
-        "Thinking LLM Model": (
-            f"{AI_SDK_THINKING_LLM_PROVIDER}/{AI_SDK_THINKING_LLM_MODEL} "
-            f"(temp={AI_SDK_THINKING_LLM_TEMPERATURE}, max_tokens={AI_SDK_THINKING_LLM_MAX_TOKENS})"
-            if THINKING_MODEL_AVAILABLE else "Not configured"
-        ),
-        "Embeddings Model": f"{AI_SDK_EMBEDDINGS_PROVIDER}/{AI_SDK_EMBEDDINGS_MODEL}",
-        "Vector Store Provider": AI_SDK_VECTOR_STORE_PROVIDER,
-        "Data Marketplace URL": AI_SDK_DATA_MARKETPLACE_URL,
-        "Data Marketplace Connection": test_data_catalog_connection(AI_SDK_DATA_MARKETPLACE_URL, AI_SDK_DATA_MARKETPLACE_VERIFY_SSL),
-        "Data Marketplace Verify SSL": AI_SDK_DATA_MARKETPLACE_VERIFY_SSL,
-        "Check Ambiguity": AI_SDK_CHECK_AMBIGUITY,
-        "Allowed Metadata Users": AI_SDK_ALLOWED_METADATA_USERS if AI_SDK_ALLOWED_METADATA_USERS else "Not set.",
-        "Forwarded Custom Headers": format_comma_separated_list(AI_SDK_FORWARD_CUSTOM_HEADERS) if AI_SDK_FORWARD_CUSTOM_HEADERS else "None"
-    }
-
-    if THINKING_MODEL_AVAILABLE:
-        ai_sdk_params.update({
-            "DeepQuery Execution Model": AI_SDK_DEEPQUERY_EXECUTION_MODEL,
-            "DeepQuery Default Rows": AI_SDK_DEEPQUERY_DEFAULT_ROWS,
-            "DeepQuery Max Analysis Loops": AI_SDK_DEEPQUERY_MAX_ANALYSIS_LOOPS,
-            "DeepQuery Max Reporting Loops": AI_SDK_DEEPQUERY_MAX_REPORTING_LOOPS,
-        })
-    else:
-        ai_sdk_params["DeepQuery"] = "Disabled (no thinking model configured)"
-
-    logging.info("AI SDK parameters:")
-    for key, value in ai_sdk_params.items():
-        logging.info(f"    - {key}: {value}")
-
-    if not ai_sdk_params["Data Marketplace Connection"]:
-        logging.warning("Could not establish connection to Data Marketplace. Please check your configuration.")
-
-    return ai_sdk_params["Data Marketplace Connection"]
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Handles startup and shutdown events for the application.
+    Handles startup and shutdown events of the application.
     """
-    state_manager.initialize_default_resources()
+    init_task = asyncio.create_task(
+        asyncio.to_thread(state_manager.initialize_default_resources)
+    )
     yield
+    if not init_task.done():
+        init_task.cancel()
     logging.info("AI SDK has shut down.")
 
 tags = [
@@ -167,30 +78,17 @@ tags = [
 ]
 
 base_app = FastAPI(
-    title = 'Denodo AI SDK',
-    summary = 'Be fearless.',
-    version = AI_SDK_VERSION,
-    openapi_tags = tags,
-    root_path = AI_SDK_ROOT_PATH,
-    favicon_url = "/favicon.svg",
-    lifespan = lifespan,
+    title='Denodo AI SDK',
+    summary='Be fearless.',
+    version=AI_SDK_VERSION,
+    openapi_tags=tags,
+    root_path=config.AI_SDK_ROOT_PATH,
+    favicon_url="/favicon.svg",
+    lifespan=lifespan,
 )
 
-@base_app.middleware("http")
-async def add_transaction_id_middleware(request, call_next):
-    """
-    Middleware to generate a transaction ID for each request,
-    store it in a context variable, and add it to the response headers.
-    """
-    transaction_id = generate_transaction_id()
-    token = transaction_id_var.set(transaction_id)
-
-    response = await call_next(request)
-    response.headers["X-Transaction-ID"] = transaction_id
-
-    transaction_id_var.reset(token)
-
-    return response
+# Middlewares
+base_app.add_middleware(RequestCancelledMiddleware)
 
 base_app.add_middleware(
     CORSMiddleware,
@@ -199,7 +97,9 @@ base_app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+base_app.middleware("http")(logging_context_middleware)
 
+# Base routes
 @base_app.get("/favicon.svg", include_in_schema=False)
 async def favicon():
     return FileResponse("api/static/favicon.svg")
@@ -212,6 +112,7 @@ async def health_check():
     """
     return {"status": "OK"}
 
+# Include routers
 base_app.include_router(getMetadata.router)
 base_app.include_router(deleteMetadata.router)
 base_app.include_router(similaritySearch.router)
@@ -223,26 +124,27 @@ base_app.include_router(answerQuestion.router)
 base_app.include_router(answerDataQuestion.router)
 base_app.include_router(answerMetadataQuestion.router)
 base_app.include_router(answerQuestionUsingViews.router)
+base_app.include_router(getUserPermissions.router)
 
-if THINKING_MODEL_AVAILABLE:
+if config.THINKING_MODEL_AVAILABLE:
     base_app.include_router(deepQuery.router)
     base_app.include_router(generateDeepQueryReport.router)
     logging.info("DeepQuery endpoints enabled (thinking model configured).")
 else:
     logging.warning("Thinking LLM model not configured — DeepQuery endpoints disabled.")
 
-log_ai_sdk_parameters()
+# Log parameters after setup
+config.log_ai_sdk_parameters()
 
-AI_SDK_MCP_MODE = os.getenv("AI_SDK_MCP_MODE")
-
-if AI_SDK_MCP_MODE == "remote":
+# MCP Server Logic
+if config.AI_SDK_MCP_MODE == "remote":
     logging.info("MCP Remote mode enabled - loading MCP server")
     from api.mcp.remote import get_mcp_app
 
     mcp_app = get_mcp_app(
-        host=AI_SDK_HOST,
-        port=AI_SDK_PORT,
-        root_path=AI_SDK_ROOT_PATH,
+        host=config.AI_SDK_HOST,
+        port=config.AI_SDK_PORT,
+        root_path=config.AI_SDK_ROOT_PATH,
     )
 
     @asynccontextmanager
@@ -259,7 +161,7 @@ if AI_SDK_MCP_MODE == "remote":
         summary="Be fearless.",
         version=AI_SDK_VERSION,
         openapi_tags=tags,
-        root_path=AI_SDK_ROOT_PATH,
+        root_path=config.AI_SDK_ROOT_PATH,
         favicon_url="/favicon.svg",
         routes=[
             *mcp_app.routes,
@@ -276,10 +178,10 @@ else:
 if __name__ == "__main__":
     uvicorn.run(
         "api.main:app",
-        host = AI_SDK_HOST,
-        port = AI_SDK_PORT,
-        ssl_keyfile = AI_SDK_SSL_KEY,
-        ssl_certfile = AI_SDK_SSL_CERT,
-        log_config = log_config,
-        workers = AI_SDK_WORKERS
+        host=config.AI_SDK_HOST,
+        port=config.AI_SDK_PORT,
+        ssl_keyfile=config.AI_SDK_SSL_KEY,
+        ssl_certfile=config.AI_SDK_SSL_CERT,
+        log_config=log_config,
+        workers=config.AI_SDK_WORKERS
     )

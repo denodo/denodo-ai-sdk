@@ -11,6 +11,7 @@
 import os
 import logging
 import traceback
+import asyncio
 
 from pydantic import BaseModel, Field
 from typing import Dict, List
@@ -19,14 +20,14 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from utils.data_catalog import activate_incremental
+from utils.data_catalog import activate_incremental, get_user_permissions, DataCatalogAuthError
 from api.utils import state_manager
 from api.utils.sdk_utils import (
     handle_endpoint_error, authenticate, process_metadata_source,
     format_metadata_response, delete_by_db_or_tag, get_by_db_or_tag,
     check_metadata_user_permission
 )
-from utils.utils import get_custom_request_headers
+from api.utils.sdk_utils import get_custom_request_headers
 
 router = APIRouter()
 
@@ -57,7 +58,10 @@ class getMetadataRequest(BaseModel):
             default = 50,
             description="Number of views to ask for per request to the Denodo Platform. This is implemented to avoid handling too many views in a single request that might overload the server."
         )
-    incremental: bool = True
+    incremental: bool = Field(
+            default = False,
+            description="If set to True, only views that have changed since the last execution are updated in the vector store based on a saved timestamp."
+        )
     parallel: bool = Field(
             default = True,
             description="If set to true, vectorization through the embeddings provider and insertion into the vector store will be done in parallel. Denodo Platform requests will remain sequential."
@@ -76,7 +80,7 @@ class getMetadataResponse(BaseModel):
         response_model = getMetadataResponse,
         tags = ['Vector Store'])
 @handle_endpoint_error("getMetadata")
-def getMetadata(
+async def getMetadata(
     endpoint_request: getMetadataRequest = Query(),
     auth: str = Depends(authenticate),
     custom_headers: dict = Depends(get_custom_request_headers)
@@ -93,7 +97,15 @@ def getMetadata(
     and activate tracking of changes. After that, you calling getMetadata with incremental set to True on the same set of databases/tags will only vectorize views
     that have been modified since the last sync.
     """
-    if not check_metadata_user_permission(auth):
+    try:
+        permissions_data = await get_user_permissions(auth=auth, custom_headers=custom_headers)
+    except DataCatalogAuthError as e:
+        raise HTTPException(status_code=401, detail=f"Authentication failed during getMetadata: {str(e)}") from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve permissions: {str(e)}") from e
+
+    if not check_metadata_user_permission(auth, permissions_data):
+        logging.warning("[Security] User unauthorized attempt to use getMetadata.")
         raise HTTPException(status_code=403, detail="You do not have authorization to use the vectorization endpoints.")
 
     vdp_database_names = [db.strip() for db in endpoint_request.vdp_database_names.split(',') if db]
@@ -105,7 +117,7 @@ def getMetadata(
         raise HTTPException(status_code=400, detail="At least one database or tag must be provided")
 
     if endpoint_request.incremental:
-        status_code, response_message = activate_incremental(auth, custom_headers=custom_headers)
+        status_code, response_message = await activate_incremental(auth, custom_headers=custom_headers)
         logging.info(f"Received status code {status_code} and response message {response_message}")
 
     all_db_schemas = []
@@ -142,7 +154,7 @@ def getMetadata(
 
     if endpoint_request.insert:
         for tag in vdp_tag_names:
-            view_ids = get_by_db_or_tag(
+            view_ids = await get_by_db_or_tag(
                 vector_store=vector_store,
                 vdp_database_names=None,
                 vdp_tag_names=[tag]
@@ -152,7 +164,7 @@ def getMetadata(
 
     if not endpoint_request.incremental and endpoint_request.insert:
         try:
-            delete_by_db_or_tag(
+            await delete_by_db_or_tag(
                 vector_store=vector_store,
                 sample_data_vector_store=sample_data_vector_store,
                 vdp_database_names=vdp_database_names,
@@ -162,57 +174,68 @@ def getMetadata(
 
         except Exception as e:
             logging.error(f"Error during metadata deletion: {e}")
-            raise HTTPException(status_code=500, detail=f"Failed to delete metadata: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to delete metadata: {e}") from e
 
-    # Process tags
-    for tag_name in vdp_tag_names:
-        try:
-            db_schema, db_schema_text, tag_errors = process_metadata_source(
-                source_type="TAG",
-                source_name=tag_name,
-                request=endpoint_request,
-                auth=auth,
-                custom_headers=custom_headers,
-                vector_store=vector_store,
-                sample_data_vector_store=sample_data_vector_store,
-                tagged_views=views_by_tag.get(tag_name, []),
-                incremental=endpoint_request.incremental,
-                tags_to_ignore=tags_to_ignore
-            )
+    try:
+        # Process tags
+        for tag_name in vdp_tag_names:
+            try:
+                db_schema, db_schema_text, tag_errors = await process_metadata_source(
+                    source_type="TAG",
+                    source_name=tag_name,
+                    request=endpoint_request,
+                    auth=auth,
+                    custom_headers=custom_headers,
+                    vector_store=vector_store,
+                    sample_data_vector_store=sample_data_vector_store,
+                    tagged_views=views_by_tag.get(tag_name, []),
+                    incremental=endpoint_request.incremental,
+                    tags_to_ignore=tags_to_ignore
+                )
 
-            all_db_schemas.append(db_schema)
-            all_db_schema_texts.extend(db_schema_text)
+                all_db_schemas.append(db_schema)
+                all_db_schema_texts.extend(db_schema_text)
 
-            if tag_errors:
-                all_data_usage_errors.extend(tag_errors)
+                if tag_errors:
+                    all_data_usage_errors.extend(tag_errors)
 
-        except ValueError as ve:
-            logging.error(f"Error processing tag: {ve}")
-            continue
+            except ValueError as ve:
+                logging.error(f"Error processing tag: {ve}")
+                continue
 
-    # Process databases
-    for db_name in vdp_database_names:
-        try:
-            db_schema, db_schema_text, db_errors = process_metadata_source(
-                source_type="DATABASE",
-                source_name=db_name,
-                request=endpoint_request,
-                auth=auth,
-                custom_headers=custom_headers,
-                vector_store=vector_store,
-                sample_data_vector_store=sample_data_vector_store,
-                tags_to_ignore=tags_to_ignore
-            )
+        # Process databases
+        for db_name in vdp_database_names:
+            try:
+                db_schema, db_schema_text, db_errors = await process_metadata_source(
+                    source_type="DATABASE",
+                    source_name=db_name,
+                    request=endpoint_request,
+                    auth=auth,
+                    custom_headers=custom_headers,
+                    vector_store=vector_store,
+                    sample_data_vector_store=sample_data_vector_store,
+                    incremental=endpoint_request.incremental,
+                    tags_to_ignore=tags_to_ignore
+                )
 
-            all_db_schemas.append(db_schema)
-            all_db_schema_texts.extend(db_schema_text)
+                all_db_schemas.append(db_schema)
+                all_db_schema_texts.extend(db_schema_text)
 
-            if db_errors:
-                all_data_usage_errors.extend(db_errors)
+                if db_errors:
+                    all_data_usage_errors.extend(db_errors)
 
-        except ValueError as ve:
-            logging.error(f"Error processing database: {ve}")
-            continue
+            except ValueError as ve:
+                logging.error(f"Error processing database: {ve}")
+                continue
+
+    except asyncio.CancelledError:
+        log_message = "The client has disconnected. The request was cancelled before completion."
+
+        if endpoint_request.insert:
+            log_message += " It is recommended to synchronize again to ensure no metadata is missing."
+
+        logging.warning(log_message)
+        raise
 
     if not any(all_db_schemas):
         return Response(status_code=204, content=None)

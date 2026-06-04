@@ -24,7 +24,7 @@ from api.utils.sdk_utils import timing_context, handle_endpoint_error, authentic
 from api.utils import ai_tools
 from api.utils import answer_question
 from api.utils import state_manager
-from utils.utils import get_custom_request_headers
+from api.utils.sdk_utils import get_custom_request_headers
 
 router = APIRouter()
 
@@ -77,8 +77,12 @@ class answerMetadataQuestionRequest(BaseModel):
         description="Maximum number of views to consider in total, including associations of the initial vector_search_k results."
     )
     vector_search_column_description_char_limit: int = Field(
-        default = 200,
-        description="Maximum characters of table or column descriptions used when filtering how many views to keep. Not applied during vector search or VQL generation (those use full descriptions). Refer to the docs for when this trimming is applied."
+        default=200,
+        description="Maximum characters of column descriptions used when filtering how many views to keep. Not applied during vector search or VQL generation (those use full descriptions). Refer to the docs for when this trimming is applied."
+    )
+    vector_search_table_description_char_limit: int = Field(
+        default=1000,
+        description="Maximum characters of table descriptions used when filtering how many views to keep. Not applied during vector search or VQL generation (those use full descriptions). Refer to the docs for when this trimming is applied."
     )
     disclaimer: bool = True
     verbose: bool = Field(
@@ -193,7 +197,7 @@ async def process_metadata_question(request_data: answerMetadataQuestionRequest,
         logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
 
-    vector_search_tables, _, timings, error_message = await ai_tools.get_relevant_tables(
+    vector_search_tables, _, timings, error_message, _ = await ai_tools.get_relevant_tables(
         query=request_data.question,
         vector_store=vector_store,
         sample_data_vector_store=sample_data_vector_store,
@@ -243,6 +247,7 @@ async def process_metadata_question(request_data: answerMetadataQuestionRequest,
             mode="metadata",
             custom_instructions=request_data.custom_instructions,
             column_description_char_limit=request_data.vector_search_column_description_char_limit,
+            table_description_char_limit=request_data.vector_search_table_description_char_limit,
             markdown_response=request_data.markdown_response,
         )
 

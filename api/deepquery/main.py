@@ -123,10 +123,16 @@ async def process_analysis(
         # Run the analysis
         logger.info("Starting analysis agent execution")
         analysis_start_time = time.time()
-        analysis_agent.set_initial_prompt(analysis_agent.initial_prompt.format(user_input=question)) #Set the initial prompt with the user's question
-        analysis_result = await analysis_agent.start({"text": "Follow the instructions given above to begin your analysis."}) #No need for input, we already set the initial prompt
+        analysis_agent.set_initial_prompt(analysis_agent.initial_prompt.format(user_input=question))
+        analysis_result = await analysis_agent.start({"text": "Follow the instructions given above to begin your analysis."})
         analysis_duration = time.time() - analysis_start_time
-        answer = analysis_result.get("answer").get("answer")
+
+        raw_answer = analysis_result.get("answer", {})
+        if isinstance(raw_answer, dict):
+            answer = raw_answer.get("answer", "")
+        else:
+            answer = str(raw_answer)
+
         logger.info(f"Analysis result: {answer}")
 
         analysis_title = custom_tag_parser(answer, tag="report_title", default="Failed to parse analysis title. LLM did not output the correct format. Check logs for more details.")[0].strip()

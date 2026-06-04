@@ -14,10 +14,17 @@ from pydantic import BaseModel, Field
 from typing import Annotated, List, Optional
 
 from fastapi.responses import JSONResponse
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
-from api.utils.sdk_utils import handle_endpoint_error, authenticate
+from utils.data_catalog import get_user_permissions, DataCatalogAuthError
+from api.utils.sdk_utils import (
+    handle_endpoint_error,
+    authenticate,
+    get_custom_request_headers,
+    check_deepquery_user_permission
+)
 from utils.uniformLLM import UniformLLM
+from utils.version import AI_SDK_VERSION
 
 router = APIRouter()
 
@@ -46,6 +53,11 @@ class AISDKInfoResponse(BaseModel):
         description="Maximum number of VQL execution-result rows passed to the LLM for answer generation."
     )
     valid_providers: List[str] = Field(description="List of supported LLM provider names.")
+    version: str = Field(
+        default=AI_SDK_VERSION,
+        description="Current release version of the AI SDK"
+    )
+    can_use_deepquery: bool = Field(description="Whether the authenticated user is allowed to use DeepQuery features.")
 
 
 @router.get(
@@ -55,12 +67,24 @@ class AISDKInfoResponse(BaseModel):
     tags=['Configuration']
 )
 @handle_endpoint_error("getAISDKInfo")
-async def get_ai_sdk_info(auth: Annotated[str, Depends(authenticate)]):
+async def get_ai_sdk_info(
+    auth: Annotated[str, Depends(authenticate)],
+    custom_headers: dict = Depends(get_custom_request_headers)
+):
     """
     Returns the current AI SDK LLM configuration, including base LLM,
     thinking LLM settings, and the list of valid providers.
     This information can be used to pre-fill settings in client applications.
     """
+    try:
+        permissions_data = await get_user_permissions(auth=auth, custom_headers=custom_headers)
+    except DataCatalogAuthError as e:
+        raise HTTPException(status_code=401, detail=f"Authentication failed during getAISDKInfo: {str(e)}") from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve user permissions: {str(e)}") from e
+
+    can_use_deepquery = check_deepquery_user_permission(auth, permissions_data)
+
     llm_provider = os.getenv("LLM_PROVIDER", "")
     base_llm = {
         "provider": llm_provider.lower(),
@@ -87,6 +111,7 @@ async def get_ai_sdk_info(auth: Annotated[str, Depends(authenticate)]):
         int(os.getenv("LLM_RESPONSE_ROWS_LIMIT", "100")),
         vql_execute_rows_limit
     )
+    version = AI_SDK_VERSION
 
     return JSONResponse(content={
         "base_llm": base_llm,
@@ -96,4 +121,6 @@ async def get_ai_sdk_info(auth: Annotated[str, Depends(authenticate)]):
         "vql_execute_rows_limit": vql_execute_rows_limit,
         "llm_response_rows_limit": llm_response_rows_limit,
         "valid_providers": UniformLLM.get_providers(),
+        "version": version,
+        "can_use_deepquery": can_use_deepquery,
     }, status_code=200)

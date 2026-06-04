@@ -69,7 +69,7 @@ const AdditionalInformationModal = ({ show, onClose, result }) => {
     const modalTool = (result.modalTool || result.toolName || "").toLowerCase();
 
     switch (modalTool) {
-      case "data_query":
+      case "data_agent":
         if (errorMessage || traceback) {
           return <div>{renderErrorSection()}</div>;
         }
@@ -139,7 +139,7 @@ const AdditionalInformationModal = ({ show, onClose, result }) => {
             )}
           </div>
         );
-      case "metadata_query":
+      case "metadata_search":
         if (errorMessage || traceback) {
           return <div>{renderErrorSection()}</div>;
         }
@@ -150,17 +150,27 @@ const AdditionalInformationModal = ({ show, onClose, result }) => {
             </p>
           </div>
         );
-      case "knowledge_query":
+      case "knowledge_query": {
         if (errorMessage || traceback) {
           return <div>{renderErrorSection()}</div>;
         }
+        const collectionName = result.collection_name || artifact.collection_name || "N/A";
+        const collectionDescription =
+          result.collection_description || artifact.collection_description || "";
         return (
           <div>
             <p>
               <strong>Source:</strong> Knowledge Base
             </p>
+            <p>
+              <strong>Collection:</strong> {collectionName}
+            </p>
+            <p>
+              <strong>Collection description:</strong> {collectionDescription || "N/A"}
+            </p>
           </div>
         );
+      }
       default:
         return (
           <div>

@@ -9,18 +9,16 @@ from langchain_core.callbacks import get_usage_metadata_callback
 
 from utils import langfuse
 from utils import utils
-from api.utils.ai_tools.prompts import QUERY_TO_VQL_PROMPT
+from utils.schema_catalog import SchemaCatalog
+from api.utils.ai_tools.prompts import QUERY_TO_VQL_PROMPT, PROCESS_STEP_NORMAL_PROMPT, PROCESS_STEP_OBLIGATORY_PROMPT
 from api.utils.ai_tools.schema_text import format_schema_text
 from api.utils.ai_tools.types import empty_tokens
 from api.utils.ai_tools.vql_rules_builder import build_vql_restrictions
 
-
 TODAYS_DATE = datetime.now().strftime("%Y-%m-%d")
-
 
 def _usage_tokens(callback):
     return next(iter(callback.usage_metadata.values())) if callback.usage_metadata else empty_tokens()
-
 
 @utils.log_params
 @utils.timed
@@ -30,13 +28,17 @@ async def query_to_vql(
     custom_instructions='',
     session_id=None,
     sample_data=None,
-    vector_search_sample_data_k=3
+    vector_search_sample_data_k=3,
+    can_use_llm=False
 ):
     prompt = PromptTemplate.from_template(QUERY_TO_VQL_PROMPT)
     query = re.sub(r'(?i)sql', 'VQL', query)
     chain = prompt | llm.llm | StrOutputParser()
 
     filtered_tables = utils.custom_tag_parser(filter_params, 'table', default=[])
+    schema_catalog = SchemaCatalog.from_vector_search_tables(vector_search_tables)
+    include_vector = schema_catalog.selected_tables_have_vector_column(filtered_tables)
+    include_metric = schema_catalog.selected_tables_include_metric_view(filtered_tables)
     relevant_tables = format_schema_text(
         vector_search_tables,
         filtered_tables,
@@ -44,12 +46,22 @@ async def query_to_vql(
         examples_per_table=vector_search_sample_data_k
     )
 
+    # Smaller LLMs struggle to respect [OBLIGATORY] field restrictions unless
+    # they are forced into a strict, step-by-step mandatory validation process.
+    # To save tokens we conditionally inject this strict validation step only
+    # when an obligatory field is present.
+    if "[OBLIGATORY]" in relevant_tables:
+        query_generation_process = PROCESS_STEP_OBLIGATORY_PROMPT
+    else:
+        query_generation_process = PROCESS_STEP_NORMAL_PROMPT
+
     prompt_parts = {
         "dates": int("<dates>" in filter_params),
         "arithmetic": int("<arithmetic>" in filter_params),
         "spatial": int("<spatial>" in filter_params),
-        "llm": int("<llm>" in filter_params),
-        "vector": int("<vector>" in filter_params or "<ai>" in filter_params),
+        "llm": int("<llm>" in filter_params and can_use_llm),
+        "vector": int("<vector>" in filter_params or "<ai>" in filter_params or include_vector),
+        "metric": int("<metric>" in filter_params or include_metric),
         "json": int("<json>" in filter_params),
         "xml": int("<xml>" in filter_params),
         "text": int("<text>" in filter_params),
@@ -66,7 +78,8 @@ async def query_to_vql(
                 "schema": relevant_tables,
                 "date": TODAYS_DATE,
                 "vql_restrictions": vql_restrictions,
-                "custom_instructions": custom_instructions
+                "custom_instructions": custom_instructions,
+                "query_generation_process": query_generation_process
             },
             config=langfuse.build_config(
                 model_id=f"{llm.provider_name}.{llm.model_name}",

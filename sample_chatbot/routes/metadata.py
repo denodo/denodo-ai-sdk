@@ -9,34 +9,12 @@ from flask import Blueprint, request, jsonify
 from flask_login import login_required, current_user
 
 from sample_chatbot.config import get_config
-from sample_chatbot.utils.ai_sdk_client import connect_to_ai_sdk, get_user_views, get_synced_resources
+from sample_chatbot.utils.ai_sdk_client import connect_to_ai_sdk, get_synced_resources
 
 metadata_bp = Blueprint('metadata', __name__)
 
-def _update_user_tables_and_resources(config, user):
-    """Helper to update user's tables and synced resources after metadata changes."""
-    status_code, table_names = get_user_views(
-        api_host=config.ai_sdk_host,
-        username=user.id,
-        password=user.password,
-        query="tables",
-        verify_ssl=config.ai_sdk_verify_ssl
-    )
-
-    if status_code == 200:
-        if table_names:
-            user.denodo_tables = (
-                "Here are some of the views available in the user's Denodo instance:\n- " +
-                "\n- ".join(table_names) +
-                "\n\nThis is not an exhaustive list, you can use the Metadata tool to query more."
-            )
-        else:
-            user.denodo_tables = (
-                "No views where found in the user's Denodo instance. Either the user has no views, "
-                "the connection is failing or he does not have enough permissions."
-            )
-        user.chatbot = None
-
+def _refresh_user_synced_resources(config, user):
+    """Reload synced/partial resource lists from the AI SDK and drop the cached chatbot."""
     synced_resources, partial_resources, user_sync_permissions = get_synced_resources(
         api_host=config.ai_sdk_host,
         username=user.id,
@@ -46,6 +24,7 @@ def _update_user_tables_and_resources(config, user):
     user.synced_resources = synced_resources
     user.partial_resources = partial_resources
     user.user_sync_permissions = user_sync_permissions
+    user.chatbot = None
 
     return synced_resources, partial_resources
 
@@ -97,7 +76,7 @@ def delete_metadata():
         )
 
         if response.status_code == 200:
-            synced_resources, partial_resources = _update_user_tables_and_resources(
+            synced_resources, partial_resources = _refresh_user_synced_resources(
                 config, current_user
             )
 
@@ -137,6 +116,7 @@ def sync_vdbs():
     examples_per_table = request.json.get('examples_per_table', 100)
     incremental = request.json.get('incremental', True)
     parallel = request.json.get('parallel', True)
+    timeout_seconds = request.json.get('timeout_seconds', 300)
 
     username, password = _get_sync_credentials(config)
 
@@ -151,13 +131,14 @@ def sync_vdbs():
         vdp_database_names=vdbs_to_sync,
         vdp_tag_names=tags_to_sync,
         tags_to_ignore=tags_to_ignore,
-        verify_ssl=config.ai_sdk_verify_ssl
+        verify_ssl=config.ai_sdk_verify_ssl,
+        timeout_seconds=timeout_seconds
     )
 
     if status == 200:
         data_usage_errors = result.get("data_usage_errors", [])
 
-        synced_resources, partial_resources = _update_user_tables_and_resources(
+        synced_resources, partial_resources = _refresh_user_synced_resources(
             config, current_user
         )
 

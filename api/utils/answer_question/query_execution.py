@@ -18,7 +18,7 @@ async def execute_query(vql_query, auth, limit, timings, custom_headers=None):
                 vql=vql_query, auth=auth, limit=limit, custom_headers=custom_headers
             )
         else:
-            vql_status_code = 499
+            vql_status_code = 500
             execution_result = "No VQL query was generated."
     return execution_result, vql_status_code, timings
 
@@ -34,22 +34,19 @@ async def attempt_query_execution(
     query_fixer_tokens=None,
     fixer_history=None,
     sample_data=None,
-    custom_headers=None
+    custom_headers=None,
+    can_use_llm=False
 ):
     fixer_history = fixer_history or []
-    if vql_query:
-        execution_result, vql_status_code, timings = await execute_query(
-            vql_query=vql_query,
-            auth=auth,
-            limit=request.vql_execute_rows_limit,
-            timings=timings,
-            custom_headers=custom_headers
-        )
-    else:
-        vql_status_code = 500
-        execution_result = "No VQL query was generated."
+    execution_result, vql_status_code, timings = await execute_query(
+        vql_query=vql_query,
+        auth=auth,
+        limit=request.vql_execute_rows_limit,
+        timings=timings,
+        custom_headers=custom_headers
+    )
 
-    if vql_status_code not in [499, 500]:
+    if vql_status_code not in [400, 499, 500]:
         return QueryExecutionResult(
             vql_query=vql_query,
             execution_result=execution_result,
@@ -84,9 +81,9 @@ async def attempt_query_execution(
                 next(iter(cb.usage_metadata.values())) if cb.usage_metadata else empty_tokens()
             )
     else:
-        if vql_status_code == 500:
+        if vql_status_code in [400, 500]:
             with timing_context("llm_time", timings):
-                vql_query, fixer_history, query_fixer_tokens = await query_fixer(
+                vql_query, fixer_history, new_fixer_tokens = await query_fixer(
                     question=request.question,
                     query=vql_query,
                     query_explanation=query_explanation,
@@ -96,8 +93,12 @@ async def attempt_query_execution(
                     vector_search_sample_data_k=request.vector_search_sample_data_k,
                     vector_search_tables=vector_search_tables,
                     fixer_history=fixer_history,
-                    sample_data=sample_data
+                    sample_data=sample_data,
+                    can_use_llm=can_use_llm
                 )
+
+                query_fixer_tokens = add_tokens(query_fixer_tokens or empty_tokens(), new_fixer_tokens)
+
         elif vql_status_code == 499:
             with timing_context("llm_time", timings):
                 vql_query, fixer_history, query_reviewer_tokens = await query_reviewer(
@@ -108,7 +109,8 @@ async def attempt_query_execution(
                     session_id=session_id,
                     vector_search_sample_data_k=request.vector_search_sample_data_k,
                     fixer_history=fixer_history,
-                    sample_data=sample_data
+                    sample_data=sample_data,
+                    can_use_llm=can_use_llm
                 )
 
             query_fixer_tokens = add_tokens(query_fixer_tokens or empty_tokens(), query_reviewer_tokens)

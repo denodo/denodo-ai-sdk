@@ -86,12 +86,12 @@ export const chatReducer = (state, action) => {
           : [];
 
         let combined = new Set(r.combinedTablesUsed || []);
-        if (toolName === 'data_query' && artifact && artifact.tables_used) {
+        if (toolName === 'data_agent' && artifact && artifact.tables_used) {
           for (const t of artifact.tables_used) combined.add(t);
         }
 
         let combinedVqls = Array.isArray(r.combinedVqls) ? [...r.combinedVqls] : [];
-        if (toolName === 'data_query' && artifact && artifact.vql) {
+        if (toolName === 'data_agent' && artifact && artifact.vql) {
           combinedVqls.push(String(artifact.vql));
         }
 

@@ -22,7 +22,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException
 from api.utils.sdk_utils import handle_endpoint_error, authenticate
 from api.deepquery.main import generate_report_from_deepquery_metadata
-from utils.utils import get_custom_request_headers
+from api.utils.sdk_utils import get_custom_request_headers
 
 router = APIRouter()
 

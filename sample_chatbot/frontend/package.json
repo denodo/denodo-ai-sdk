@@ -3,23 +3,18 @@
     "version": "1.0-beta",
     "private": true,
     "dependencies": {
-        "@emotion/react": "^11.13.3",
-        "@emotion/styled": "^11.13.0",
-        "@testing-library/jest-dom": "^5.17.0",
-        "@testing-library/react": "^13.4.0",
-        "@testing-library/user-event": "^13.5.0",
         "axios": "^1.7.1",
         "bootstrap": "^5.3.2",
         "bootstrap-icons": "^1.11.1",
         "devlop": "^1.1.0",
+        "exceljs": "^4.4.0",
         "framer-motion": "^11.5.4",
         "react": "^18.2.0",
         "react-bootstrap": "^2.9.1",
         "react-csv": "^2.2.2",
         "react-dom": "^18.2.0",
         "react-markdown": "^9.0.1",
-        "remark-gfm": "^4.0.0",
-        "web-vitals": "^2.1.4"
+        "remark-gfm": "^4.0.0"
     },
     "scripts": {
         "dev": "vite",

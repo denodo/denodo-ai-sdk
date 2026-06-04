@@ -221,7 +221,16 @@ CREATE OR REPLACE TABLE account I18N us_pst (
         account_opened_date:localdate
     )
     FOLDER = '/02 - Datasets'
-    DESCRIPTION = 'One row per bank account. Monetary amounts are USD. Join to customer for holder profile.'
+    DESCRIPTION = 'One row per bank account. Monetary amounts are USD.
+
+USE THIS VIEW FOR:
+- Account inventory
+- Account type and balance analysis
+- Customer account balances → ONLY when joined with samples_bank.customer
+DO NOT USE THIS VIEW FOR:
+- Customer profile details → Use samples_bank.customer instead.
+- Loan or repayment analysis → Use samples_bank.loan and samples_bank.payment instead.'
+    PRIMARY KEY ( 'acct_id' )
     CACHE OFF
     TIMETOLIVEINCACHE DEFAULT
     ADD SEARCHMETHOD ds_bank_account(
@@ -250,7 +259,17 @@ CREATE OR REPLACE TABLE customer I18N us_pst (
         zip_code:text
     )
     FOLDER = '/02 - Datasets'
-    DESCRIPTION = 'One row per customer. Use as the primary customer dimension. Join to samples_bank.loan and samples_bank.account on customer_id.'
+    DESCRIPTION = 'One row per customer. Use as the primary customer dimension.
+
+USE THIS VIEW FOR:
+- Customer lookup
+- Customer contact and location attributes
+- Customer-level loan analysis → ONLY when joined with samples_bank.loan
+- Customer-level account analysis → ONLY when joined with samples_bank.account
+DO NOT USE THIS VIEW FOR:
+- Account balances → Use samples_bank.account instead.
+- Loan application details → Use samples_bank.loan instead.'
+    PRIMARY KEY ( 'customer_id' )
     CACHE OFF
     TIMETOLIVEINCACHE DEFAULT
     ADD SEARCHMETHOD ds_bank_customer(
@@ -283,7 +302,16 @@ CREATE OR REPLACE TABLE loan I18N us_pst (
         loan_origination_date:localdate
     )
     FOLDER = '/02 - Datasets'
-    DESCRIPTION = 'Mortgage-style loans. One row per loan application. Use for origination, status, term, and principal. For individual payments and repayment timing, use samples_bank.payment. Monetary amounts are USD.'
+    DESCRIPTION = 'Mortgage-style loans. One row per loan application. Monetary amounts are USD.
+
+USE THIS VIEW FOR:
+- Origination volume
+- Loan status, term, and principal
+- Loan context for payments and underwriting
+DO NOT USE THIS VIEW FOR:
+- Individual payments and repayment timing → Use samples_bank.payment instead.
+- Offered rates by loan type and term → Use samples_bank.rate instead.'
+    PRIMARY KEY ( 'loan_id' )
     CACHE OFF
     TIMETOLIVEINCACHE DEFAULT
     ADD SEARCHMETHOD ds_bank_loan(
@@ -312,7 +340,16 @@ CREATE OR REPLACE TABLE loan_officer I18N us_pst (
         phone_number:text
     )
     FOLDER = '/02 - Datasets'
-    DESCRIPTION = 'One row per loan officer. Join to samples_bank.loan on loan_officer_id to analyze assignments and workload.'
+    DESCRIPTION = 'One row per loan officer.
+
+USE THIS VIEW FOR:
+- Loan officer lookup
+- Loan officer contact details
+- Assignments and workload → ONLY when joined with samples_bank.loan
+DO NOT USE THIS VIEW FOR:
+- Loan application details → Use samples_bank.loan instead.
+- Customer contact details → Use samples_bank.customer instead.'
+    PRIMARY KEY ( 'loan_officer_id' )
     CACHE OFF
     TIMETOLIVEINCACHE DEFAULT
     ADD SEARCHMETHOD ds_bank_loan_officer(
@@ -336,7 +373,15 @@ CREATE OR REPLACE TABLE payment I18N us_pst (
         payment_date:localdate
     )
     FOLDER = '/02 - Datasets'
-    DESCRIPTION = 'One row per payment applied to a loan. Use for repayment volume and timing. For application-stage attributes use samples_bank.loan and samples_bank.underwriting.'
+    DESCRIPTION = 'One row per payment applied to a loan.
+
+USE THIS VIEW FOR:
+- Repayment volume
+- Payment timing
+- Loan repayment analysis → ONLY when joined with samples_bank.loan
+DO NOT USE THIS VIEW FOR:
+- Application-stage attributes → Use samples_bank.loan and samples_bank.underwriting instead.'
+    PRIMARY KEY ( 'payment_id' )
     CACHE OFF
     TIMETOLIVEINCACHE DEFAULT
     ADD SEARCHMETHOD ds_bank_payment(
@@ -361,7 +406,16 @@ CREATE OR REPLACE TABLE property I18N us_pst (
         property_value:double (description = 'Assessed value in USD')
     )
     FOLDER = '/02 - Datasets'
-    DESCRIPTION = 'One row per collateral property. Join to samples_bank.loan on property_id for LTV-style analysis.'
+    DESCRIPTION = 'One row per collateral property.
+
+USE THIS VIEW FOR:
+- Collateral property lookup
+- Property value and location analysis
+- LTV-style analysis → ONLY when joined with samples_bank.loan
+DO NOT USE THIS VIEW FOR:
+- Loan application details → Use samples_bank.loan instead.
+- Customer addresses → Use samples_bank.customer instead.'
+    PRIMARY KEY ( 'property_id' )
     CACHE OFF
     TIMETOLIVEINCACHE DEFAULT
     ADD SEARCHMETHOD ds_bank_property(
@@ -386,7 +440,15 @@ CREATE OR REPLACE TABLE rate I18N us_pst (
         interest_rate:double (description = 'Quoted annual rate as a percentage for this loan_type and term_years')
     )
     FOLDER = '/02 - Datasets'
-    DESCRIPTION = 'Reference rows for offered rates by loan_type and term_years (years). Includes Fixed, ARM_5_1, ARM_7_1, and Jumbo_Fixed rows. Not transactional loan history.'
+    DESCRIPTION = 'Reference rows for offered rates by loan_type and term_years (years). Includes Fixed, ARM_5_1, ARM_7_1, and Jumbo_Fixed rows.
+
+USE THIS VIEW FOR:
+- Offered rate lookup
+- Rate comparison by loan type and term
+DO NOT USE THIS VIEW FOR:
+- Transactional loan history → Use samples_bank.loan instead.
+- Payment amounts or repayment timing → Use samples_bank.payment instead.'
+    PRIMARY KEY ( 'rate_id' )
     CACHE OFF
     TIMETOLIVEINCACHE DEFAULT
     ADD SEARCHMETHOD ds_bank_rate(
@@ -410,7 +472,16 @@ CREATE OR REPLACE TABLE underwriting I18N us_pst (
         financial_history:text (description = 'Valid values (case-sensitive): Good, Fair, Excellent, Bad')
     )
     FOLDER = '/02 - Datasets'
-    DESCRIPTION = 'One row per loan credit assessment. Join to samples_bank.loan on loan_id.'
+    DESCRIPTION = 'One row per loan credit assessment.
+
+USE THIS VIEW FOR:
+- Credit score analysis
+- Employment and financial history analysis
+- Loan underwriting context → ONLY when joined with samples_bank.loan
+DO NOT USE THIS VIEW FOR:
+- Loan principal, term, status, or origination date → Use samples_bank.loan instead.
+- Payment analysis → Use samples_bank.payment instead.'
+    PRIMARY KEY ( 'underwriting_id' )
     CACHE OFF
     TIMETOLIVEINCACHE DEFAULT
     ADD SEARCHMETHOD ds_bank_underwriting(

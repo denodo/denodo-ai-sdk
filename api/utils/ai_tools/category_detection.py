@@ -69,7 +69,7 @@ async def metadata_category(query, vector_search_tables, llm, custom_instruction
         response = await chain.ainvoke(
             {
                 "instruction": query,
-                "schema": SchemaCatalog.from_vector_search_tables(vector_search_tables).render_metadata_prompt_payload(),
+                "schema": SchemaCatalog.from_vector_search_tables(vector_search_tables).render_vql_schema(),
                 "custom_instructions": custom_instructions,
                 "metadata_response_instructions": _metadata_response_instructions(
                     markdown_response, layout="category"
@@ -101,7 +101,7 @@ async def direct_metadata_category(query, vector_search_tables, llm, custom_inst
         response = await chain.ainvoke(
             {
                 "instruction": query,
-                "schema": SchemaCatalog.from_vector_search_tables(vector_search_tables).render_metadata_prompt_payload(),
+                "schema": SchemaCatalog.from_vector_search_tables(vector_search_tables).render_vql_schema(),
                 "custom_instructions": custom_instructions,
                 "metadata_response_instructions": _metadata_response_instructions(
                     markdown_response, layout="direct"
@@ -130,6 +130,7 @@ async def direct_sql_category(
     custom_instructions='',
     session_id=None,
     column_description_char_limit=None,
+    table_description_char_limit=None,
     check_ambiguity=True
 ):
     prompt_text = DIRECT_SQL_CATEGORY_PROMPT if check_ambiguity else DIRECT_SQL_CATEGORY_NO_AMBIGUITY_PROMPT
@@ -140,7 +141,7 @@ async def direct_sql_category(
         response = await chain.ainvoke(
             {
                 "instruction": query,
-                "schema": selector_schema_for_prompt(vector_search_tables, column_description_char_limit),
+                "schema": selector_schema_for_prompt(vector_search_tables, column_description_char_limit, table_description_char_limit),
                 "custom_instructions": custom_instructions
             },
             config=langfuse.build_config(
@@ -163,6 +164,7 @@ async def sql_category(
     custom_instructions='',
     session_id=None,
     column_description_char_limit=None,
+    table_description_char_limit=None,
     check_ambiguity=True,
     markdown_response=True,
 ):
@@ -188,6 +190,7 @@ async def sql_category(
             custom_instructions=custom_instructions,
             session_id=session_id,
             column_description_char_limit=column_description_char_limit,
+            table_description_char_limit=table_description_char_limit,
             check_ambiguity=check_ambiguity
         )
 
@@ -207,7 +210,7 @@ async def sql_category(
             chain.ainvoke(
                 {
                     "instruction": query,
-                    "schema": selector_schema_for_prompt(vector_search_tables, column_description_char_limit),
+                    "schema": selector_schema_for_prompt(vector_search_tables, column_description_char_limit, table_description_char_limit),
                     "custom_instructions": custom_instructions
                 },
                 config=langfuse.build_config(

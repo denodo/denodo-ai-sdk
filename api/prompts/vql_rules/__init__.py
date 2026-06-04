@@ -4,6 +4,7 @@ from . import cast_vql
 from . import dates_vql
 from . import json_vql
 from . import llm_vql
+from . import metric_vql
 from . import spatial_vql
 from . import text_vql
 from . import vector_vql
@@ -18,6 +19,7 @@ __all__ = [
     "dates_vql",
     "json_vql",
     "llm_vql",
+    "metric_vql",
     "spatial_vql",
     "text_vql",
     "vector_vql",

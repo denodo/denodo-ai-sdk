@@ -29,7 +29,7 @@ const Header = ({
   syncedResources,
   userSyncPermissions,
   onResourcesUpdate,
-  onCSVSourcesChange,
+  hasActiveConversation = false,
   toggleSidebar,
   isSidebarOpen,
   selectedChatbot,
@@ -67,8 +67,8 @@ const Header = ({
   const showToolsMenu = hasToolsItems;
 
   const canEditLLM = canShowAdvancedOptions && config.user_edit_llm;
-  const canAddCustomInstructions = canShowAdvancedOptions && config.can_add_custom_instructions;
-  const showAdminMenu = !isWelcomeScreen && (canEditLLM || canAddCustomInstructions);
+  const canEditInstructions = canShowAdvancedOptions && config.can_edit_instructions;
+  const showAdminMenu = !isWelcomeScreen && (canEditLLM || canEditInstructions);
 
   const clearTimer = (ref) => {
     if (ref.current) {
@@ -296,7 +296,6 @@ const Header = ({
 
       <VectorDBSyncModal
         show={showVectorDBSync}
-        syncTimeout={config.sync_timeout}
         handleClose={() => setShowVectorDBSync(false)}
         syncedResources={syncedResources} 
         onResourcesUpdate={onResourcesUpdate}
@@ -318,7 +317,7 @@ const Header = ({
         <CSVManagerModal
           show={showCSVManager}
           handleClose={() => setShowCSVManager(false)}
-          onSourcesChange={onCSVSourcesChange}
+          hasActiveConversation={hasActiveConversation}
           selectedChatbot={selectedChatbot}
         />
       )}
@@ -339,7 +338,7 @@ Header.propTypes = {
   syncedResources: PropTypes.object,
   userSyncPermissions: PropTypes.bool,
   onResourcesUpdate: PropTypes.func,
-  onCSVSourcesChange: PropTypes.func,
+  hasActiveConversation: PropTypes.bool,
   toggleSidebar: PropTypes.func,
   isSidebarOpen: PropTypes.bool,
   selectedChatbot: PropTypes.object,

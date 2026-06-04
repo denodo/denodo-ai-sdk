@@ -26,6 +26,7 @@ class ChatbotConfig:
 
         # Access control
         self.allowed_users = config_dict.get('allowed_users', None)
+        self.allowed_roles = config_dict.get('allowed_roles', None)
 
         # Centralized Data Directory
         self.data_dir = os.getenv("AI_SDK_DATA_DIR", ".")
@@ -90,6 +91,18 @@ class ChatbotConfig:
         self.allow_sync = bool(int(os.getenv('CHATBOT_ALLOW_SYNC', '1')))
         self.filters_enabled = settings.get('filters_enabled', True)
 
+        # Parse allowed users/roles for unstructured mode from environment variables
+        allowed_csv_users_env = os.getenv('CHATBOT_ALLOWED_UNSTRUCTURED_USERS', '')
+        allowed_csv_roles_env = os.getenv('CHATBOT_ALLOWED_UNSTRUCTURED_ROLES', '')
+
+        self.allowed_unstructured_users = [
+            u.strip() for u in allowed_csv_users_env.split(',') if u.strip()
+        ] if allowed_csv_users_env else []
+
+        self.allowed_unstructured_roles = [
+            r.strip() for r in allowed_csv_roles_env.split(',') if r.strip()
+        ] if allowed_csv_roles_env else []
+
         # Reporting Configuration
         if self.data_dir != ".":
             self.reports_folder = os.path.join(self.data_dir, "reports", self.id)
@@ -99,25 +112,35 @@ class ChatbotConfig:
         self.report_max_size = get_config_value(settings, 'report_max_size', 'CHATBOT_REPORT_MAX_SIZE', '10', int)
         self.report_max_files = get_config_value(settings, 'report_max_files', 'CHATBOT_REPORT_MAX_FILES', '10', int)
 
-        # Unstructured Data Configuration
-        self.unstructured_index = os.getenv('CHATBOT_UNSTRUCTURED_INDEX')
-        self.unstructured_description = os.getenv('CHATBOT_UNSTRUCTURED_DESCRIPTION')
-
-        # Sync Configuration
-        self.sync_vdbs_timeout = int(os.getenv('CHATBOT_SYNC_VDBS_TIMEOUT', '600000'))
-
         # AI SDK Configuration
         self.ai_sdk_host = os.getenv('AI_SDK_URL', 'http://localhost:8008')
         self.ai_sdk_username = os.getenv('AI_SDK_USERNAME')
         self.ai_sdk_password = os.getenv('AI_SDK_PASSWORD')
         self.ai_sdk_verify_ssl = bool(int(os.getenv('AI_SDK_VERIFY_SSL', '0')))
+        self.chatbot_timeout = int(os.getenv('CHATBOT_TIMEOUT', '1200'))
 
         # External Services
         self.data_marketplace_url = os.getenv("CHATBOT_DATA_MARKETPLACE_URL")
 
-        # Custom instructions
-        self.custom_instructions = get_config_value(settings, 'custom_intructions', 'CHATBOT_CUSTOM_INTRUCTIONS', '')
-        self.user_add_custom_instructions = get_config_value(settings, 'user_add_custom_instructions','CHATBOT_USER_ADD_CUSTOM_INTRUCTIONS', '1', bool)
+        # custom_instructions: custom agents read chatbot/ai_sdk from YAML. General Chat reads env variable CHATBOT_CUSTOM_INSTRUCTIONS.
+        ci = settings.get('custom_instructions')
+        if not isinstance(ci, dict):
+            ci = {}
+        self.custom_instructions_ai_sdk = (ci.get('ai_sdk') or '').strip()
+        yaml_chatbot = (ci.get('chatbot') or '').strip()
+        env_general_chatbot = (os.getenv('CHATBOT_CUSTOM_INSTRUCTIONS') or '').strip()
+        if self.is_global:
+            self.custom_instructions_chatbot = yaml_chatbot or env_general_chatbot
+        else:
+            self.custom_instructions_chatbot = yaml_chatbot
+
+        user_edit_instructions = settings.get("user_edit_instructions")
+        if user_edit_instructions is None:
+            user_edit_instructions = os.getenv("CHATBOT_USER_EDIT_INSTRUCTIONS", "1")
+        if isinstance(user_edit_instructions, bool):
+            self.user_edit_instructions = user_edit_instructions
+        else:
+            self.user_edit_instructions = bool(int(user_edit_instructions))
 
         # Check ambiguity
         self.check_ambiguity = get_config_value(settings, 'check_ambiguity', 'CHATBOT_CHECK_AMBIGUITY', '1', bool)
@@ -141,6 +164,67 @@ class ChatbotConfig:
         """Feedback is only enabled if reporting is also enabled."""
         return self.feedback_enabled if self.reporting_enabled else False
 
+    def _evaluate_restrictions(self, username, roles, is_admin, legacy_permissions_endpoint, allowed_users, allowed_roles):
+        """
+        Internal generic helper to evaluate user and role access restrictions.
+        """
+        if roles is None:
+            roles = []
+
+        if not legacy_permissions_endpoint and is_admin:
+            return True
+
+        # Check if restrictions are explicitly configured
+        has_user_restriction = allowed_users is not None and len(allowed_users) > 0
+        has_role_restriction = allowed_roles is not None and len(allowed_roles) > 0
+
+        # If no specific restrictions are set, everyone is allowed
+        if not has_user_restriction and not has_role_restriction:
+            return True
+
+        # User-based whitelist check
+        if has_user_restriction and username in allowed_users:
+            return True
+
+        # Role-based whitelist check
+        if not legacy_permissions_endpoint and has_role_restriction:
+            if any(r in allowed_roles for r in roles):
+                return True
+
+        # Default deny if restrictions exist but no match was found
+        return False
+
+
+    def is_user_allowed(self, username, roles=None, is_admin=False, legacy_permissions_endpoint=False):
+        """
+        Evaluates if a user has access to this agent.
+        """
+        return self._evaluate_restrictions(
+            username=username,
+            roles=roles,
+            is_admin=is_admin,
+            legacy_permissions_endpoint=legacy_permissions_endpoint,
+            allowed_users=self.allowed_users,
+            allowed_roles=self.allowed_roles
+        )
+
+    def is_unstructured_mode_allowed_for_user(self, username, roles=None, is_admin=False, legacy_permissions_endpoint=False):
+        """
+        Evaluates if a specific user has permission to use the unstructured (CSV upload) mode.
+        """
+        # If unstructured mode is fully disabled, deny access to everyone.
+        if not self.unstructured_mode:
+            return False
+
+        return self._evaluate_restrictions(
+            username=username,
+            roles=roles,
+            is_admin=is_admin,
+            legacy_permissions_endpoint=legacy_permissions_endpoint,
+            allowed_users=self.allowed_unstructured_users,
+            allowed_roles=self.allowed_unstructured_roles
+        )
+
     def log_config(self, logger):
         """Log the current configuration."""
         logger.info(f"Chatbot parameters for agent: {self.name}")
@@ -161,6 +245,7 @@ class ChatbotConfig:
         logger.info(f"    - Vector Store Provider: {self.vector_store_provider}")
         logger.info(f"    - AI SDK Host: {self.ai_sdk_host}")
         logger.info(f"    - AI SDK Data Dir (logs, cache, reports...): {self.data_dir}")
+        logger.info(f"    - Chatbot Timeout: {self.chatbot_timeout}s")
         logger.info(f"    - Using SSL: {self.ssl_enabled}")
         logger.info(f"    - DeepQuery: {'enabled' if self.deepquery_enabled else 'disabled'}")
         logger.info(f"    - Reporting: {self.reporting_enabled}")
@@ -171,6 +256,19 @@ class ChatbotConfig:
         logger.info(f"    - User can edit LLM settings: {self.user_edit_llm}")
         logger.info(f"    - Data Marketplace URL (for direct view linking): {self.data_marketplace_url}")
 
+        if not self.unstructured_mode:
+            logger.info("    - Unstructured Mode (CSV): Disabled globally")
+        else:
+            access_msg = []
+            if self.allowed_unstructured_roles:
+                access_msg.append(f"Roles: {self.allowed_unstructured_roles}")
+            if self.allowed_unstructured_users:
+                access_msg.append(f"Users: {self.allowed_unstructured_users}")
+
+            if access_msg:
+                logger.info(f"    - Unstructured Mode (CSV): Enabled for [{', '.join(access_msg)}]")
+            else:
+                logger.info("    - Unstructured Mode (CSV): Enabled globally (no restrictions)")
 
 # --- Management of Multiple Configurations ---
 
@@ -234,13 +332,17 @@ def get_config_reports_directory(chatbot_id):
     return _configs.get(chatbot_id).reports_folder
 
 
-def get_agents_metadata_by_user(username) -> list:
+def get_agents_metadata_by_user(username, roles=None, is_admin=False, legacy_permissions_endpoint=False):
     """
     Returns a list of dictionaries containing the basic metadata
     for the initialized chatbots that a user has access to.
 
     Args:
         username (str): The identifier of the user.
+        roles (list): List of roles of the user.
+        is_admin (bool): Whether the user is a global administrator.
+        legacy_permissions_endpoint (bool): True if the connected Data Marketplace is <= 9.4.1.
+                                If True, role-based and admin checks are ignored.
 
     Returns:
         list: A list of dicts with the metadata of the allowed agents.
@@ -248,8 +350,8 @@ def get_agents_metadata_by_user(username) -> list:
     global _configs
     metadata_list = []
 
-    for bot_id, config in _configs.items():
-        if config.allowed_users is None or username in config.allowed_users:
+    for _, config in _configs.items():
+        if config.is_user_allowed(username, roles, is_admin, legacy_permissions_endpoint):
             metadata_list.append({
                 "id": config.id,
                 "name": config.name,
