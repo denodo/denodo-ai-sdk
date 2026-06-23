@@ -40,7 +40,8 @@ from api.endpoints import (
     answerMetadataQuestion,
     answerQuestionUsingViews,
     generateDeepQueryReport,
-    getUserPermissions
+    getUserPermissions,
+    executeVQL
 )
 
 log_config = get_logging_config()
@@ -75,6 +76,7 @@ tags = [
     {"name": "Ask a Question - Streaming"},
     {"name": "Ask a Question - Custom Vector Store"},
     {"name": "Ask a Question - Streaming - Custom Vector Store"},
+    {"name": "Utilities"},
 ]
 
 base_app = FastAPI(
@@ -125,6 +127,7 @@ base_app.include_router(answerDataQuestion.router)
 base_app.include_router(answerMetadataQuestion.router)
 base_app.include_router(answerQuestionUsingViews.router)
 base_app.include_router(getUserPermissions.router)
+base_app.include_router(executeVQL.router)
 
 if config.THINKING_MODEL_AVAILABLE:
     base_app.include_router(deepQuery.router)

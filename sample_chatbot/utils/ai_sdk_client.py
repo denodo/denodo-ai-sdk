@@ -147,11 +147,13 @@ def connect_to_ai_sdk(api_host, username, password, insert=True, examples_per_ta
         db_schema = data.get('db_schema_json')
         vdbs = ','.join(data.get('vdb_list', []))
         data_usage_errors = data.get('data_usage_errors', [])
+        timings = data.get('timings', {})
 
         if db_schema is None:
             return 500, "Query didn't fail, but it returned no data. Check the Data Marketplace logs."
 
-        return 200, {"vdbs": vdbs, "data_usage_errors": data_usage_errors}
+        return 200, {"vdbs": vdbs, "data_usage_errors": data_usage_errors,
+                     "timings": timings}
 
     except requests.exceptions.Timeout:
         return 408, f"The synchronization timed out after {timeout_seconds} seconds."

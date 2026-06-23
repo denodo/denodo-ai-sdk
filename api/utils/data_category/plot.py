@@ -15,12 +15,7 @@ from api.utils.ai_tools.prompts import (
     GENERATE_VISUALIZATION_PROMPT,
     GENERATE_VISUALIZATION_PYTHON_TEMPLATE,
 )
-from api.utils.ai_tools.types import empty_tokens
-
-
-def _usage_tokens(callback):
-    return next(iter(callback.usage_metadata.values())) if callback.usage_metadata else empty_tokens()
-
+from api.utils.ai_tools.types import usage_tokens
 
 @utils.log_params
 @utils.timed
@@ -52,7 +47,7 @@ async def graph_generator(
 
     response = response.replace('```python', '<python>').replace('```', '</python>').strip()
     python_code = utils.custom_tag_parser(response, 'python', default='')[0].strip()
-    tokens = _usage_tokens(cb)
+    tokens = usage_tokens(cb)
 
     if not python_code:
         return "LLM failed to generate a valid Python code, please try again.", tokens
@@ -69,3 +64,15 @@ async def graph_generator(
         output = output[:-1]
 
     return output, tokens
+
+def prepare_plot_data(request, execution_result):
+    """Return the data to plot, or None. Disables request.plot when there is
+    nothing plottable so the answer phase skips graph generation."""
+    if not request.plot:
+        return None
+
+    if execution_result and isinstance(execution_result, dict) and len(execution_result) > 0:
+        return execution_result
+
+    request.plot = False
+    return None

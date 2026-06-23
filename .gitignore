@@ -7,6 +7,9 @@ embeddings/
 reports/
 uploads/
 .vscode/
+.agents/
+.claude/
+skills/*
 tests/
 logs/
 venv/

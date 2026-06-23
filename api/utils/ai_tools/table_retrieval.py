@@ -2,7 +2,7 @@ import asyncio
 import logging
 
 from utils import utils
-from utils.data_catalog import get_user_permissions
+from utils.data_marketplace.connection import get_user_permissions
 from api.utils import sdk_utils
 
 

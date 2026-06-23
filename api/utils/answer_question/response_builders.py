@@ -3,7 +3,7 @@ import os
 from utils.schema_catalog import SchemaCatalog
 from utils.utils import custom_tag_parser
 
-from api.utils.answer_question.serializers import build_execution_result_bundle
+from api.utils.data_category.serialize import build_execution_result_bundle
 
 
 AMBIGUITY_TYPE_LABELS = {
@@ -117,9 +117,6 @@ def process_unknown_category(timings):
 
 
 def prepare_response(vql_query, query_explanation, tokens, execution_result, vector_search_tables, raw_graph, timings):
-    if "Conditions:" in query_explanation:
-        query_explanation = query_explanation.split("Conditions:")[0].strip()
-
     llm_response_rows_limit = int(os.getenv('LLM_RESPONSE_ROWS_LIMIT', '100'))
     execution_result_bundle = {}
     if execution_result:

@@ -108,7 +108,7 @@ Where Bedrock refers to AWS Bedrock, NVIDIA refers to NVIDIA NIM and Google refe
 * AzureOpenAI (text-embedding-3-large)
 * Bedrock (amazon.titan-embed-text-v2:0)
 * Google (text-multilingual-embedding-002)
-* Ollama (bge-m3)
+* Ollama (qwen3-embedding:8b)
 * Mistral (mistral-embed)
 * NVIDIA (baai/bge-m3)
 * GoogleAIStudio (gemini-embedding-exp-03-07)

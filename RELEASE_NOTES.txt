@@ -1,3 +1,15 @@
+version 1.2.1 - 20260622
+----------------------
+
+- Improved executeVQL error classification and reworked fixer/reviewer flow
+- Added executeVQL endpoint under a new Utilities category in the API
+- Added support for OpenRouter reasoning control via -thinking / -no-thinking model ID suffixes
+- Added response time breakdown to the sample Chatbot
+- Added enable_query_fixer and enable_query_reviewer to data-mode answer endpoints
+- Updated getVectorDBInfo to accept vector_store_provider and embeddings parameters
+- Updated requirements.txt to resolve dependency CVEs
+- Updated recommended Ollama embedding model to Qwen3-Embedding-8B in README
+
 version 1.2 - 20260603
 ----------------------
 

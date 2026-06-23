@@ -20,10 +20,15 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from api.utils import state_manager
 from api.utils.sdk_utils import get_user_synced_resources, handle_endpoint_error, check_metadata_user_permission, authenticate
-from utils.data_catalog import get_user_permissions, DataCatalogAuthError
+from utils.data_marketplace.connection import get_user_permissions, DataCatalogAuthError
 from api.utils.sdk_utils import get_custom_request_headers
 
 router = APIRouter()
+
+class VectorDBInfoRequest(BaseModel):
+    embeddings_provider: str = os.getenv('EMBEDDINGS_PROVIDER')
+    embeddings_model: str = os.getenv('EMBEDDINGS_MODEL')
+    vector_store_provider: str = os.getenv('VECTOR_STORE')
 
 class VectorDBInfoResponse(BaseModel):
     synced_resources: Dict = Field(
@@ -52,6 +57,7 @@ class VectorDBInfoResponse(BaseModel):
 )
 @handle_endpoint_error("getVectorDBInfo")
 async def getVectorDBInfo(
+    endpoint_request: VectorDBInfoRequest = Depends(),
     auth: str = Depends(authenticate),
     custom_headers: dict = Depends(get_custom_request_headers)
 ):
@@ -81,9 +87,9 @@ async def getVectorDBInfo(
 
     try:
         vector_store = state_manager.get_vector_store(
-            provider=os.getenv('VECTOR_STORE'),
-            embeddings_provider=os.getenv('EMBEDDINGS_PROVIDER'),
-            embeddings_model=os.getenv('EMBEDDINGS_MODEL')
+            provider=endpoint_request.vector_store_provider,
+            embeddings_provider=endpoint_request.embeddings_provider,
+            embeddings_model=endpoint_request.embeddings_model
         )
     except Exception as e:
         logging.error(f"Resource initialization error: {str(e)}")

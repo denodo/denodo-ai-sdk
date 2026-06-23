@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException
 
-from utils.data_catalog import get_user_permissions, DataCatalogAuthError
+from utils.data_marketplace.connection import get_user_permissions, DataCatalogAuthError
 from api.utils import state_manager
 from api.utils.sdk_utils import (
     handle_endpoint_error, authenticate, delete_by_db_or_tag,

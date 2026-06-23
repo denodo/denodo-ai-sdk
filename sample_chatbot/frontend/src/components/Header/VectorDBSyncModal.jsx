@@ -135,13 +135,62 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
       } else {
         const errors = response.data.dataUsageErrors || [];
 
-        if (errors.length > 0) {
-          const formatError = (e) => {
-            const msg = e.cause || 'Unknown error';
+        // extract timings
+        let timingsMsg = "";
 
-            if (e.databaseName && e.viewName) {
-              const fieldInfo = e.fieldName ? `.${e.fieldName}` : '';
-              return `• [${e.databaseName}.${e.viewName}${fieldInfo}] ${msg}`;
+        if (Array.isArray(response.data.timings) && response.data.timings.length > 0) {
+          const aggregatedTimings = {};
+
+          response.data.timings.forEach(timingObj => {
+            Object.entries(timingObj).forEach(([key, value]) => {
+              if (typeof value === 'number') {
+                aggregatedTimings[key] = (aggregatedTimings[key] || 0) + value;
+              }
+            });
+          });
+
+          if (Object.keys(aggregatedTimings).length > 0) {
+            timingsMsg += "\n\nTiming Breakdown (Aggregate):";
+
+            const keyOrder = [
+              'metadata_retrieval',
+              'vector_store_deletion',
+              'metadata_processing',
+              'vector_store_embedding',
+              'sample_data_processing',
+              'total_execution_time'
+            ];
+
+            const sortedKeys = Object.keys(aggregatedTimings).sort((a, b) => {
+              const indexA = keyOrder.indexOf(a);
+              const indexB = keyOrder.indexOf(b);
+              if (indexA === -1 && indexB === -1) return a.localeCompare(b);
+              if (indexA === -1) return 1;
+              if (indexB === -1) return -1;
+              return indexA - indexB;
+            });
+
+            sortedKeys.forEach(key => {
+              const formattedKey = key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+              timingsMsg += `\n• ${formattedKey}: ${Number(aggregatedTimings[key]).toFixed(2)}s`;
+            });
+          }
+        } else if (response.data.timings && typeof response.data.timings === 'object' && !Array.isArray(response.data.timings)) {
+          timingsMsg += "\n\nTiming Breakdown:";
+          Object.entries(response.data.timings).forEach(([key, value]) => {
+            const formattedKey = key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+            timingsMsg += `\n• ${formattedKey}: ${Number(value).toFixed(2)}s`;
+          });
+        }
+
+        // append timings to toast
+        if (errors.length > 0) {
+          const formatError = (errObj) => {
+            const msg = errObj.cause || 'Unknown error';
+
+            if (errObj.databaseName && errObj.viewName) {
+              const fieldInfo = errObj.fieldName ? `.${errObj.fieldName}` : '';
+              return `• [${errObj.databaseName}.${errObj.viewName}${fieldInfo}] ${msg}`;
             }
             return `• ${msg}`;
           };
@@ -150,24 +199,26 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
           const moreErrors = errors.length > 3 ? `\n...and ${errors.length - 3} more.` : '';
 
           showToast(
-            `Sync completed, but with ${errors.length} warning(s):\n${errorList}${moreErrors}`, 
-            'warning',
-            'Sync completed with warnings',
-            30000
+              `Sync completed, but with ${errors.length} warning(s):\n${errorList}${moreErrors}${timingsMsg}`,
+              'warning',
+              'Sync completed with warnings',
+              30000
           );
         } else {
-          const successMsg = response.data.message || "Synchronization successful.";
-          showToast(successMsg, 'success', 'Sync completed');
-        }
+          let successMsg = response.data.message || "Synchronization successful.";
+          successMsg += timingsMsg;
 
-        if (response.data) {
-          if (response.data.syncedResources) {
-            setStatusData(response.data.syncedResources);
+          if (response.data) {
+            if (response.data.syncedResources) {
+              setStatusData(response.data.syncedResources);
+            }
+
+            if (onResourcesUpdate) {
+              onResourcesUpdate(response.data);
+            }
           }
-          
-          if (onResourcesUpdate) {
-            onResourcesUpdate(response.data);
-          }
+
+          showToast(successMsg, 'success', 'Sync completed', 15000);
         }
       }
 
@@ -200,8 +251,8 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
 
       if (response.status === 204) {
           showToast(
-            "No metadata found matching the specified criteria for deletion.", 
-            'warning', 
+            "No metadata found matching the specified criteria for deletion.",
+            'warning',
             'No content'
           );
       } else {
@@ -291,10 +342,10 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
           <Button variant="light" onClick={handleClose}>
             Cancel
           </Button>
-          <Button 
-              variant="dark" 
-              type="submit" 
-              disabled={isLoading || !isTimeoutValid || !isExamplesValid} 
+          <Button
+              variant="dark"
+              type="submit"
+              disabled={isLoading || !isTimeoutValid || !isExamplesValid}
               form="sync-form"
           >
             {isLoading ? (
@@ -329,18 +380,18 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
 
   return (
     <>
-      <NotificationToast 
-        show={toastConfig.show} 
-        message={toastConfig.message} 
+      <NotificationToast
+        show={toastConfig.show}
+        message={toastConfig.message}
         variant={toastConfig.variant}
         title={toastConfig.title}
         duration={toastConfig.duration}
-        onClose={handleToastClose} 
+        onClose={handleToastClose}
       />
 
-      <Modal 
-        show={show} 
-        onHide={handleClose} 
+      <Modal
+        show={show}
+        onHide={handleClose}
         onExited={handleOnExited}
         centered
         data-bs-theme="light"
@@ -349,11 +400,11 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
           <Modal.Title>Vector DB Manager</Modal.Title>
         </Modal.Header>
         <Modal.Body>
-            <Tabs 
-              activeKey={activeTab} 
+            <Tabs
+              activeKey={activeTab}
               onSelect={(k) => !isLoading && setActiveTab(k)}
-              id="vdb-management-tabs" 
-              className="mb-3" 
+              id="vdb-management-tabs"
+              className="mb-3"
               data-bs-theme="light"
             >
               <Tab eventKey="status" title="Vector DB Info" disabled={isLoading}>

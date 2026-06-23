@@ -241,6 +241,10 @@ def _build_data_agent_artifact(response):
         "query_explanation": response.get("query_explanation", ""),
         "tokens": response.get("tokens", {}).get("total_tokens", 0),
         "ai_sdk_time": response.get("total_execution_time", 0),
+        "total_execution_time": response.get("total_execution_time", 0),
+        "vector_store_search_time": response.get("vector_store_search_time", 0),
+        "llm_time": response.get("llm_time", 0),
+        "sql_execution_time": response.get("sql_execution_time", 0),
         "llm_provider": response.get("llm_provider", ""),
         "llm_model": response.get("llm_model", ""),
     }

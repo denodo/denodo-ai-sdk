@@ -3,7 +3,7 @@ import json
 
 from api.deepquery.prompts import ANALYSIS_TRACE_TEMPLATE
 from api.endpoints.answerQuestion import process_question, answerQuestionRequest
-from api.utils.answer_question.serializers import get_full_execution_result_rows
+from utils.execution_result_helpers import get_full_execution_result_rows
 
 def filter_tool_calls_report_agent(tool_calls, default_rows=10):
     """

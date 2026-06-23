@@ -1,7 +1,9 @@
 import inspect
 import re
 
+from enum import Enum
 from datetime import datetime
+from dataclasses import dataclass, field
 
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -11,14 +13,29 @@ from utils import langfuse
 from utils import utils
 from utils.schema_catalog import SchemaCatalog
 from api.utils.ai_tools.prompts import QUERY_TO_VQL_PROMPT, PROCESS_STEP_NORMAL_PROMPT, PROCESS_STEP_OBLIGATORY_PROMPT
+from api.utils.ai_tools.types import empty_tokens, usage_tokens
 from api.utils.ai_tools.schema_text import format_schema_text
-from api.utils.ai_tools.types import empty_tokens
 from api.utils.ai_tools.vql_rules_builder import build_vql_restrictions
 
 TODAYS_DATE = datetime.now().strftime("%Y-%m-%d")
 
-def _usage_tokens(callback):
-    return next(iter(callback.usage_metadata.values())) if callback.usage_metadata else empty_tokens()
+class GenerationStatus(str, Enum):
+    """Status of the generated VQL query based on the output of the query_to_vql prompt.
+
+    GENERATED when a VQL query is returned in <vql></vql> tags; NO_QUERY when the prompt
+    returns nothing, <vql>NONE</vql>, or malformed tags.
+    """
+    GENERATED = "generated"
+    NO_QUERY = "no_query"
+
+@dataclass
+class GeneratedQuery:
+    """A generated VQL query: its status, the VQL itself, the generation reasoning,
+    and the tokens used."""
+    status: "GenerationStatus"
+    vql: str
+    explanation: str
+    tokens: dict = field(default_factory=empty_tokens)
 
 @utils.log_params
 @utils.timed
@@ -100,4 +117,10 @@ async def query_to_vql(
     if conditions != "None":
         query_explanation = f"{query_explanation}\n\nConditions: {conditions}"
 
-    return vql_query, query_explanation, _usage_tokens(cb)
+    status = GenerationStatus.GENERATED if vql_query else GenerationStatus.NO_QUERY
+    return GeneratedQuery(
+        status=status,
+        vql=vql_query,
+        explanation=query_explanation,
+        tokens=usage_tokens(cb),
+    )

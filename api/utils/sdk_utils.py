@@ -21,14 +21,14 @@ import asyncio
 import functools
 import traceback
 
-from time import time
+from time import time, perf_counter
 from typing import Annotated
 from fastapi import HTTPException, Depends, Request
 from fastapi.security import HTTPBasic, HTTPBearer, HTTPBasicCredentials, HTTPAuthorizationCredentials
 from contextlib import contextmanager
 from langchain_core.documents.base import Document
 
-from utils.data_catalog import get_views_metadata_documents
+from utils.data_marketplace.connection import get_views_metadata_documents
 from utils.schema_catalog import SchemaCatalog
 from utils.utils import schema_summary, prepare_schema, flatten_list, prepare_sample_data_schema, calculate_tokens, current_endpoint, filter_allowed_headers
 
@@ -95,14 +95,13 @@ def match_nested_parentheses(text):
 
     return matches
 
-# Prepare VQL
-def prepare_vql(vql):
-    error_log = ''
-    error_categories = []
+# Static VQL category codes returned by detect_vql_issues.
+VQL_ISSUE_LIMIT_SUBQUERY = 'LIMIT_SUBQUERY'
+VQL_ISSUE_LIMIT_OFFSET = 'LIMIT_OFFSET'
 
-    # Convert VQL to single line for regex processing
-    vql_single_line = vql.replace('\n', ' ')
 
+def normalize_vql(vql):
+    """Cleans an LLM-generated VQL query."""
     # Look for LLM code styling
     if '```' in vql:
         logging.info("Backward ticks detected in VQL, fixing...")
@@ -111,6 +110,8 @@ def prepare_vql(vql):
     if '\\_' in vql:
         logging.info("Markdown underscore detected in VQL, fixing...")
         vql = vql.replace('\\_', '_')
+
+    vql_single_line = vql.replace('\n', ' ')
 
     # Protected words for aliases
     protected_words = (
@@ -136,68 +137,28 @@ def prepare_vql(vql):
         logging.info(f"Protected word '{protected_word}' used as alias, appending underscore")
 
     # Apply replacements
-    modified_vql = vql
     for old_word, new_word in replacements.items():
         # Pattern to match the exact alias after AS
         replace_pattern = fr'(\s+AS\s+){old_word}(\s+)'
-        modified_vql = re.sub(replace_pattern, fr'\1{new_word}\2', modified_vql, flags=re.IGNORECASE)
+        vql = re.sub(replace_pattern, fr'\1{new_word}\2', vql, flags=re.IGNORECASE)
 
-    vql = modified_vql
+    return vql.strip()
 
-    forbidden_functions = [
-        'LENGTH',
-        'LISTAGG',
-        'CHAR_LENGTH',
-        'CHARACTER_LENGTH',
-        'CURRENT_TIME',
-        'DIVIDE',
-        'MULTIPLY',
-        'DATE',
-        'STRFTIME',
-        'SUBSTRING',
-        'DATE_SUB',
-        'DATE_ADD',
-        'DATE_TRUNC',
-        'INTERVAL',
-        'ADDDATE',
-        'TO_CHAR',
-        'LPAD',
-        'STRING_AGG',
-        'ARRAY_AGG',
-        'UNNEST'
-    ]
+def detect_vql_issues(vql):
+    """Read-only static analysis. Detects usage of LIMIT in subquery (a Denodo VQL restriction) in a given VQL query."""
+    categories = []
+    vql_single_line = vql.replace('\n', ' ')
 
-    for forbidden_function in forbidden_functions:
-        if f" {forbidden_function} " in vql.upper() or f" {forbidden_function} ( " in vql.upper() or f" {forbidden_function}(" in vql.upper() or f"({forbidden_function}(" in vql.upper():
-            error_log += f"{forbidden_function} is not permitted in VQL.\n"
-            if "FORBIDDEN_FUNCTION" not in error_categories:
-                #error_categories.append('FORBIDDEN_FUNCTION')
-                continue
-
-    # Look for LIMIT in subquery
-    matches = match_nested_parentheses(vql_single_line)
-
-    for match in matches:
-        if ' LIMIT ' in match:
-            error_log += "There is a LIMIT in subquery, which is not permitted in VQL. Use ROW_NUMBER () instead.\n"
-            if "LIMIT_SUBQUERY" not in error_categories:
-                error_categories.append('LIMIT_SUBQUERY')
-
-        if ' FETCH ' in match:
-            error_log += "There is a FETCH in subquery, which is not permitted in VQL. Use ROW_NUMBER () instead.\n"
-            if "LIMIT_SUBQUERY" not in error_categories:
-                error_categories.append('LIMIT_SUBQUERY')
+    # Look for LIMIT/FETCH in subquery (CTEs count as subqueries)
+    for match in match_nested_parentheses(vql_single_line):
+        if ' LIMIT ' in match or ' FETCH ' in match:
+            categories.append(VQL_ISSUE_LIMIT_SUBQUERY)
+            break
 
     if " OFFSET " in vql_single_line:
-        error_log += "There is a LIMIT OFFSET in the main query, which is not permitted in VQL. Use ROW_NUMBER () instead.\n"
-        if "LIMIT_OFFSET" not in error_categories:
-            error_categories.append('LIMIT_OFFSET')
+        categories.append(VQL_ISSUE_LIMIT_OFFSET)
 
-    if error_log == "":
-        error_log = False
-
-    logging.info(f"prepare_vql vql: {vql} error log: {error_log} and categories: {error_categories}")
-    return vql.strip(), error_log, error_categories
+    return categories
 
 def generate_vql_restrictions(
     prompt_parts,
@@ -575,15 +536,18 @@ async def process_metadata_source(
         custom_headers: Custom headers to forward to the Data Marketplace
 
     Returns:
-        Tuple of (db_schema, db_schema_text, data_usage_errors)
+        Tuple of (db_schema, db_schema_text, data_usage_errors, timings)
+        where timings is a dict of the detailed timing breakdown per step
     """
+
+    start_total = perf_counter()
+    timings = {}
 
     if vector_store and request.incremental:
         last_update = vector_store.get_last_update(source_type=source_type, source_name=source_name)
     else:
         last_update = None
 
-    # Prepare arguments for get_views_metadata_documents
     kwargs = {
         "auth": auth,
         "examples_per_table": request.examples_per_table,
@@ -601,7 +565,6 @@ async def process_metadata_source(
     if tags_to_ignore:
         kwargs["tags_to_ignore"] = tags_to_ignore
 
-    # Add source-specific parameter
     if source_type == "TAG":
         kwargs["tag_name"] = source_name
         if tagged_views is not None:
@@ -611,16 +574,16 @@ async def process_metadata_source(
     else:
         raise ValueError(f"Invalid source type: {source_type}")
 
-    # Get metadata documents
+    start_metadata = perf_counter()
     result, delete_view_ids, detagged_view_ids, data_usage_errors = await get_views_metadata_documents(**kwargs)
+    timings['metadata_retrieval'] = perf_counter() - start_metadata
 
-    # Handle view deletions if needed
+    start_deletions = perf_counter()
     if delete_view_ids and vector_store:
         await asyncio.to_thread(vector_store.delete_by_view_id, view_ids=delete_view_ids)
         if sample_data_vector_store:
             await asyncio.to_thread(sample_data_vector_store.delete_by_view_id, view_ids=delete_view_ids)
 
-    # Handle detagged views if needed
     if detagged_view_ids and source_type == 'TAG' and vector_store:
         await handle_detagged_views(
             detagged_view_ids=detagged_view_ids,
@@ -629,11 +592,13 @@ async def process_metadata_source(
             sample_data_vector_store=sample_data_vector_store,
             incremental=incremental
         )
+    timings['vector_store_deletion'] = perf_counter() - start_deletions
 
     # Validate response
     if not result:
         logging.info(f"Empty response from the Denodo Data Marketplace for {source_type.lower()} {source_name}")
-        return {}, [], data_usage_errors
+        timings['total_execution_time'] = perf_counter() - start_total
+        return {}, [], data_usage_errors, timings
 
     # Process schema
     if isinstance(result, dict):
@@ -651,14 +616,12 @@ async def process_metadata_source(
 
                 if vector_store:
                     tags = view.get('tagDetails', [])
-
                     # Get partial tags
                     if tags:
                         for tag in tags:
                             if 'name' in tag:
                                 if source_type == "DATABASE":
                                     found_tags_by_db.setdefault(source_name, set()).add(tag['name'])
-
                                 elif source_type == "TAG":
                                     found_tags_by_tag.setdefault(source_name, set()).add(tag['name'])
 
@@ -667,13 +630,14 @@ async def process_metadata_source(
                         table_name = view.get('tableName', '')
                         if '.' in table_name:
                             db_name = table_name.split('.')[0]
-
                             if db_name:
                                 found_dbs_by_tag.setdefault(source_name, set()).add(db_name)
 
-        # Add to vector store if provided
         if vector_store:
             views = flatten_list(prepare_schema(db_schema, request.embeddings_token_limit))
+
+        start_embedding = perf_counter()
+        if vector_store:
             await asyncio.to_thread(
                 vector_store.add_views,
                 views=views,
@@ -684,8 +648,9 @@ async def process_metadata_source(
                 dbs_by_tag=found_dbs_by_tag,
                 tags_by_tag=found_tags_by_tag
             )
+        timings['vector_store_embedding'] = perf_counter() - start_embedding
 
-        # Add sample data if enabled
+        start_sample_data = perf_counter()
         if sample_data_vector_store:
             views = flatten_list(prepare_sample_data_schema(db_schema))
             await asyncio.to_thread(
@@ -695,25 +660,30 @@ async def process_metadata_source(
                 source_type=source_type,
                 sample_data=True
             )
+        timings['sample_data_processing'] = perf_counter() - start_sample_data
 
-        return db_schema, db_schema_text, data_usage_errors
+        timings['total_execution_time'] = perf_counter() - start_total
+        return db_schema, db_schema_text, data_usage_errors, timings
 
-    # If not a dict, return empty results
-    return {}, [], data_usage_errors
+    timings['total_execution_time'] = perf_counter() - start_total
+    timings = {k: v for k, v in timings.items() if v > 0}
+    return {}, [], data_usage_errors, timings
 
 def format_metadata_response(
     all_db_schemas,
     all_db_schema_texts,
     vdb_database_names,
     vdb_tag_names,
-    all_data_usage_errors
+    all_data_usage_errors,
+    all_timings
 ):
     return {
         'db_schema_json': all_db_schemas,
         'db_schema_text': all_db_schema_texts,
         'vdb_list': vdb_database_names,
         'tag_list': vdb_tag_names,
-        'data_usage_errors': all_data_usage_errors
+        'data_usage_errors': all_data_usage_errors,
+        'timings': all_timings
     }
 
 def is_non_conflicting_doc(doc, databases_to_delete, tags_to_delete, last_update_dict):

@@ -160,12 +160,14 @@ def sync_vdbs():
             if message_suffix else "Metadata successfully synchronized."
         )
 
+        timings = result.get("timings", {})
         return jsonify({
             "success": True,
             "message": success_message,
             "syncedResources": synced_resources,
             "partialResources": partial_resources,
-            "dataUsageErrors": data_usage_errors
+            "dataUsageErrors": data_usage_errors,
+            "timings": timings,
         }), status
 
     elif status == 204:

@@ -26,6 +26,8 @@ from api.utils.sdk_utils import (
 )
 from api.utils import ai_tools
 from api.utils import answer_question
+
+from api.utils.data_category.pipeline import process_sql_category
 from api.utils import state_manager
 from api.utils.sdk_utils import get_custom_request_headers
 
@@ -102,6 +104,14 @@ class answerQuestionRequest(BaseModel):
         ge=1,
         le=int(os.getenv('VQL_EXECUTE_ROWS_LIMIT', '10000')),
         description="Maximum number of rows to return from the VQL execution result."
+    )
+    enable_query_fixer: bool = Field(
+        default=True,
+        description="If enabled, the LLM will try to automatically fix the VQL query if the first VQL query generated fails."
+    )
+    enable_query_reviewer: bool = Field(
+        default=False,
+        description="If enabled, the LLM will review the VQL query if the first VQL query generated returns no rows."
     )
 
 class answerQuestionResponse(BaseModel):
@@ -283,7 +293,7 @@ async def process_question(request_data: answerQuestionRequest, auth: str, custo
             tokens=sql_category_tokens
         )
     elif category == "SQL":
-        response = await answer_question.process_sql_category(
+        response = await process_sql_category(
             request=request_data,
             vector_search_tables=vector_search_tables,
             category_response=category_response,
@@ -294,7 +304,7 @@ async def process_question(request_data: answerQuestionRequest, auth: str, custo
             sample_data=sample_data,
             chat_llm=llm,
             sql_gen_llm=llm,
-            can_use_llm=check_llm_permission(permissions_data)
+            can_use_llm=check_llm_permission(permissions_data),
         )
         response['tokens'] = add_tokens(response['tokens'], sql_category_tokens)
     elif category == "METADATA":

@@ -18,6 +18,7 @@ import asyncio
 from async_lru import alru_cache
 from utils.utils import timed, log_params
 from utils.schema_catalog import SchemaCatalog
+from utils.data_marketplace.vql_execution_outcomes import ExecutionStatus, ExecutionOutcome
 
 DATA_MARKETPLACE_URL = (os.getenv("AI_SDK_DATA_MARKETPLACE_URL") or 'http://localhost:9090/denodo-data-catalog').rstrip('/') + '/'
 DATA_MARKETPLACE_VERIFY_SSL = os.getenv('DATA_MARKETPLACE_VERIFY_SSL', '0') == '1'
@@ -272,25 +273,54 @@ async def get_views_metadata_documents(
         return processed_views, list(set(delete_view_ids)), list(set(detagged_view_ids)), data_usage_errors
 
     except aiohttp.ClientResponseError as e:
-        logging.error("Data Marketplace views metadata request failed: %s", e.message)
+        logging.error(f"Data Marketplace views metadata request failed: {e.message}")
         raise
 
     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-        logging.error("Failed to connect to the server: %s", str(e))
+        logging.error(f"Failed to connect to the server: {str(e)}")
         raise
 
-async def is_empty_result(json_response):
-    if not json_response.get('rows'):
-        return True, "Query executed successfully but returned an empty result (no rows)."
+@log_params()
+def classify_execution(http_status, body):
+    """Map a raw Data Marketplace response into an ExecutionOutcome after executing a VQL query.
 
-    # Check for single row with single column containing 0 or null
-    if (len(json_response['rows']) == 1 and  # Single row
-        len(json_response['rows'][0]['values']) == 1 and  # Single column
-        (str(json_response['rows'][0]['values'][0]['value']) == '0' or  # Value is 0
-            json_response['rows'][0]['values'][0]['value'] is None)):  # Value is null/None
-        return True, f"Query executed successfully but returned a single row with a value of 0 or null: {parse_execution_json(json_response)}"
+    Possible outcomes:
+    - SUCCESS: 200 OK with rows
+    - EMPTY: 200 OK with no rows
+    - EXECUTION_ERROR: 200 OK with executionErrors
+    - VALIDATION_ERROR: 400 Bad Request with message
+    - CONNECTION_ERROR: Connection error/timeout. Already set by execute_vql.
+    """
 
-    return False, ""
+    # SUCCESS|EMPTY|EXECUTION_ERROR: HTTP 200 with 'executionErrors' field
+    if http_status == 200:
+        # EXECUTION_ERROR: HTTP 200 with 'executionErrors' list not empty
+        execution_errors = body.get('executionErrors') or []
+        if execution_errors:
+            error = "\n".join(
+                e.get('message', '') for e in execution_errors if isinstance(e, dict)
+            ).strip()
+            return ExecutionOutcome(ExecutionStatus.EXECUTION_ERROR, http_status, error=error, raw=body)
+
+        # EMPTY: HTTP 200 with no rows and empty 'executionErrors' list
+        if not body.get('rows'):
+            return ExecutionOutcome(ExecutionStatus.EMPTY, http_status, raw=body)
+
+        # SUCCESS: HTTP 200 with rows and empty 'executionErrors' list
+        return ExecutionOutcome(
+            ExecutionStatus.SUCCESS, http_status, data=parse_execution_json(body), raw=body
+        )
+    # VALIDATION_ERROR: HTTP 400-500 with 'message' field
+    elif 400 <= http_status <= 500:
+        try:
+            error = body.get('message')
+            return ExecutionOutcome(ExecutionStatus.VALIDATION_ERROR, http_status, error=error, raw=body)
+        except Exception as e:
+            error = str(body)
+            return ExecutionOutcome(ExecutionStatus.VALIDATION_ERROR, http_status, error=error, raw=body)
+    else:
+        error = str(body)
+        return ExecutionOutcome(ExecutionStatus.VALIDATION_ERROR, http_status, error=error, raw=body)
 
 @log_params(truncate_input_chars=None, truncate_output_chars=None)
 @timed
@@ -309,7 +339,7 @@ async def execute_vql(vql, auth, limit, truncate_vectors=True, execution_url=DAT
         verify_ssl: Whether to verify SSL certificates
 
     Returns:
-        Status code and parsed response or error message
+        ExecutionOutcome describing the result of the execution.
     """
 
     # Prepare headers based on auth type
@@ -336,46 +366,14 @@ async def execute_vql(vql, auth, limit, truncate_vectors=True, execution_url=DAT
                 headers=headers,
                 ssl=verify_ssl
             ) as response:
-                status_code = response.status
-                # Try to parse as JSON first
                 try:
-                    json_response = await response.json()
-
-                    # Success case
-                    if 200 <= status_code < 300:
-                        # Check for empty results
-                        is_empty, empty_message = await is_empty_result(json_response)
-                        if is_empty:
-                            return 499, empty_message
-
-                        return status_code, parse_execution_json(json_response)
-
-                    # Error case with JSON response
-                    if isinstance(json_response, dict) and 'message' in json_response:
-                        return status_code, json_response.get('message')
-                    else:
-                        return status_code, str(json_response)
-
-                except json.JSONDecodeError:
-                    # Non-JSON response
-                    text_response = await response.text()
-                    return status_code, text_response
-    except aiohttp.ClientResponseError as e:
-        try:
-            error_text = await e.response.text()
-            error_json = json.loads(error_text)
-            # If we have a structured JSON error with a message field, return that
-            if isinstance(error_json, dict) and 'message' in error_json:
-                return e.status, error_json.get('message')
-            else:
-                return e.status, str(error_json)
-        except (json.JSONDecodeError, AttributeError):
-            return e.status, f"HTTP Error: {e.status} - {e.message}"
-
+                    body = await response.json(content_type=None)
+                except (aiohttp.ContentTypeError, json.JSONDecodeError):
+                    body = await response.text()
+                return classify_execution(response.status, body)
     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         error_message = f"Failed to connect to the server: {str(e)}"
-        logging.error(f"{error_message}. VQL: {vql}")
-        return 500, error_message
+        return ExecutionOutcome(ExecutionStatus.CONNECTION_ERROR, http_status=0, error=error_message)
 
 @log_params
 @timed
@@ -724,7 +722,7 @@ async def get_username_from_denodo(
     """
     vql = "SELECT getsession('user') as username"
 
-    status, response = await execute_vql(
+    outcome = await execute_vql(
         vql=vql,
         auth=auth,
         limit=1,
@@ -733,9 +731,9 @@ async def get_username_from_denodo(
         custom_headers=custom_headers
     )
 
-    if status == 200 and isinstance(response, dict):
+    if outcome.is_success:
         try:
-            row_1 = response.get('Row 1', [])
+            row_1 = outcome.data.get('Row 1', [])
             if row_1 and len(row_1) > 0:
                 return row_1[0].get('value')
         except Exception as e:

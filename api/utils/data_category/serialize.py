@@ -3,7 +3,6 @@ from io import StringIO
 from utils.execution_result_helpers import (
     extract_execution_result_row,
     get_execution_result_rows,
-    get_full_execution_result_rows,
     limit_execution_result_rows,
 )
 

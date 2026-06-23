@@ -25,7 +25,7 @@ from api.utils.ai_tools.prompts import (
     SQL_CATEGORY_NO_AMBIGUITY_PROMPT,
 )
 from api.utils.ai_tools.schema_text import selector_schema_for_prompt
-from api.utils.ai_tools.types import CategoryDecision, empty_tokens
+from api.utils.ai_tools.types import CategoryDecision, usage_tokens
 
 
 def _metadata_response_instructions(markdown_response, layout):
@@ -33,9 +33,6 @@ def _metadata_response_instructions(markdown_response, layout):
         return DIRECT_METADATA_RESPONSE_MARKDOWN if markdown_response else DIRECT_METADATA_RESPONSE_PLAIN
     return METADATA_CATEGORY_RESPONSE_MARKDOWN if markdown_response else METADATA_CATEGORY_RESPONSE_PLAIN
 
-
-def _usage_tokens(callback):
-    return next(iter(callback.usage_metadata.values())) if callback.usage_metadata else empty_tokens()
 
 
 def _decision_tuple(decision):
@@ -86,7 +83,7 @@ async def metadata_category(query, vector_search_tables, llm, custom_instruction
         category=utils.custom_tag_parser(response, 'cat', default="OTHER")[0].strip(),
         category_response=utils.custom_tag_parser(response, 'response', default='')[0].strip(),
         related_questions=utils.custom_tag_parser(response, 'related_question', default=[]),
-        tokens=_usage_tokens(cb)
+        tokens=usage_tokens(cb)
     )
     return _decision_tuple(decision)
 
@@ -118,7 +115,7 @@ async def direct_metadata_category(query, vector_search_tables, llm, custom_inst
         category="METADATA",
         category_response=utils.custom_tag_parser(response, 'response', default='')[0].strip(),
         related_questions=utils.custom_tag_parser(response, 'related_question', default=[]),
-        tokens=_usage_tokens(cb)
+        tokens=usage_tokens(cb)
     )
     return _decision_tuple(decision)
 
@@ -151,7 +148,7 @@ async def direct_sql_category(
             )
         )
 
-    decision = _parse_sql_category_response(response, _usage_tokens(cb), check_ambiguity)
+    decision = _parse_sql_category_response(response, usage_tokens(cb), check_ambiguity)
     decision.category = "SQL"
     return _decision_tuple(decision)
 
@@ -242,5 +239,5 @@ async def sql_category(
         else:
             response = await sql_task
 
-    decision = _parse_sql_category_response(response, _usage_tokens(cb), check_ambiguity)
+    decision = _parse_sql_category_response(response, usage_tokens(cb), check_ambiguity)
     return _decision_tuple(decision)

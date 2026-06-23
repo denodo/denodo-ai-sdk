@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from utils.data_catalog import activate_incremental, get_user_permissions, DataCatalogAuthError
+from utils.data_marketplace.connection import activate_incremental, get_user_permissions, DataCatalogAuthError
 from api.utils import state_manager
 from api.utils.sdk_utils import (
     handle_endpoint_error, authenticate, process_metadata_source,
@@ -73,6 +73,7 @@ class getMetadataResponse(BaseModel):
     vdb_list: List[str]
     tag_list: List[str]
     data_usage_errors: List[Dict]
+    timings: List[Dict[str, float]]
 
 @router.get(
         '/getMetadata',
@@ -123,6 +124,7 @@ async def getMetadata(
     all_db_schemas = []
     all_db_schema_texts = []
     all_data_usage_errors = []
+    all_timings = []
 
     vector_store = None
     sample_data_vector_store = None
@@ -177,10 +179,9 @@ async def getMetadata(
             raise HTTPException(status_code=500, detail=f"Failed to delete metadata: {e}") from e
 
     try:
-        # Process tags
         for tag_name in vdp_tag_names:
             try:
-                db_schema, db_schema_text, tag_errors = await process_metadata_source(
+                db_schema, db_schema_text, tag_errors, timings = await process_metadata_source(
                     source_type="TAG",
                     source_name=tag_name,
                     request=endpoint_request,
@@ -195,6 +196,7 @@ async def getMetadata(
 
                 all_db_schemas.append(db_schema)
                 all_db_schema_texts.extend(db_schema_text)
+                all_timings.append(timings)
 
                 if tag_errors:
                     all_data_usage_errors.extend(tag_errors)
@@ -203,10 +205,9 @@ async def getMetadata(
                 logging.error(f"Error processing tag: {ve}")
                 continue
 
-        # Process databases
         for db_name in vdp_database_names:
             try:
-                db_schema, db_schema_text, db_errors = await process_metadata_source(
+                db_schema, db_schema_text, db_errors, timings = await process_metadata_source(
                     source_type="DATABASE",
                     source_name=db_name,
                     request=endpoint_request,
@@ -220,6 +221,7 @@ async def getMetadata(
 
                 all_db_schemas.append(db_schema)
                 all_db_schema_texts.extend(db_schema_text)
+                all_timings.append(timings)
 
                 if db_errors:
                     all_data_usage_errors.extend(db_errors)
@@ -246,7 +248,8 @@ async def getMetadata(
         all_db_schema_texts=all_db_schema_texts,
         vdb_database_names=vdp_database_names,
         vdb_tag_names=vdp_tag_names,
-        all_data_usage_errors=all_data_usage_errors
+        all_data_usage_errors=all_data_usage_errors,
+        all_timings=all_timings
     )
 
     if all_data_usage_errors:

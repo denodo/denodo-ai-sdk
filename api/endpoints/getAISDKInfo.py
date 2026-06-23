@@ -16,7 +16,7 @@ from typing import Annotated, List, Optional
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, Depends, HTTPException
 
-from utils.data_catalog import get_user_permissions, DataCatalogAuthError
+from utils.data_marketplace.connection import get_user_permissions, DataCatalogAuthError
 from api.utils.sdk_utils import (
     handle_endpoint_error,
     authenticate,

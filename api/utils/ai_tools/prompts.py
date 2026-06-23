@@ -24,8 +24,10 @@ METADATA_CATEGORY_PROMPT = category_detection.metadata_category.METADATA_CATEGOR
 
 FIX_LIMIT_PROMPT = vql_fixer.fix_limit.FIX_LIMIT
 FIX_OFFSET_PROMPT = vql_fixer.fix_offset.FIX_OFFSET
-QUERY_FIXER_PROMPT = vql_fixer.query_fixer.QUERY_FIXER
-QUERY_REVIEWER_PROMPT = vql_fixer.query_reviewer.QUERY_REVIEWER
+QUERY_FIXER_SYSTEM_PROMPT = vql_fixer.query_fixer.QUERY_FIXER_SYSTEM
+QUERY_FIXER_TURN_PROMPT = vql_fixer.query_fixer.QUERY_FIXER_TURN
+QUERY_REVIEWER_SYSTEM_PROMPT = vql_fixer.query_reviewer.QUERY_REVIEWER_SYSTEM
+QUERY_REVIEWER_TURN_PROMPT = vql_fixer.query_reviewer.QUERY_REVIEWER_TURN
 
 VQL_RULES_PROMPT = vql_rules.vql_rules.VQL_RULES
 DATES_VQL_PROMPT = vql_rules.dates_vql.DATES_VQL

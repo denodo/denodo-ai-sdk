@@ -3,7 +3,7 @@ from langchain_core.output_parsers import StrOutputParser
 from api.deepquery.agent.xml_utils import remove_think_tags
 from api.deepquery.analysis_agent.prompts import SCHEMA_DIGEST_PROMPT
 from api.deepquery.utils import execute_base_database_query
-from api.utils.answer_question.serializers import get_full_execution_result_rows
+from utils.execution_result_helpers import get_full_execution_result_rows
 from utils import langfuse
 
 class AnalysisToolsMixin:

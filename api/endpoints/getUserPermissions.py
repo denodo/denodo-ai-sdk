@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from api.utils.sdk_utils import authenticate, handle_endpoint_error
-from utils.data_catalog import get_user_permissions, DataCatalogAuthError
+from utils.data_marketplace.connection import get_user_permissions, DataCatalogAuthError
 from api.utils.sdk_utils import get_custom_request_headers
 
 router = APIRouter()

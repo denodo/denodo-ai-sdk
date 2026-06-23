@@ -91,22 +91,39 @@ class UniformLLM:
         if api_key is None:
             raise ValueError("OPENROUTER_API_KEY environment variable not set.")
 
+        model = self.model_name
+        reasoning_enabled = None
+
+        # Check -no-thinking before -thinking so suffixes are not confused.
+        if model.endswith("-no-thinking"):
+            model = model[: -len("-no-thinking")]
+            reasoning_enabled = False
+            logging.info(f"OpenRouter reasoning disabled via model id suffix; routing model ID: {model}")
+        elif model.endswith("-thinking"):
+            model = model[: -len("-thinking")]
+            reasoning_enabled = True
+            logging.info(f"OpenRouter reasoning enabled via model id suffix; routing model ID: {model}")
+
         kwargs = {
-            "model": self.model_name,
+            "model": model,
             "api_key": api_key,
             "base_url": base_url,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
         }
 
+        extra_body = {}
         if preferred_providers:
             preferred_providers = preferred_providers.split(',')
-            kwargs["extra_body"] = {
-                "provider": {
-                    "order": preferred_providers,
-                    "allow_fallbacks": True
-                }
+            extra_body["provider"] = {
+                "order": preferred_providers,
+                "allow_fallbacks": True
             }
+        if reasoning_enabled is not None:
+            extra_body["reasoning"] = {"enabled": reasoning_enabled}
+
+        if extra_body:
+            kwargs["extra_body"] = extra_body
 
         self.llm = ChatOpenAI(**kwargs)
 

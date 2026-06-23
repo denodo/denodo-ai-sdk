@@ -23,6 +23,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from api.utils.sdk_utils import timing_context, add_tokens, generate_session_id, handle_endpoint_error, authenticate, check_llm_permission
 from api.utils import ai_tools
 from api.utils import answer_question
+
+from api.utils.data_category.pipeline import process_sql_category
 from api.utils import state_manager
 from api.utils.sdk_utils import get_custom_request_headers
 
@@ -98,6 +100,14 @@ class answerDataQuestionRequest(BaseModel):
         ge=1,
         le=int(os.getenv('VQL_EXECUTE_ROWS_LIMIT', '10000')),
         description="Maximum number of rows to return from the VQL execution result."
+    )
+    enable_query_fixer: bool = Field(
+        default=True,
+        description="If enabled, the LLM will try to automatically fix the VQL query if the first VQL query generated fails."
+    )
+    enable_query_reviewer: bool = Field(
+        default=False,
+        description="If enabled, the LLM will review the VQL query if the first VQL query generated returns no rows."
     )
 
 class answerDataQuestionResponse(BaseModel):
@@ -269,7 +279,7 @@ async def process_data_question(request_data: answerDataQuestionRequest, auth: s
         response['llm_model'] = request_data.llm_model
         return JSONResponse(content=jsonable_encoder(response), media_type='application/json')
 
-    response = await answer_question.process_sql_category(
+    response = await process_sql_category(
         request=request_data,
         vector_search_tables=vector_search_tables,
         category_response=category_response,

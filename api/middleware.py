@@ -15,7 +15,7 @@ import logging
 import asyncio
 from fastapi import Response
 from utils.utils import generate_transaction_id
-from utils.data_catalog import get_username_from_denodo
+from utils.data_marketplace.connection import get_username_from_denodo
 from utils.logging_utils import transaction_id_var, username_var
 
 logger = logging.getLogger(__name__)
