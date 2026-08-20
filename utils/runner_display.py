@@ -6,7 +6,6 @@ console = Console()
 
 PANEL_WIDTH = 60
 
-
 def _build_chatbot_segments(urls, root_path_prefix="", imported_agent_names=None):
     imported_agent_names = imported_agent_names or []
     segments = []
@@ -24,7 +23,7 @@ def _build_chatbot_segments(urls, root_path_prefix="", imported_agent_names=None
     if imported_agent_names:
         segments.extend([
             ("\n\n", ""),
-            ("Imported custom agents:\n", "bold white")
+            ("Imported specialized agents:\n", "bold white")
         ])
         for index, agent_name in enumerate(imported_agent_names):
             segments.extend([

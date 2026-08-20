@@ -20,6 +20,19 @@ def get_full_execution_result_rows(execution_result):
 
     return execution_result.get("full", {})
 
+def get_llm_execution_result_rows(execution_result):
+    """
+    Return the LLM-facing rows of an execution result. Accepts both the
+    {"full": ..., "llm": ...} bundle and an already-unwrapped rows dict.
+    """
+    if not isinstance(execution_result, dict):
+        return {}
+
+    if "llm" in execution_result or "full" in execution_result:
+        return get_execution_result_rows(execution_result.get("llm", execution_result.get("full", {})))
+
+    return get_execution_result_rows(execution_result)
+
 def limit_execution_result_rows(execution_result, rows_limit):
     rows = get_execution_result_rows(execution_result)
     if not rows or rows_limit is None:

@@ -58,7 +58,9 @@ def detect_csv_delimiter(csv_file_path, sample_size=8192):
         with open(csv_file_path, encoding='utf-8') as f:
             sample = f.read(sample_size)
         sniffer = csv.Sniffer()
-        dialect = sniffer.sniff(sample)
+        # Restrict to plausible delimiters: on files whose first cells are long
+        # prose/code blobs the sniffer otherwise detects characters like ' '.
+        dialect = sniffer.sniff(sample, delimiters=',;\t|')
         logging.debug(f"[csv_utils] Detected delimiter '{dialect.delimiter}' for {csv_file_path}")
         return dialect.delimiter
     except Exception as e:

@@ -1,11 +1,10 @@
 import os
 
-from sample_chatbot.engine.prompts import CHATBOT_SYSTEM_PROMPT, DEEPQUERY_GUIDANCE
+from sample_chatbot.engine.prompts import CHATBOT_SYSTEM_PROMPT
 from sample_chatbot.utils.helpers import get_config_value
 from sample_chatbot.utils.helpers import setup_directory, get_icon_as_base64
 from utils.uniformLLM import UniformLLM
 from utils.utils import normalize_root_path
-
 
 class ChatbotConfig:
     """
@@ -70,9 +69,11 @@ class ChatbotConfig:
         # Vector Store Configuration
         self.vector_store_provider = os.environ['CHATBOT_VECTOR_STORE_PROVIDER']
 
+        # Database Configuration
+        self.database_provider = os.getenv('CHATBOT_DATABASE_PROVIDER', 'SQLite').upper()
+
         # System Prompts (from engine/prompts.py)
         self.system_prompt = CHATBOT_SYSTEM_PROMPT
-        self.deepquery_guidance = DEEPQUERY_GUIDANCE
 
         # Server Configuration
         self.host = os.getenv('CHATBOT_HOST', '0.0.0.0')
@@ -91,6 +92,13 @@ class ChatbotConfig:
         self.allow_sync = bool(int(os.getenv('CHATBOT_ALLOW_SYNC', '1')))
         self.filters_enabled = settings.get('filters_enabled', True)
 
+        # Default input method for the question form: 'enter' submits on Enter,
+        # 'ctrl_enter' submits on Ctrl+Enter (plain Enter is ignored), which is
+        # convenient for IME-based languages where Enter confirms the conversion.
+        # Users can override this default from the User Profile modal.
+        input_method = os.getenv('CHATBOT_INPUT_METHOD', 'enter').strip().lower()
+        self.input_method = input_method if input_method in ('enter', 'ctrl_enter') else 'enter'
+
         # Parse allowed users/roles for unstructured mode from environment variables
         allowed_csv_users_env = os.getenv('CHATBOT_ALLOWED_UNSTRUCTURED_USERS', '')
         allowed_csv_roles_env = os.getenv('CHATBOT_ALLOWED_UNSTRUCTURED_ROLES', '')
@@ -102,6 +110,39 @@ class ChatbotConfig:
         self.allowed_unstructured_roles = [
             r.strip() for r in allowed_csv_roles_env.split(',') if r.strip()
         ] if allowed_csv_roles_env else []
+
+        # Parse allowed users/roles for skill management (create/edit). Reading
+        # skills is open to everyone; creating and editing them is restricted.
+        # By default (no users/roles configured) only global admins may manage skills.
+        allowed_skill_users_env = os.getenv('CHATBOT_ALLOWED_SKILL_USERS', '')
+        allowed_skill_roles_env = os.getenv('CHATBOT_ALLOWED_SKILL_ROLES', '')
+
+        self.allowed_skill_users = [
+            u.strip() for u in allowed_skill_users_env.split(',') if u.strip()
+        ] if allowed_skill_users_env else []
+
+        self.allowed_skill_roles = [
+            r.strip() for r in allowed_skill_roles_env.split(',') if r.strip()
+        ] if allowed_skill_roles_env else []
+
+        # System skills that apply to this agent. Specialized agents can list
+        # skill names in their YAML (settings.skills); None means all system
+        # skills apply (the global agent's default). Personal skills always apply.
+        agent_skills = settings.get('skills', None)
+        self.agent_skills = list(agent_skills) if agent_skills is not None else None
+
+        # Skills force-deactivated by feature flags. When DeepQuery is disabled
+        # for this agent (settings.deepquery_enabled / CHATBOT_DEEPQUERY), its
+        # skill is permanently deactivated: excluded from the agent context,
+        # not user-toggleable, and not readable via the read_skill tool.
+        self.disabled_skills = set() if self.deepquery_enabled else {"deepquery"}
+
+        # Knowledge base collection names declared by this agent's YAML
+        # (like `skills`, a plain list of names). They are always active for
+        # every user of the agent and must already exist in the vector store;
+        # the agent is not usable while any is missing. Descriptions come from
+        # the collections themselves (set in the Knowledge Base Manager).
+        self.knowledge_bases = [str(name) for name in settings.get('knowledge_bases', []) or []]
 
         # Reporting Configuration
         if self.data_dir != ".":
@@ -194,7 +235,6 @@ class ChatbotConfig:
         # Default deny if restrictions exist but no match was found
         return False
 
-
     def is_user_allowed(self, username, roles=None, is_admin=False, legacy_permissions_endpoint=False):
         """
         Evaluates if a user has access to this agent.
@@ -225,6 +265,30 @@ class ChatbotConfig:
             allowed_roles=self.allowed_unstructured_roles
         )
 
+    def is_skill_management_allowed_for_user(self, username, roles=None, is_admin=False, legacy_permissions_endpoint=False):
+        """
+        Evaluates if a user may create or edit skills.
+
+        Reading skills is open to everyone; managing (creating/editing) them is
+        restricted. Global admins are always allowed. If specific users/roles are
+        configured, they are allowed too. If nothing is configured, only admins
+        are allowed (admin-only default).
+        """
+        if roles is None:
+            roles = []
+
+        if not legacy_permissions_endpoint and is_admin:
+            return True
+
+        if self.allowed_skill_users and username in self.allowed_skill_users:
+            return True
+
+        if not legacy_permissions_endpoint and self.allowed_skill_roles:
+            if any(r in self.allowed_skill_roles for r in roles):
+                return True
+
+        return False
+
     def log_config(self, logger):
         """Log the current configuration."""
         logger.info(f"Chatbot parameters for agent: {self.name}")
@@ -243,6 +307,7 @@ class ChatbotConfig:
 
         logger.info(f"    - Embeddings Model: {self.embeddings_provider}/{self.embeddings_model}")
         logger.info(f"    - Vector Store Provider: {self.vector_store_provider}")
+        logger.info(f"    - Database Provider (History): {self.database_provider}")
         logger.info(f"    - AI SDK Host: {self.ai_sdk_host}")
         logger.info(f"    - AI SDK Data Dir (logs, cache, reports...): {self.data_dir}")
         logger.info(f"    - Chatbot Timeout: {self.chatbot_timeout}s")
@@ -253,8 +318,25 @@ class ChatbotConfig:
         logger.info(f"    - Report Max Files: {'unlimited' if self.report_max_files <= 0 else self.report_max_files}")
         logger.info(f"    - Feedback: {self.effective_feedback_enabled}")
         logger.info(f"    - Auto Graph: {self.auto_graph}")
+        logger.info(f"    - Input Method: {self.input_method}")
         logger.info(f"    - User can edit LLM settings: {self.user_edit_llm}")
         logger.info(f"    - Data Marketplace URL (for direct view linking): {self.data_marketplace_url}")
+
+        skill_access_msg = []
+        if self.allowed_skill_roles:
+            skill_access_msg.append(f"Roles: {self.allowed_skill_roles}")
+        if self.allowed_skill_users:
+            skill_access_msg.append(f"Users: {self.allowed_skill_users}")
+        if skill_access_msg:
+            logger.info(f"    - Skill Management: Admins + [{', '.join(skill_access_msg)}]")
+        else:
+            logger.info("    - Skill Management: Admins only")
+
+        if self.agent_skills is not None:
+            logger.info(f"    - Agent System Skills: {self.agent_skills}")
+
+        if self.knowledge_bases:
+            logger.info(f"    - Agent Knowledge Bases (always active): {self.knowledge_bases}")
 
         if not self.unstructured_mode:
             logger.info("    - Unstructured Mode (CSV): Disabled globally")
@@ -275,7 +357,6 @@ class ChatbotConfig:
 # Dictionary to store configuration instances by name
 _configs = {}
 
-
 def get_config(chatbot_name="global", config_dict=None):
     """
     Get or create a specific configuration instance.
@@ -285,7 +366,6 @@ def get_config(chatbot_name="global", config_dict=None):
     if chatbot_name not in _configs or config_dict is not None:
         _configs[chatbot_name] = ChatbotConfig(config_dict)
     return _configs[chatbot_name]
-
 
 def init_agents(agents_config=None):
     """
@@ -304,13 +384,11 @@ def init_agents(agents_config=None):
 
     return _configs.get("global") or next(iter(_configs.values()))
 
-
 def setup_agents_directories():
     global _configs
 
     for chatbot in _configs.values():
         setup_directory(chatbot.reports_folder)
-
 
 def get_llm(chatbot_id):
     """
@@ -320,17 +398,14 @@ def get_llm(chatbot_id):
     _configs.get(chatbot_id)
     return _configs.get(chatbot_id).llm
 
-
 def log_agents_config(logger):
     global _configs
     for chatbot in _configs.values():
         chatbot.log_config(logger)
 
-
 def get_config_reports_directory(chatbot_id):
     global _configs
     return _configs.get(chatbot_id).reports_folder
-
 
 def get_agents_metadata_by_user(username, roles=None, is_admin=False, legacy_permissions_endpoint=False):
     """

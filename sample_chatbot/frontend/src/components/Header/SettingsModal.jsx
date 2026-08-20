@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import PropTypes from "prop-types";
 import Modal from "react-bootstrap/Modal";
 import Button from "react-bootstrap/Button";
 import Form from "react-bootstrap/Form";
@@ -56,10 +57,10 @@ const canonicalProviderForSelect = (provider, validProviders) => {
 const SettingsModal = ({
   show,
   handleClose,
-  handleClearResults,
   selectedChatbot,
   onSettingsApplied,
   title,
+  isCurrentAgent = true,
 }) => {
   const [activeTab, setActiveTab] = useState("info");
   const [isLoading, setIsLoading] = useState(false);
@@ -93,9 +94,6 @@ const SettingsModal = ({
   });
   const [useBaseLLMForExecution, setUseBaseLLMForExecution] = useState(false);
   const [checkAmbiguity, setCheckAmbiguity] = useState(true);
-  const [isCustomBaseProvider, setIsCustomBaseProvider] = useState(false);
-  const [isCustomThinkingProvider, setIsCustomThinkingProvider] =
-    useState(false);
   const [sdkDefaults, setSdkDefaults] = useState({ base: {}, thinking: {} });
   const [sdkDeepQueryEnabled, setSdkDeepQueryEnabled] = useState(false);
 
@@ -105,13 +103,20 @@ const SettingsModal = ({
     temperature: "",
     max_tokens: "",
   });
-  const [isCustomChatbotProvider, setIsCustomChatbotProvider] = useState(false);
   const [chatbotDefaults, setChatbotDefaults] = useState({});
   const [chatbotDeepQueryEnabled, setChatbotDeepQueryEnabled] = useState(false);
   const [defaultCustomInstructions, setDefaultCustomInstructions] = useState({
     chatbot: "",
     ai_sdk: "",
   });
+
+  // Skills & Knowledge activation toggles (per user, per agent). These act
+  // immediately (no Save needed) and work for any agent, not just the
+  // currently selected one.
+  const [agentSkills, setAgentSkills] = useState([]);
+  const [agentKBs, setAgentKBs] = useState([]);
+  const [togglesLoading, setTogglesLoading] = useState(false);
+  const [togglesError, setTogglesError] = useState(null);
 
   const agentKey = selectedChatbot
     ? selectedChatbot.isGlobal
@@ -120,11 +125,14 @@ const SettingsModal = ({
     : "global";
   const isGlobalChat = selectedChatbot && selectedChatbot.isGlobal;
 
-  const canEditLLM = config?.user_edit_llm;
-  const canEditInstructions = config?.can_edit_instructions;
+  // Permissions evaluated for the agent being configured (fetched with its
+  // settings); fall back to the current agent's config until loaded.
+  const [agentPerms, setAgentPerms] = useState(null);
+  const canEditLLM = agentPerms ? agentPerms.user_edit_llm : config?.user_edit_llm;
+  const canEditInstructions = agentPerms ? agentPerms.can_edit_instructions : config?.can_edit_instructions;
 
   const showToast = (message, variant, toastTitle, duration = 5000) => {
-    setToastConfig({
+    toastConfig && setToastConfig({
       show: true,
       message,
       variant,
@@ -142,14 +150,100 @@ const SettingsModal = ({
     setIsLoading(false);
   };
 
+  // The modal instance is shared across agents: reset to the first tab every
+  // time it opens.
+  useEffect(() => {
+    if (show) setActiveTab("info");
+  }, [show, isCurrentAgent]);
+
+  useEffect(() => {
+    if (!show) return;
+    const fetchToggles = async () => {
+      setTogglesLoading(true);
+      setTogglesError(null);
+      try {
+        const [skillsRes, kbRes] = await Promise.all([
+          api.get("skills/list", { params: { agent_id: agentKey } }),
+          api.get("csv/list", { params: { agent_id: agentKey } }),
+        ]);
+        if (skillsRes.data.success) setAgentSkills(skillsRes.data.skills || []);
+        if (kbRes.data.success) {
+          // Show agent-declared, public, and the user's own private
+          // collections; other users' private collections (admin-visible in
+          // the KB Manager) are not listed here.
+          setAgentKBs((kbRes.data.sources || []).filter((s) => s.agent_managed || !s.private || s.is_owner));
+        }
+      } catch (err) {
+        setTogglesError("Failed to load skills and knowledge bases for this agent.");
+        console.error("Error fetching agent toggles:", err);
+      } finally {
+        setTogglesLoading(false);
+      }
+    };
+    fetchToggles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show, agentKey]);
+
+  const handleToggleSkill = async (skillName, currentActive) => {
+    try {
+      const response = await api.post("skills/activate", {
+        skill_name: skillName,
+        active: !currentActive,
+        agent_id: agentKey,
+      });
+      if (response.data.success) {
+        setAgentSkills((prev) => prev.map((s) =>
+          s.skill_name === skillName ? { ...s, active: !currentActive } : s
+        ));
+      }
+    } catch (err) {
+      setTogglesError(`Failed to toggle skill: ${err.response?.data?.error || err.message}`);
+    }
+  };
+
+  const handleToggleKB = async (sourceName, currentActive) => {
+    try {
+      const response = await api.post("csv/activate", {
+        source_name: sourceName,
+        active: !currentActive,
+        agent_id: agentKey,
+      });
+      if (response.data.success) {
+        setAgentKBs((prev) => prev.map((s) =>
+          s.source_name === sourceName ? { ...s, active: !currentActive } : s
+        ));
+      }
+    } catch (err) {
+      setTogglesError(`Failed to toggle knowledge base: ${err.response?.data?.error || err.message}`);
+    }
+  };
+
   useEffect(() => {
     if (!show) return;
 
     const fetchSettings = async () => {
       setIsFetching(true);
       try {
-        const response = await api.get("llm_settings");
+        const response = await api.get("llm_settings", { params: { agent_id: agentKey } });
         const data = response.data;
+        setAgentPerms({
+          user_edit_llm: data.user_edit_llm ?? config?.user_edit_llm,
+          can_edit_instructions: data.user_edit_instructions ?? config?.can_edit_instructions,
+        });
+
+        // For a non-current agent the server has no session preferences;
+        // use the per-agent settings stored locally (the same ones pushed to
+        // the backend whenever the user switches to that agent).
+        if (!isCurrentAgent) {
+          const storedUser = localStorage.getItem("current_user") || "";
+          const storedAiSdk = storedUser ? (getDict(storedUser, "ai_sdk_llm_settings_dict")[agentKey] || {}) : {};
+          const storedChatbot = storedUser ? (getDict(storedUser, "chatbot_llm_settings_dict")[agentKey] || {}) : {};
+          data.ai_sdk_base_llm_preferences = storedAiSdk.ai_sdk_base_llm || {};
+          data.ai_sdk_thinking_llm_preferences = storedAiSdk.ai_sdk_thinking_llm || {};
+          data.chatbot_llm_preferences = storedChatbot;
+          data.check_ambiguity = storedAiSdk.check_ambiguity ?? data.check_ambiguity_default;
+          data.use_base_llm_for_execution = storedAiSdk.use_base_llm_for_execution ?? data.use_base_llm_for_execution_default;
+        }
 
         const sdkInfo = data.ai_sdk_info || {};
         const providers = sdkInfo.valid_providers || [];
@@ -276,19 +370,6 @@ const SettingsModal = ({
         setCheckAmbiguity(checkAmbVal);
         setUseBaseLLMForExecution(useBaseExecVal);
 
-        const providersLower = new Set(providers.map((p) => p.toLowerCase()));
-        setIsCustomBaseProvider(
-          effectiveBaseProvider !== "" &&
-            !providersLower.has(effectiveBaseProvider.toLowerCase()),
-        );
-        setIsCustomThinkingProvider(
-          effectiveThinkingProvider !== "" &&
-            !providersLower.has(effectiveThinkingProvider.toLowerCase()),
-        );
-        setIsCustomChatbotProvider(
-          effectiveChatbotProvider !== "" &&
-            !providersLower.has(effectiveChatbotProvider.toLowerCase()),
-        );
       } catch (error) {
         console.error("Error fetching settings:", error);
       } finally {
@@ -384,17 +465,22 @@ const SettingsModal = ({
       }
 
       if (username && canEditLLM) {
-        const payload = {
-          ai_sdk_base_llm: aiSDKBaseLLM,
-          check_ambiguity: checkAmbiguity,
-          ...(deepQueryActive && {
-            ai_sdk_thinking_llm: aiSDKThinkingLLM,
-            use_base_llm_for_execution: useBaseLLMForExecution,
-          }),
-          chatbot_llm: chatbotLLM,
-        };
+        // The live update endpoint acts on the user's current agent; for any
+        // other agent the saved settings are stored per-agent below and
+        // pushed automatically the next time the user switches to it.
+        if (isCurrentAgent) {
+          const payload = {
+            ai_sdk_base_llm: aiSDKBaseLLM,
+            check_ambiguity: checkAmbiguity,
+            ...(deepQueryActive && {
+              ai_sdk_thinking_llm: aiSDKThinkingLLM,
+              use_base_llm_for_execution: useBaseLLMForExecution,
+            }),
+            chatbot_llm: chatbotLLM,
+          };
 
-        await api.post("update_llm_settings", payload);
+          await api.post("update_llm_settings", payload);
+        }
 
         const aiSdkLlmDict = getDict(username, "ai_sdk_llm_settings_dict");
         aiSdkLlmDict[agentKey] = {
@@ -412,14 +498,14 @@ const SettingsModal = ({
         saveDict(username, "chatbot_llm_settings_dict", chatbotLlmDict);
       }
 
-      if (onSettingsApplied && selectedChatbot) {
+      if (onSettingsApplied && selectedChatbot && isCurrentAgent) {
         await onSettingsApplied(selectedChatbot);
-      } else if (handleClearResults) {
-        await handleClearResults();
       }
 
       showToast(
-        "Settings updated. Conversation history cleared.",
+        isCurrentAgent
+          ? "Settings updated successfully."
+          : "Settings saved. They will apply the next time you use this agent.",
         "success",
         "Settings Updated",
       );
@@ -440,7 +526,7 @@ const SettingsModal = ({
   const handleResetToDefaults = async () => {
     setIsLoading(true);
     try {
-      const response = await api.get("llm_settings");
+      const response = await api.get("llm_settings", { params: { agent_id: agentKey } });
       const data = response.data;
       const sdkInfo = data.ai_sdk_info || {};
 
@@ -455,12 +541,6 @@ const SettingsModal = ({
           : sdkInfo.thinking_llm || {};
 
       const chatbotServerDefaults = data.chatbot_llm_defaults || {};
-      const providersLower = new Set(
-        validProviders.map((p) => p.toLowerCase()),
-      );
-
-      const markCustom = (provider) =>
-        provider !== "" && !providersLower.has(provider.toLowerCase());
 
       if (activeTab === "agent_llm") {
         const p = canonicalProviderForSelect(
@@ -473,7 +553,6 @@ const SettingsModal = ({
           temperature: chatbotServerDefaults.temperature ?? "",
           max_tokens: chatbotServerDefaults.max_tokens || "",
         });
-        setIsCustomChatbotProvider(markCustom(p));
       } else if (activeTab === "ai_sdk") {
         const baseP = canonicalProviderForSelect(
           baseDefaults.provider || "",
@@ -485,7 +564,6 @@ const SettingsModal = ({
           temperature: baseDefaults.temperature ?? "",
           max_tokens: baseDefaults.max_tokens || "",
         });
-        setIsCustomBaseProvider(markCustom(baseP));
 
         const hasThinkingModel =
           sdkInfo.thinking_llm != null ||
@@ -503,7 +581,7 @@ const SettingsModal = ({
             temperature: thinkingDefaults.temperature ?? "",
             max_tokens: thinkingDefaults.max_tokens || "",
           });
-          setIsCustomThinkingProvider(markCustom(thP));
+          
           const defExec = data.use_base_llm_for_execution_default;
           setUseBaseLLMForExecution(
             defExec !== null && defExec !== undefined
@@ -554,78 +632,27 @@ const SettingsModal = ({
     );
   };
 
-  const handleProviderSelect = (value, setLLMState, setIsCustom) => {
-    if (value === "__custom__") {
-      setIsCustom(true);
-      setLLMState((prev) => ({ ...prev, provider: "" }));
-    } else {
-      setIsCustom(false);
-      setLLMState((prev) => ({ ...prev, provider: value }));
-    }
-  };
-
-  const renderProviderField = (
-    llmState,
-    setLLMState,
-    isCustom,
-    setIsCustom,
-  ) => {
-    if (isCustom) {
-      return (
-        <div className="d-flex gap-1">
-          <Form.Control
-            size="sm"
-            type="text"
-            placeholder="Custom provider name"
-            value={llmState.provider}
-            onChange={(e) =>
-              setLLMState((prev) => ({ ...prev, provider: e.target.value }))
-            }
-          />
-          <Button
-            size="sm"
-            variant="outline-secondary"
-            onClick={() => setIsCustom(false)}
-            title="Switch back to provider list"
-          >
-            &#x2630;
-          </Button>
-        </div>
-      );
-    }
-    return (
-      <Form.Select
-        size="sm"
-        value={llmState.provider}
-        onChange={(e) =>
-          handleProviderSelect(e.target.value, setLLMState, setIsCustom)
-        }
-      >
-        <option value="">Select provider...</option>
-        {validProviders.map((p) => (
-          <option key={p} value={p}>
-            {p}
-          </option>
-        ))}
-        <option value="__custom__">Custom...</option>
-      </Form.Select>
-    );
-  };
-
-  const renderLLMSection = (
-    sectionTitle,
-    llmState,
-    setLLMState,
-    isCustom,
-    setIsCustom,
-  ) => (
+  const renderLLMSection = (sectionTitle, llmState, setLLMState) => (
     <div className="mb-3">
       {sectionTitle && <h6 className="mb-2 small fw-bold">{sectionTitle}</h6>}
       <div className="row g-2">
         <div className="col-md-6">
           <Form.Group className="mb-2">
             <Form.Label className="small">Provider</Form.Label>
-            {renderProviderField(llmState, setLLMState, isCustom, setIsCustom)}
+            <Form.Select
+              size="sm"
+              value={llmState.provider}
+              onChange={(e) =>
+                setLLMState((prev) => ({ ...prev, provider: e.target.value }))
+              }
+            >
+              <option value="">Select provider...</option>
+              {validProviders.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </Form.Select>
           </Form.Group>
         </div>
         <div className="col-md-6">
@@ -682,27 +709,8 @@ const SettingsModal = ({
     </div>
   );
 
-  const showSDKWarning =
-    (aiSDKBaseLLM.provider &&
-      sdkDefaults.base?.provider &&
-      aiSDKBaseLLM.provider.toLowerCase() !==
-        sdkDefaults.base.provider.toLowerCase()) ||
-    (deepQueryActive &&
-      aiSDKThinkingLLM.provider &&
-      sdkDefaults.thinking?.provider &&
-      aiSDKThinkingLLM.provider.toLowerCase() !==
-        sdkDefaults.thinking.provider.toLowerCase());
-
-  const showChatbotWarning =
-    chatbotLLM.provider &&
-    chatbotDefaults.provider &&
-    chatbotLLM.provider.toLowerCase() !==
-      chatbotDefaults.provider.toLowerCase();
-
   const tooltipAiSdkInstructionsContent =
     "Only the data query path (e.g. data_search tool) uses this text as request custom_instructions. The AI SDK server appends it after CUSTOM_INSTRUCTIONS from sdk_config.env. The metadata search path does not use an LLM the same way.";
-
-  if (!canEditLLM && !canEditInstructions) return null;
 
   return (
     <>
@@ -720,9 +728,9 @@ const SettingsModal = ({
           <Alert variant="info" className="mb-3 py-2">
             <small>
               <strong>Note:</strong> Fields are pre-filled with the current
-              configurations for this agent. Changing these settings will clear
-              your conversation history. Your settings are saved and will be
-              restored on your next login.
+              configurations for this agent. Your settings are saved and will be
+              restored on your next login. Changing the LLM settings mid-conversation 
+              is supported, but starting a new chat is recommended for best results.
             </small>
           </Alert>
 
@@ -788,7 +796,7 @@ const SettingsModal = ({
                         ) : null}
                         <i
                           className={
-                              isGlobalChat
+                            isGlobalChat
                               ? "bi bi-chat-left-text"
                               : "bi bi-robot"
                           }
@@ -839,26 +847,141 @@ const SettingsModal = ({
                   </div>
                 </Tab>
 
+                <Tab eventKey="skills_kb" title="Skills & Knowledge">
+                  <div className="mt-3">
+                    {togglesError && (
+                      <Alert variant="danger" onClose={() => setTogglesError(null)} dismissible className="py-2">
+                        <small>{togglesError}</small>
+                      </Alert>
+                    )}
+                    {togglesLoading ? (
+                      <div className="text-center py-4">
+                        <Spinner animation="border" size="sm" />
+                        <span className="ms-2">Loading skills and knowledge bases...</span>
+                      </div>
+                    ) : (
+                      <>
+                        <h6 className="fw-semibold mb-2">Skills</h6>
+                        {agentSkills.length === 0 ? (
+                          <p className="text-muted"><small>No skills available for this agent.</small></p>
+                        ) : (
+                          <div className="mb-2">
+                            {["system", "personal"].map((scope) => {
+                              const skills = agentSkills.filter((s) => s.scope === scope);
+                              if (skills.length === 0) return null;
+                              return (
+                                <div key={scope} className="mb-2">
+                                  <h6
+                                    className="text-uppercase text-secondary mb-1 mt-2"
+                                    style={{ fontSize: "0.7rem", letterSpacing: "0.04em" }}
+                                  >
+                                    {scope === "system" ? "System" : "Personal"}
+                                  </h6>
+                                  {skills.map((skill) => (
+                                    <div key={skill.skill_name} className="d-flex align-items-center py-1 border-bottom">
+                                      <Form.Check
+                                        type="switch"
+                                        id={`settings-skill-${agentKey}-${skill.skill_name}`}
+                                        checked={skill.valid === false ? false : skill.active}
+                                        disabled={skill.agent_managed || skill.valid === false}
+                                        onChange={() => handleToggleSkill(skill.skill_name, skill.active)}
+                                        title={
+                                          skill.valid === false
+                                            ? (skill.error || "Invalid skill")
+                                            : skill.agent_managed
+                                              ? "Managed by this agent"
+                                              : ""
+                                        }
+                                      />
+                                      <code className="ms-2">{skill.skill_name}</code>
+                                      {skill.valid === false && (
+                                        <span className="text-danger ms-2" title={skill.error || "Invalid skill"}>
+                                          <small>(Error)</small>
+                                        </span>
+                                      )}
+                                      {skill.agent_managed && skill.valid !== false && (
+                                        <span className="text-muted ms-2">
+                                          <small>{skill.active ? "(managed by agent — always active)" : "(managed by agent)"}</small>
+                                        </span>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        <p className="text-muted mb-4">
+                          <small>To create, upload, view or delete skills, use <strong>Tools &gt; Skills Manager</strong>.</small>
+                        </p>
+
+                        <h6 className="fw-semibold mb-2">Knowledge Bases</h6>
+                        {agentKBs.length === 0 ? (
+                          <p className="text-muted"><small>No knowledge base collections available.</small></p>
+                        ) : (
+                          <div className="mb-2">
+                            {[
+                              { key: "agent", label: "Agent", match: (kb) => kb.agent_managed },
+                              { key: "public", label: "Public", match: (kb) => !kb.agent_managed && !kb.private },
+                              { key: "personal", label: "Personal", match: (kb) => !kb.agent_managed && kb.private },
+                            ].map(({ key, label, match }) => {
+                              const kbs = agentKBs.filter(match);
+                              if (kbs.length === 0) return null;
+                              return (
+                                <div key={key} className="mb-2">
+                                  <h6
+                                    className="text-uppercase text-secondary mb-1 mt-2"
+                                    style={{ fontSize: "0.7rem", letterSpacing: "0.04em" }}
+                                  >
+                                    {label}
+                                  </h6>
+                                  {kbs.map((kb) => (
+                                    <div key={kb.source_name} className="d-flex align-items-center py-1 border-bottom">
+                                      <Form.Check
+                                        type="switch"
+                                        id={`settings-kb-${agentKey}-${kb.source_name}`}
+                                        checked={kb.active}
+                                        disabled={kb.agent_managed || !kb.can_toggle}
+                                        onChange={() => handleToggleKB(kb.source_name, kb.active)}
+                                        title={
+                                          kb.agent_managed
+                                            ? "Managed by this agent — always active"
+                                            : !kb.can_toggle
+                                              ? kb.private
+                                                ? "You are not allowed to activate collections on this agent"
+                                                : "Public collections are only active when declared in an agent's configuration"
+                                              : ""
+                                        }
+                                      />
+                                      <code className="ms-2">{kb.source_name}</code>
+                                      {kb.agent_managed && (
+                                        <span className="text-muted ms-2"><small>(managed by agent — always active)</small></span>
+                                      )}
+                                      {!kb.agent_managed && !kb.private && !kb.can_toggle && (
+                                        <span className="text-muted ms-2"><small>(active only when declared by an agent)</small></span>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        <p className="text-muted mb-0">
+                          <small>To upload, delete or manage collections, use <strong>Tools &gt; Knowledge Base Manager</strong>.</small>
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </Tab>
+
                 {canEditLLM && (
                   <Tab eventKey="agent_llm" title="LLM">
                     <div className="mt-3">
-                      {showChatbotWarning && (
-                        <Alert variant="warning" className="mb-3 py-2">
-                          <small>
-                            <strong>Important:</strong> If you select a
-                            different provider or model, make sure the
-                            corresponding API keys are already configured in{" "}
-                            <code>chatbot_config.env</code>.
-                          </small>
-                        </Alert>
-                      )}
-
                       {renderLLMSection(
                         "",
                         chatbotLLM,
                         setChatbotLLM,
-                        isCustomChatbotProvider,
-                        setIsCustomChatbotProvider,
                       )}
                     </div>
                   </Tab>
@@ -952,17 +1075,6 @@ const SettingsModal = ({
                         AI SDK LLMs
                       </h6>
 
-                      {showSDKWarning && (
-                        <Alert variant="warning" className="mb-3 py-2">
-                          <small>
-                            <strong>Important:</strong> If you select a
-                            different provider or model, make sure the
-                            corresponding API keys are already configured in{" "}
-                            <code>sdk_config.env</code>.
-                          </small>
-                        </Alert>
-                      )}
-
                       <div className="row g-3 align-items-start mb-1">
                         <div
                           className={
@@ -973,8 +1085,6 @@ const SettingsModal = ({
                             "Base LLM",
                             aiSDKBaseLLM,
                             setAISDKBaseLLM,
-                            isCustomBaseProvider,
-                            setIsCustomBaseProvider,
                           )}
                         </div>
                         {deepQueryActive && (
@@ -983,8 +1093,6 @@ const SettingsModal = ({
                               "Thinking LLM",
                               aiSDKThinkingLLM,
                               setAISDKThinkingLLM,
-                              isCustomThinkingProvider,
-                              setIsCustomThinkingProvider,
                             )}
                           </div>
                         )}
@@ -1093,7 +1201,7 @@ const SettingsModal = ({
               Reset General defaults
             </Button>
           )}
-          {activeTab !== "info" && canEditLLM && (
+          {activeTab !== "info" && activeTab !== "skills_kb" && canEditLLM && (
             <Button
               variant="outline-danger"
               size="sm"
@@ -1111,7 +1219,7 @@ const SettingsModal = ({
           )}
           {!(
             (activeTab === "info" && canEditInstructions) ||
-            (activeTab !== "info" && canEditLLM)
+            (activeTab !== "info" && activeTab !== "skills_kb" && canEditLLM)
           ) && <div className="me-auto" />}
 
           <Button variant="light" onClick={handleClose} disabled={isLoading}>
@@ -1151,6 +1259,15 @@ const SettingsModal = ({
       />
     </>
   );
+};
+
+SettingsModal.propTypes = {
+  show: PropTypes.bool.isRequired,
+  handleClose: PropTypes.func.isRequired,
+  selectedChatbot: PropTypes.object,
+  onSettingsApplied: PropTypes.func,
+  title: PropTypes.string,
+  isCurrentAgent: PropTypes.bool,
 };
 
 export default SettingsModal;

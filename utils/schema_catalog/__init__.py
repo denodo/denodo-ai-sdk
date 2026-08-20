@@ -1,4 +1,4 @@
-from .catalog import SchemaCatalog
+from .catalog import SchemaCatalog, VQL_SCHEMA_GRAMMAR
 from .view import SchemaAssociation, SchemaColumn, SchemaTable
 
 __all__ = [
@@ -6,4 +6,5 @@ __all__ = [
     "SchemaCatalog",
     "SchemaColumn",
     "SchemaTable",
+    "VQL_SCHEMA_GRAMMAR",
 ]

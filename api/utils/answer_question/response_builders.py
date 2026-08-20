@@ -5,7 +5,6 @@ from utils.utils import custom_tag_parser
 
 from api.utils.data_category.serialize import build_execution_result_bundle
 
-
 AMBIGUITY_TYPE_LABELS = {
     "UNCL_SCHEMA": "Unclear schema reference",
     "TEMP": "Temporal ambiguity",
@@ -13,7 +12,6 @@ AMBIGUITY_TYPE_LABELS = {
     "QUAL": "Qualitative ambiguity",
     "MISSING_OBL": "Missing obligatory input",
 }
-
 
 def build_ambiguity_message(category_response):
     ambiguous_inputs = custom_tag_parser(category_response, 'ambiguous_input', default=[])
@@ -38,7 +36,6 @@ def build_ambiguity_message(category_response):
 
     return "\n".join(lines)
 
-
 def _normalize_tokens(tokens):
     normalized_tokens = {
         'input_tokens': 0,
@@ -50,7 +47,6 @@ def _normalize_tokens(tokens):
         normalized_tokens['output_tokens'] = tokens.get('output_tokens', 0)
         normalized_tokens['total_tokens'] = tokens.get('total_tokens', 0)
     return normalized_tokens
-
 
 def process_metadata_category(category_response, category_related_questions, disclaimer, vector_search_tables, timings, tokens):
     if disclaimer:
@@ -78,7 +74,6 @@ def process_metadata_category(category_response, category_related_questions, dis
         'total_execution_time': round(sum(timings.values()), 2) if timings else 0
     }
 
-
 def process_ambiguity_category(ambiguity_message, vector_search_tables, timings, tokens):
     related_tables = SchemaCatalog.from_vector_search_tables(vector_search_tables).render_related_tables_payload()
 
@@ -98,7 +93,6 @@ def process_ambiguity_category(ambiguity_message, vector_search_tables, timings,
         'total_execution_time': round(sum(timings.values()), 2) if timings else 0
     }
 
-
 def process_unknown_category(timings):
     return {
         'answer': "Sorry, that doesn't seem something I can help you with. Are you sure that question is related to your Denodo instance?",
@@ -114,7 +108,6 @@ def process_unknown_category(timings):
         'llm_time': timings.get('llm_time', 0),
         'total_execution_time': round(sum(timings.values()), 2) if timings else 0
     }
-
 
 def prepare_response(vql_query, query_explanation, tokens, execution_result, vector_search_tables, raw_graph, timings):
     llm_response_rows_limit = int(os.getenv('LLM_RESPONSE_ROWS_LIMIT', '100'))

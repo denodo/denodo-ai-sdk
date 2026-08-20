@@ -7,16 +7,30 @@ import uuid
 import logging
 
 from langchain.agents import create_agent
+from langchain_core.messages import HumanMessage
 from langchain_core.messages.ai import AIMessageChunk
 from langchain_core.messages.tool import ToolMessage
-from langgraph.checkpoint.memory import InMemorySaver
 
-from sample_chatbot.engine.middleware import TrimConversationHistoryMiddleware, UserRequestLoggingMiddleware
+from sample_chatbot.engine.middleware import TrimConversationHistoryMiddleware
 from sample_chatbot.engine.context import UserContext
-from sample_chatbot.engine.tools import data_agent, deep_query, knowledge_query, metadata_search
-from sample_chatbot.utils.helpers import setup_user_details, format_user_instructions_for_prompt
-from utils.langfuse import build_config, generate_langfuse_session_id
+from sample_chatbot.engine.skills import build_skills_prompt_section
+from sample_chatbot.engine.tools import (
+    data_agent,
+    deep_query,
+    knowledge_query,
+    metadata_search,
+    read_skill,
+    read_skill_reference,
+    edit_skill,
+    edit_skill_reference,
+    create_skill,
+    create_skill_reference,
+)
+from sample_chatbot.utils.helpers import setup_user_details, format_user_instructions_for_prompt, format_chat_log
+from utils.langfuse import build_config
 from utils.utils import custom_tag_parser, calculate_tokens, safe_str
+from utils.database_utils import UniformCheckpointer
+from utils.denodo_tools import AISDKRequestCancelled
 
 class ChatbotEngine:
     """
@@ -39,14 +53,16 @@ class ChatbotEngine:
         vector_store_provider,
         vector_store,
         message_history_limit=5,
-        remove_first_n_messages=1,
         user_details="",
         ai_sdk_custom_instructions="",
         chatbot_custom_instructions="",
-        thread_id=None,
         enable_deepquery=True,
-        deep_query_guidance="",
         extra_tools_guidance="",
+        skills=None,
+        can_manage_skills=False,
+        agent_id="global",
+        allowed_system_skills=None,
+        disabled_skills=None,
         data_agent_limit_max=None,
         verify_ssl=False,
         ai_sdk_params=None,
@@ -62,14 +78,17 @@ class ChatbotEngine:
         self.vector_store = vector_store
         self.chat_history = []
         self.message_history_limit = message_history_limit
-        self.remove_first_n_messages = remove_first_n_messages
         self.api_host = api_host
         self.username = username
         self.password = password
         self.user_details = setup_user_details(user_details)
         self.enable_deepquery = enable_deepquery
-        self.deep_query_guidance = deep_query_guidance
         self.extra_tools_guidance = extra_tools_guidance
+        self.skills = skills or {}
+        self.can_manage_skills = can_manage_skills
+        self.agent_id = agent_id
+        self.allowed_system_skills = allowed_system_skills
+        self.disabled_skills = disabled_skills
         self.data_agent_limit_max = data_agent_limit_max
         self.verify_ssl = verify_ssl
         self.ai_sdk_params = ai_sdk_params or {}
@@ -77,8 +96,6 @@ class ChatbotEngine:
         self.kb_description = kb_description
         self.active_csv_sources = active_csv_sources or []
         self.kb_collections = kb_collections or {}
-        self.session_id = generate_langfuse_session_id()
-        self.thread_id = thread_id
         self.ai_sdk_custom_instructions = (ai_sdk_custom_instructions or "").strip()
         self.timeout = timeout
         self.user_context = UserContext(
@@ -94,6 +111,10 @@ class ChatbotEngine:
             vector_store=self.vector_store,
             active_csv_sources=self.active_csv_sources,
             kb_collections=self.kb_collections,
+            can_manage_skills=self.can_manage_skills,
+            agent_id=self.agent_id,
+            allowed_system_skills=self.allowed_system_skills,
+            disabled_skills=self.disabled_skills,
         )
 
         self.system_prompt = system_prompt
@@ -103,7 +124,8 @@ class ChatbotEngine:
             self.deepquery_system_prompt_chunk = (
                 "- deep_query tool. The DeepQuery tool is a powerful analyst agent, that is capable of in-depth reasoning\n"
                 "and generating and executing multiple SQL queries to generate a complete report regarding an analysis question.\n"
-                "You can only execute the DeepQuery tool if explicitly requested by the user."
+                "You can only execute the DeepQuery tool if explicitly requested by the user.\n"
+                "Before proposing or running any DeepQuery analysis, you MUST read the 'deepquery' skill with read_skill(\"deepquery\") and follow its process. If the skill is not available, you cannot use the DeepQuery tool."
             )
             self.deepquery_related_question_chunk = (
                 "Finally, also include a fourth related question, more analytical, in one sentence, that would require the DeepQuery tool to answer.\n"
@@ -121,7 +143,6 @@ class ChatbotEngine:
             self.tool_count_string = "two"
             self.deepquery_system_prompt_chunk = ""
             self.deepquery_related_question_chunk = ""
-            self.deep_query_guidance = ""
 
         if self.auto_graph:
             graph_guidance_chunk = (
@@ -146,11 +167,13 @@ class ChatbotEngine:
         else:
             self.extra_tools_guidance = "There are no extra tools available."
 
+        skills_guidance = build_skills_prompt_section(self.skills, can_manage_skills=self.can_manage_skills)
+
         self.system_prompt = self.system_prompt.format(
             user_details=self.user_details,
             custom_instructions=format_user_instructions_for_prompt(chatbot_custom_instructions),
             tool_count_string=self.tool_count_string,
-            deep_query_guidance=self.deep_query_guidance,
+            skills_guidance=skills_guidance,
             deepquery_system_prompt_chunk=self.deepquery_system_prompt_chunk,
             deepquery_related_question_chunk=self.deepquery_related_question_chunk,
             data_agent_limit_max=self.data_agent_limit_max,
@@ -162,8 +185,21 @@ class ChatbotEngine:
         self.tools = [data_agent, metadata_search]
         if self.enable_deepquery:
             self.tools.append(deep_query)
-        if self.vector_store:
+        # Only when the user actually has active collections: with none, the
+        # tool could only ever refuse, so it is not exposed to the LLM at all
+        # (activating a collection rebuilds the engine, which re-adds it).
+        if self.vector_store and self.kb_collections:
             self.tools.append(knowledge_query)
+
+        # Skill tools: reading and personal skill management are available to
+        # everyone; system skill reference management only for authorized users
+        # so unauthorized users never even see those tools.
+        self.tools.extend([read_skill, read_skill_reference, create_skill, edit_skill])
+        if self.can_manage_skills:
+            self.tools.extend([edit_skill_reference, create_skill_reference])
+
+        # Initialize the persistent database-backed checkpointer
+        self.checkpointer = UniformCheckpointer.get_saver()
 
         # Create agent once per engine
         self.agent = create_agent(
@@ -171,17 +207,15 @@ class ChatbotEngine:
             tools=self.tools,
             context_schema=UserContext,
             middleware=[
-                UserRequestLoggingMiddleware(),
                 TrimConversationHistoryMiddleware(
                     conversation_history_limit=self.message_history_limit,
-                    remove_first_n_messages=self.remove_first_n_messages
                 )
             ],
             system_prompt=self.system_prompt,
-            checkpointer=InMemorySaver(),
+            checkpointer=self.checkpointer,
         )
 
-    def _process_stream_events(self, agent_stream, uuid_str=None):
+    def _process_stream_events(self, agent_stream, uuid_str=None, thread_id=None):
         """
         Helper to process the agent stream, handling the buffering of related questions
         to prevent them from being sent to the client as raw text.
@@ -213,7 +247,10 @@ class ChatbotEngine:
                 elif isinstance(message_chunk, ToolMessage):
                     # Log tool calls (response tokens and truncated content)
                     tool_tokens = calculate_tokens(str(message_chunk.content)) if message_chunk.content else 0
-                    logging.info(f"[TOOL RESPONSE] '{message_chunk.name}' (Tokens: {tool_tokens}) -> {safe_str(message_chunk.content, 200)}")
+                    logging.info(
+                        f"{format_chat_log(self.agent_id, thread_id, 'tool_response', tool_tokens)} "
+                        f"'{message_chunk.name}' -> {safe_str(message_chunk.content, 200)}"
+                    )
 
                     # Tool execution finished
                     yield {
@@ -230,7 +267,10 @@ class ChatbotEngine:
                 for m in messages:
                     for tool_call in getattr(m, "tool_calls", []) or []:
                         # Log tool calls (args)
-                        logging.info(f"[TOOL CALL] '{tool_call.get('name')}' Args: {tool_call.get('args')}")
+                        logging.info(
+                            f"{format_chat_log(self.agent_id, thread_id, 'tool_call')} "
+                            f"'{tool_call.get('name')}' Args: {tool_call.get('args')}"
+                        )
 
                         yield {
                             "type": "tool_start",
@@ -269,7 +309,7 @@ class ChatbotEngine:
 
         return aggregated_answer, related_questions, related_questions_deepquery
 
-    def process_query(self, query, tool, vdp_database_names=None, vdp_tag_names=None, allow_external_associations=True):
+    def process_query(self, query, tool, vdp_database_names=None, vdp_tag_names=None, allow_external_associations=True, thread_id=None, cancel_event=None):
         """
         Process a user query and yield streaming response chunks.
 
@@ -279,6 +319,7 @@ class ChatbotEngine:
             vdp_database_names: Optional database filter
             vdp_tag_names: Optional tag filter
             allow_external_associations: Whether to allow external associations
+            thread_id: Request-scoped thread ID to prevent concurrency mutations
 
         Yields:
             Dict chunks with type and content for streaming response
@@ -288,7 +329,10 @@ class ChatbotEngine:
 
             # Log user question and tokens
             question_tokens = calculate_tokens(str(query)) if query else 0
-            logging.info(f"[USER QUESTION] (Tokens: {question_tokens}) -> {safe_str(query)}")
+            logging.info(
+                f"{format_chat_log(self.agent_id, thread_id, 'user_question', question_tokens)} "
+                f"{safe_str(query)}"
+            )
 
             if tool:
                 query = f"{query}\n\nI want you to use the {tool} tool for this task."
@@ -323,8 +367,13 @@ class ChatbotEngine:
             # Updates is the LLM's internal state, which includes complete tool calls (instead of chunked) and their results
             langfuse_config = build_config(
                 model_id=self.llm_model,
-                session_id=self.session_id,
-                run_name="chatbot_process_query"
+                session_id=thread_id,
+                user_id=self.username,
+                run_name=f"chatbot_ui:{self.agent_id or 'global'}",
+                extra_metadata={
+                    "agent_id": self.agent_id or "global",
+                    "langfuse_tags": [f"agent:{self.agent_id or 'global'}", "sample_chatbot"],
+                },
             )
 
             # Build per-request context so database/tag filters do not persist across queries
@@ -345,21 +394,33 @@ class ChatbotEngine:
                 vector_store=self.vector_store,
                 active_csv_sources=self.active_csv_sources,
                 kb_collections=self.kb_collections,
+                can_manage_skills=self.can_manage_skills,
+                agent_id=self.agent_id,
+                allowed_system_skills=self.allowed_system_skills,
+                disabled_skills=self.disabled_skills,
+                cancel_event=cancel_event,
             )
 
+            human_msg = HumanMessage(content=query, id=uuid_str)
+
             stream = self.agent.stream(
-                {"messages": [{"role": "user", "content": query}]},
-                config={**langfuse_config, "thread_id": self.thread_id},
+                {"messages": [human_msg]},
+                config={**langfuse_config, "configurable": {"thread_id": thread_id}},
                 stream_mode=["messages", "updates"],
                 context=request_context,
             )
 
             # Delegate processing to helper method to handle buffering and event generation
-            aggregated_answer, related_questions, related_questions_deepquery = yield from self._process_stream_events(stream, uuid_str)
+            aggregated_answer, related_questions, related_questions_deepquery = yield from self._process_stream_events(
+                stream, uuid_str, thread_id=thread_id
+            )
 
             # Log response (truncated to 200 chars) and tokens
             response_tokens = calculate_tokens(aggregated_answer) if aggregated_answer else 0
-            logging.info(f"[AGENT RESPONSE] (Tokens: {response_tokens}) -> {safe_str(aggregated_answer, 200)}")
+            logging.info(
+                f"{format_chat_log(self.agent_id, thread_id, 'agent_response', response_tokens)} "
+                f"{safe_str(aggregated_answer, 200)}"
+            )
 
             # Finalization
             yield {
@@ -370,6 +431,9 @@ class ChatbotEngine:
                 "related_questions": related_questions,
                 "related_questions_deepquery": related_questions_deepquery
             }
+        except AISDKRequestCancelled as e:
+            logging.info(f"Query cancelled by the user: {e}")
+            yield {"type": "error", "message": str(e)}
         except Exception as e:
             logging.error("Error in process_query", exc_info=True)
             yield {"type": "error", "message": str(e)}

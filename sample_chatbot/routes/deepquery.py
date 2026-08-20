@@ -25,21 +25,24 @@ def generate_report():
         data = request.json
         deepquery_metadata = data.get('deepquery_metadata')
         color_palette = data.get('color_palette', 'red')
+        language = data.get('language', 'English')
 
         if not deepquery_metadata:
             return jsonify({"error": "Missing deepquery_metadata"}), 400
 
-        # Make request to the generateDeepQueryReport endpoint
-        auth = (config.ai_sdk_username, config.ai_sdk_password)
+        # Make request to the generateDeepQueryReport endpoint using the logged-in
+        # user's credentials, matching the analysis (/deepQuery) flow
+        auth = (user_obj.id, user_obj.password)
         response = requests.post(
             f"{config.ai_sdk_host}/generateDeepQueryReport",
             json={
                 "deepquery_metadata": deepquery_metadata,
-                "color_palette": color_palette
+                "color_palette": color_palette,
+                "language": language
             },
             auth=auth,
             verify=config.ai_sdk_verify_ssl,
-            timeout=600
+            timeout=config.chatbot_timeout
         )
 
         if response.status_code == 200:

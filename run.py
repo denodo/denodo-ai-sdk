@@ -15,7 +15,7 @@ import time
 import signal
 import argparse
 import threading
-from dotenv import dotenv_values
+from dotenv import dotenv_values, load_dotenv
 from rich.panel import Panel
 from rich.console import Console
 from utils.runner_migration import run_migration_tool
@@ -67,12 +67,17 @@ if __name__ == "__main__":
 
     print_header()
 
-    env_api = dotenv_values('api/utils/sdk_config.env') if args.mode in ["api", "both"] else {}
-    env_chat = dotenv_values('sample_chatbot/chatbot_config.env') if args.mode in ["sample_chatbot", "both"] else {}
+    # The API configuration is listed first so that its values win when both
+    # files define the same variable.
+    config_files = []
+    if args.mode in ["api", "both"]:
+        config_files.append('api/utils/sdk_config.env')
+    if args.mode in ["sample_chatbot", "both"]:
+        config_files.append('sample_chatbot/chatbot_config.env')
 
     if args.mode == "both":
-        dir_api = env_api.get("AI_SDK_DATA_DIR")
-        dir_chat = env_chat.get("AI_SDK_DATA_DIR")
+        dir_api = dotenv_values('api/utils/sdk_config.env').get("AI_SDK_DATA_DIR")
+        dir_chat = dotenv_values('sample_chatbot/chatbot_config.env').get("AI_SDK_DATA_DIR")
 
         if dir_api and dir_chat and dir_api != dir_chat:
             console.print(Panel(
@@ -86,11 +91,12 @@ if __name__ == "__main__":
                 border_style="yellow",
                 width=PANEL_WIDTH
             ))
-            env_chat["AI_SDK_DATA_DIR"] = dir_api
 
-    env_dict = {**env_api, **env_chat}
-    if "AI_SDK_DATA_DIR" in env_dict:
-        os.environ["AI_SDK_DATA_DIR"] = env_dict["AI_SDK_DATA_DIR"]
+    for config_file in config_files:
+        if os.path.exists(config_file):
+            load_dotenv(config_file)
+        else:
+            console.print(f"[yellow]Warning:[/] Environment file {config_file} not found.")
 
     DATA_DIR = validate_data_dir()
 
@@ -165,7 +171,8 @@ if __name__ == "__main__":
         display_name = {"api": "API", "sample_chatbot": "chatbot"}
         for process_name, spec in succeeded:
             processes.append((display_name.get(process_name, process_name), spec["process"]))
-            log_threads.append(spec["log_thread"])
+            if spec["log_thread"] is not None:
+                log_threads.append(spec["log_thread"])
 
         for process_name, _spec in failed:
             service_display_name = "AI SDK" if process_name == "api" else "Sample chatbot"

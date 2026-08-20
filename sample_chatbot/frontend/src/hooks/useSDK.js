@@ -2,13 +2,13 @@ import { useState, useRef } from "react";
 import { actionTypes } from "../reducers/chatReducer";
 import { buildApiUrl } from "../api/client";
 
-const useSDK = (dispatch, onRequestComplete) => {
+const useSDK = (dispatch, onRequestComplete, currentThreadId, onThreadIdUpdate, onLimitReached, autoOverwriteAccepted) => {
   const [isLoading, setLoading] = useState(false);
-  const [runningDeepQueries, setRunningDeepQueries] = useState(new Set());
+  const [runningRequests, setRunningRequests] = useState(new Set());
   const activeControllers = useRef(new Map()); // Map of requestId -> { controller, resultIndex }
   const requestIdCounter = useRef(0);
 
-  const handleStream = async (url, body, resultIndex, requestId, onMessage) => {
+  const handleStream = async (url, body, resultIndex, requestId, onMessage, options) => {
     const controller = new AbortController();
     const signal = controller.signal;
     
@@ -29,8 +29,28 @@ const useSDK = (dispatch, onRequestComplete) => {
 
       const response = await fetch(fetchUrl, fetchOptions);
 
+      if (response.status === 409 && isQuestion) {
+        const errorData = await response.json();
+        
+        if (onLimitReached) {
+          onLimitReached(errorData, {
+            query: body.query,
+            toolName: body.tool,
+            resultIndex,
+            options
+          });
+        }
+        
+        return; 
+      }
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const returnedThreadId = response.headers.get('X-Thread-ID');
+      if (returnedThreadId && onThreadIdUpdate) {
+        onThreadIdUpdate(returnedThreadId);
       }
 
       const reader = response.body.getReader();
@@ -88,9 +108,11 @@ const useSDK = (dispatch, onRequestComplete) => {
       });
     } finally {
       activeControllers.current.delete(requestId);
-      if (url.includes('deep_query')) { // Logic for deep query tracking might need adjustment based on tool usage
-         // This cleanup is handled in onMessage for 'done' or explicit cancel usually
-      }
+      setRunningRequests(prev => {
+        const next = new Set(prev);
+        next.delete(requestId);
+        return next;
+      });
       onRequestComplete(requestId);
       setLoading(false);
     }
@@ -99,15 +121,18 @@ const useSDK = (dispatch, onRequestComplete) => {
   const processQuestion = async (question, _type, resultIndex, options = {}) => {
     setLoading(true);
     const requestId = `agent_${Date.now()}_${++requestIdCounter.current}`;
+    setRunningRequests(prev => new Set([...prev, requestId]));
 
     const body = {
       query: question,
+      cancellation_id: requestId,
       tool: _type,
       databases: options.databases,
       tags: options.tags,
-      allow_external_associations: options.allow_external_associations
+      allow_external_associations: options.allow_external_associations,
+      thread_id: currentThreadId,
+      force_overwrite: options.force_overwrite !== undefined ? options.force_overwrite : autoOverwriteAccepted
     };
-
     
     handleStream('question', body, resultIndex, requestId, (payload) => {
       const type = payload.type;
@@ -120,9 +145,6 @@ const useSDK = (dispatch, onRequestComplete) => {
         });
       } else if (type === 'tool_start') {
         const { tool_name, tool_call_id, args } = payload;
-        if (tool_name === 'deep_query') {
-          setRunningDeepQueries(prev => new Set([...prev, requestId]));
-        }
         dispatch({
           type: actionTypes.TOOL_CALL_START,
           payload: {
@@ -136,13 +158,6 @@ const useSDK = (dispatch, onRequestComplete) => {
             type: actionTypes.TOOL_CALL_END,
             payload: { resultIndex, toolName: tool_name, toolCallId: tool_call_id, content, artifact }
         });
-        if (tool_name === 'deep_query') {
-            setRunningDeepQueries(prev => {
-              const next = new Set(prev);
-              next.delete(requestId);
-              return next;
-            });
-        }
       } else if (type === 'done') {
         dispatch({
             type: actionTypes.COMPLETE_CHAT_ITEM,
@@ -160,15 +175,16 @@ const useSDK = (dispatch, onRequestComplete) => {
           }
         });
       }
-    });
+    }, options);
 
     return requestId;
   };
 
-  const cancelDeepQuery = (requestId) => {
+  const cancelQuery = async (requestId) => {
     const connection = activeControllers.current.get(requestId);
     if (connection) {
       const { controller, resultIndex } = connection;
+
       controller.abort();
       activeControllers.current.delete(requestId);
 
@@ -176,22 +192,36 @@ const useSDK = (dispatch, onRequestComplete) => {
         type: actionTypes.DELETE_CHAT_ITEM,
         payload: { resultIndex }
       });
-      
-      setRunningDeepQueries(prev => {
+
+      setRunningRequests(prev => {
         const newSet = new Set(prev);
         newSet.delete(requestId);
         return newSet;
       });
-      onRequestComplete(requestId);
       setLoading(false);
+
+      // Tell the backend to abort the query, including any in-flight AI SDK
+      // request. The endpoint responds once the rollback and empty-chat
+      // cleanup have finished, so the sidebar refresh below always sees the
+      // final state.
+      try {
+        await fetch(buildApiUrl('question/cancel'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cancellation_id: requestId })
+        });
+      } catch {
+        // Ignore: the request may already be finished; refresh regardless.
+      }
+      onRequestComplete(requestId);
     }
   };
 
   return {
     isLoading,
     processQuestion,
-    cancelDeepQuery,
-    runningDeepQueries: Array.from(runningDeepQueries)
+    cancelQuery,
+    runningRequests: Array.from(runningRequests)
   };
 };
 

@@ -1,11 +1,14 @@
 import base64
+import asyncio
 import logging
+import httpx
 import requests
 import traceback
 
 from utils.execution_result_helpers import (
     get_full_execution_result_rows,
 )
+from utils.schema_catalog import SchemaCatalog, VQL_SCHEMA_GRAMMAR
 
 def create_basic_auth_header(username, password):
     """Create a Basic Authorization header value from username and password."""
@@ -13,7 +16,30 @@ def create_basic_auth_header(username, password):
     encoded = base64.b64encode(credentials.encode("utf-8")).decode("utf-8")
     return f"Basic {encoded}"
 
-def make_ai_sdk_request(endpoint, payload, auth, method="POST", verify_ssl=False, timeout=1200):
+class AISDKRequestCancelled(Exception):
+    """Raised when an in-flight AI SDK request is cancelled by the user."""
+
+async def _cancellable_request(method, endpoint, payload, headers, verify_ssl, timeout, cancel_event):
+    """Run the AI SDK request as an asyncio task, polling the cancel event.
+
+    Cancelling the task closes the underlying connection, which lets the AI SDK's
+    RequestCancelledMiddleware cancel the request server-side too.
+    """
+    async with httpx.AsyncClient(verify=verify_ssl, timeout=timeout) as client:
+        if method == "GET":
+            request_task = asyncio.create_task(client.get(endpoint, params=payload, headers=headers))
+        else:
+            request_task = asyncio.create_task(client.post(endpoint, json=payload, headers=headers))
+
+        while True:
+            done, _ = await asyncio.wait({request_task}, timeout=0.25)
+            if done:
+                return request_task.result()
+            if cancel_event.is_set():
+                request_task.cancel()
+                raise AISDKRequestCancelled(f"AI SDK request to {endpoint} cancelled by the user.")
+
+def make_ai_sdk_request(endpoint, payload, auth, method="POST", verify_ssl=False, timeout=1200, cancel_event=None):
     """Helper function to make AI SDK requests with standardized error handling.
 
     Args:
@@ -23,11 +49,15 @@ def make_ai_sdk_request(endpoint, payload, auth, method="POST", verify_ssl=False
         method: HTTP method (POST or GET)
         verify_ssl: Whether to verify SSL certificates
         timeout: Request timeout in seconds
+        cancel_event: Optional threading.Event; when set, the in-flight request is
+            aborted (closing the connection) and AISDKRequestCancelled is raised
     """
     headers = {"Authorization": auth}
 
     try:
-        if method == "GET":
+        if cancel_event is not None:
+            response = asyncio.run(_cancellable_request(method, endpoint, payload, headers, verify_ssl, timeout, cancel_event))
+        elif method == "GET":
             response = requests.get(
                 endpoint,
                 params=payload,
@@ -45,7 +75,9 @@ def make_ai_sdk_request(endpoint, payload, auth, method="POST", verify_ssl=False
             )
         response.raise_for_status()
         return response.json()
-    except requests.HTTPError as e:
+    except AISDKRequestCancelled:
+        raise
+    except (requests.HTTPError, httpx.HTTPStatusError) as e:
         logging.error(f"Error making AI SDK request: {e}")
         logging.error(f"Traceback: {traceback.format_exc()}")
         try:
@@ -77,6 +109,7 @@ def deep_query(
     vdp_tag_names=None,
     allow_external_associations=True,
     timeout=1200,
+    cancel_event=None,
     **llm_params
 ):
     request_body = {
@@ -92,7 +125,7 @@ def deep_query(
     request_body.update(llm_params)
 
     endpoint = f'{api_host}/deepQuery'
-    response = make_ai_sdk_request(endpoint, request_body, auth, verify_ssl=verify_ssl, timeout=timeout)
+    response = make_ai_sdk_request(endpoint, request_body, auth, verify_ssl=verify_ssl, timeout=timeout, cancel_event=cancel_event)
 
     return response
 
@@ -105,6 +138,7 @@ def metadata_search(
     n_results=5,
     verify_ssl=False,
     timeout=1200,
+    cancel_event=None,
 ):
     request_body = {
         'question': search_query,
@@ -119,7 +153,7 @@ def metadata_search(
         request_body['vdp_tag_names'] = vdp_tag_names
 
     endpoint = f'{api_host}/answerQuestion'
-    response = make_ai_sdk_request(endpoint, request_body, auth, "GET", verify_ssl=verify_ssl, timeout=timeout)
+    response = make_ai_sdk_request(endpoint, request_body, auth, "GET", verify_ssl=verify_ssl, timeout=timeout, cancel_event=cancel_event)
 
     return response
 
@@ -136,6 +170,7 @@ def data_agent(
     custom_instructions='',
     verify_ssl=False,
     timeout=1200,
+    cancel_event=None,
     **llm_params
 ):
     request_body = {
@@ -160,7 +195,7 @@ def data_agent(
         request_body['vql_execute_rows_limit'] = int(limit)
 
     endpoint = f'{api_host}/answerQuestion'
-    response = make_ai_sdk_request(endpoint, request_body, auth, verify_ssl=verify_ssl, timeout=timeout)
+    response = make_ai_sdk_request(endpoint, request_body, auth, verify_ssl=verify_ssl, timeout=timeout, cancel_event=cancel_event)
 
     return response
 
@@ -194,7 +229,6 @@ def _get_execution_result_views(response):
         "full_csv": full_csv,
         "llm_csv": llm_csv,
     }
-
 
 def _build_success_data_agent_content(response):
     execution_result_views = _get_execution_result_views(response)
@@ -233,13 +267,17 @@ def _append_graph_output(content, response):
     return content + f"\n\nGraph generation failed. Error: {raw_graph}"
 
 def _build_data_agent_artifact(response):
+    tokens = response.get("tokens", {}) or {}
     return {
         "vql": response.get("sql_query", ""),
         "execution_result": response.get("execution_result", {}),
         "raw_graph": response.get("raw_graph", ""),
         "tables_used": response.get("tables_used", []),
         "query_explanation": response.get("query_explanation", ""),
-        "tokens": response.get("tokens", {}).get("total_tokens", 0),
+        "tokens": tokens.get("total_tokens", 0),
+        "total_tokens": tokens.get("total_tokens", 0),
+        "input_tokens": tokens.get("input_tokens", 0),
+        "output_tokens": tokens.get("output_tokens", 0),
         "ai_sdk_time": response.get("total_execution_time", 0),
         "total_execution_time": response.get("total_execution_time", 0),
         "vector_store_search_time": response.get("vector_store_search_time", 0),
@@ -275,14 +313,12 @@ def format_metadata_search_output(response):
         artifact = response
         return (content, artifact)
 
-    related_tables = response.get('related_tables', [])
-    response_dump = [
-        entry.get('vql_representation', '')
-        for entry in related_tables
+    related_tables = [
+        entry for entry in response.get('related_tables', [])
         if entry.get('vql_representation')
     ]
-    response_dump = "\n\n".join(response_dump)
-    ## (only include this bit if there are results lol)
+    response_dump = SchemaCatalog.from_vector_search_tables(related_tables).render_vql_schema()
+
     content = f"""A similarity search for the provided search_query was correctly executed across the user's views in Denodo. Remember this tool does not perform exhaustive searches.
         When answering the user's question take this into account so as to not mislead the user.
         If the user is looking for exhaustive searches (not similarity search), point them to the Denodo Data Marketplace.
@@ -294,17 +330,7 @@ def format_metadata_search_output(response):
         The schema definition of the views in the results comes in an optimized textual format to reduce token usage. It follows this grammar:
 
         <schema_definition>
-        # Table: "<database>"."<view>"
-        ## Description: <description>
-        ## Columns:
-        - <column_name> (<type>) [PK] [NOT NULL]
-        - <column_name> (<type>) → <logical_name>
-        - <column_name> (<type>) → <logical_name>: <description>.
-        - <column_name> (<type>) → <logical_name>. sample values: a, b, c
-        - <column_name> (<type>) sample values: a, b, c
-        ## JOINs:
-        → <join_clause>. Description: <association_description>
-        → <join_clause>
+        {VQL_SCHEMA_GRAMMAR}
         </schema_definition>
 
         This means that if a view contains fields and none of those are marked as [PK], then that view does not have a defined primary key in the schema's definition.

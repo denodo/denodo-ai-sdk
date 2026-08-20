@@ -30,6 +30,7 @@ class ReportingAgent(Agent, ReportingToolsMixin):
         max_loops: int = None,
         auth: str = None,
         custom_headers: dict = None,
+        language: str = "English",
     ):
         """
         Initialize the ReportingAgent.
@@ -43,10 +44,12 @@ class ReportingAgent(Agent, ReportingToolsMixin):
             max_loops: Maximum number of execution loops
             auth: Authentication token for database access
             custom_headers: Custom HTTP headers to be forwarded to the Data Marketplace
+            language: The target language for the report and visualizations
         """
         # Store auth and headers for tool calls
         self.auth = auth
         self.custom_headers = custom_headers
+        self.language = language
 
         super().__init__(
             agent_name="ReportingAgent",
@@ -73,7 +76,8 @@ class ReportingAgent(Agent, ReportingToolsMixin):
 
             formatted_input = self.initial_prompt.format(
                 question=analysis_question,
-                cohorts=str([c["name"] for c in self.cohorts])
+                cohorts=str([c["name"] for c in self.cohorts]),
+                language=self.language
             )
 
             # Wrap the formatted string in a dictionary with 'text' key as expected by _execute_loop
@@ -115,7 +119,9 @@ class ReportingAgent(Agent, ReportingToolsMixin):
                 analysis_tool_calls=analysis_tool_calls,
                 llm=self.llm,
                 deepquery_metadata=deepquery_metadata,
-                include_failed_tool_calls_appendix=include_failed_tool_calls_appendix)
+                include_failed_tool_calls_appendix=include_failed_tool_calls_appendix,
+                language=self.language
+            )
             report = await processor.generate_report(formatted_trace)
 
             duration = time.time() - start_time

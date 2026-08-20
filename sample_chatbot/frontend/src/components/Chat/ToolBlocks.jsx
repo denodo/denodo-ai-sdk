@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useConfig } from "../../contexts/ConfigContext";
 import Card from "react-bootstrap/Card";
+import Dropdown from "react-bootstrap/Dropdown";
 import Badge from "react-bootstrap/Badge";
 import Spinner from "react-bootstrap/Spinner";
 import OverlayTrigger from "react-bootstrap/OverlayTrigger";
@@ -17,7 +18,6 @@ const assetBaseUrl = import.meta.env.BASE_URL;
 const ToolBlocks = ({
   blocks,
   result,
-  isGeneratingReport,
   onGenerateReport,
   resultsContainerRef,
   onOpenGraph,
@@ -39,6 +39,7 @@ const ToolBlocks = ({
   const [expandedTools, setExpandedTools] = useState({});
   const [paletteSelectorOpenId, setPaletteSelectorOpenId] = useState(null);
   const [selectedPalette, setSelectedPalette] = useState("");
+  const [selectedLanguage, setSelectedLanguage] = useState("English");
   const [copiedId, setCopiedId] = useState(null);
   const paletteOptions = ["red", "blue", "green", "black"];
 
@@ -138,6 +139,9 @@ const ToolBlocks = ({
                 vql: artifact.vql,
                 query_explanation: artifact.query_explanation,
                 tokens: artifact.tokens,
+                total_tokens: artifact.total_tokens,
+                input_tokens: artifact.input_tokens,
+                output_tokens: artifact.output_tokens,
                 ai_sdk_time: artifact.ai_sdk_time,
                 llm_provider: artifact.llm_provider,
                 llm_model: artifact.llm_model,
@@ -288,7 +292,6 @@ const ToolBlocks = ({
 
       if (artifact.deepquery_metadata) {
         const deepQueryResult = { ...result, deepquery_metadata: artifact.deepquery_metadata };
-        const isGenerating = isGeneratingReport && result.uuid === deepQueryResult.uuid;
         const isPaletteOpen = paletteSelectorOpenId === toolCall.toolCallId;
 
         icons.push(
@@ -297,7 +300,7 @@ const ToolBlocks = ({
               placement="left"
               delay={{ show: 250, hide: 400 }}
               overlay={(props) =>
-                renderTooltip(props, isGenerating ? "Generating PDF..." : "Generate PDF Report")
+                renderTooltip(props, "Generate PDF Report")
               }
               container={resultsContainerRef?.current}
             >
@@ -306,9 +309,8 @@ const ToolBlocks = ({
                 alt="Generate PDF Report"
                 width="20"
                 height="20"
-                className={`ms-2 ${isGenerating ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+                className="ms-2 cursor-pointer"
                 onClick={() => {
-                  if (isGenerating) return;
                   setPaletteSelectorOpenId((prev) => (prev === toolCall.toolCallId ? null : toolCall.toolCallId));
                 }}
               />
@@ -316,29 +318,53 @@ const ToolBlocks = ({
             {isPaletteOpen && (
               <div className="report-palette-popup">
                 <span className="report-palette-label">Color palette:</span>
-                <select
-                  className="form-select form-select-sm report-palette-select"
-                  value={selectedPalette}
-                  onChange={(e) => setSelectedPalette(e.target.value)}
-                >
-                  <option value="" disabled>
-                    Select...
-                  </option>
-                  {paletteOptions.map((palette) => (
-                    <option key={palette} value={palette}>
-                      {palette.charAt(0).toUpperCase() + palette.slice(1)}
-                    </option>
-                  ))}
-                </select>
+                <Dropdown className="w-100">
+                  <Dropdown.Toggle 
+                    variant="light" 
+                    size="sm" 
+                    className="w-100 report-palette-select d-flex justify-content-between align-items-center"
+                  >
+                    {selectedPalette ? selectedPalette.charAt(0).toUpperCase() + selectedPalette.slice(1) : "Select..."}
+                  </Dropdown.Toggle>
+
+                  <Dropdown.Menu className="w-100">
+                    {paletteOptions.map((palette) => (
+                      <Dropdown.Item 
+                        key={palette}
+                        active={selectedPalette === palette}
+                        onClick={() => setSelectedPalette(palette)}
+                        className="report-dropdown-item"
+                      >
+                        {palette.charAt(0).toUpperCase() + palette.slice(1)}
+                      </Dropdown.Item>
+                    ))}
+                  </Dropdown.Menu>
+                </Dropdown>
+
+                <span className="report-palette-label mt-2 d-block">Language:</span>
+                <input
+                  type="text"
+                  className="form-control form-control-sm report-palette-select"
+                  placeholder="e.g., English, Spanish..."
+                  value={selectedLanguage}
+                  maxLength={30}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (/^[a-zA-Z\u00C0-\u024F\s-]*$/.test(val)) {
+                      setSelectedLanguage(val);
+                    }
+                  }}
+                />
+
                 <Button
                   variant="dark"
                   size="sm"
-                  className="mt-2 w-100"
-                  disabled={isGeneratingReport || !selectedPalette}
+                  className="mt-3 w-100"
+                  disabled={!selectedPalette || !selectedLanguage.trim()}
                   onClick={() => {
-                    if (!selectedPalette || isGeneratingReport) return;
+                    if (!selectedPalette || !selectedLanguage.trim()) return;
                     setPaletteSelectorOpenId(null);
-                    onGenerateReport(deepQueryResult, selectedPalette);
+                    onGenerateReport(deepQueryResult, selectedPalette, selectedLanguage.trim());
                   }}
                 >
                   Generate

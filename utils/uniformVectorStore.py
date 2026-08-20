@@ -17,13 +17,36 @@ class UniformVectorStore:
         self.chunk_factor = chunk_factor
         self._connect()
 
+    @staticmethod
+    def _ensure_modern_sqlite():
+        """Make sure the sqlite3 module Chroma will import is >= 3.35.0."""
+        import sys
+        import sqlite3
+
+        if sqlite3.sqlite_version_info >= (3, 35, 0):
+            return
+
+        for module_name in ("pysqlite3", "sqlean"):
+            try:
+                __import__(module_name)
+            except ImportError:
+                continue
+            # A source build of pysqlite3 links against the host's libsqlite3, so it
+            # can report the same too-old version. Only swap when it really is newer.
+            if sys.modules[module_name].sqlite_version_info >= (3, 35, 0):
+                sys.modules['sqlite3'] = sys.modules.pop(module_name)
+                return
+            sys.modules.pop(module_name, None)
+
+        raise RuntimeError(
+            f"Chroma requires sqlite3 >= 3.35.0 but this host provides {sqlite3.sqlite_version}. "
+            "Run the AI SDK on a Python linked against a newer SQLite (a uv, pyenv or conda "
+            "managed build ships one), or upgrade the system SQLite."
+        )
+
     def _connect(self):
         if self.provider == "chroma":
-            import platform
-            if platform.system() == "Linux":
-                __import__('pysqlite3')
-                import sys
-                sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+            self._ensure_modern_sqlite()
             from chromadb.config import Settings
             from langchain_chroma import Chroma
             data_dir = os.getenv("AI_SDK_DATA_DIR", ".")
@@ -186,18 +209,12 @@ class UniformVectorStore:
                     if db_name in last_update_dict["DATABASE"]:
                         del last_update_dict["DATABASE"][db_name]
                         modified = True
-                if not last_update_dict["DATABASE"]:
-                    del last_update_dict["DATABASE"]
-                    modified = True
 
             if tag_names and "TAG" in last_update_dict:
                 for tag_name in tag_names:
                     if tag_name in last_update_dict["TAG"]:
                         del last_update_dict["TAG"][tag_name]
                         modified = True
-                if not last_update_dict["TAG"]:
-                    del last_update_dict["TAG"]
-                    modified = True
 
         if partial_resources_dict:
             if database_names and "partial_tags_by_db" in partial_resources_dict:
@@ -222,8 +239,68 @@ class UniformVectorStore:
                             del partial_tags_by_tag[tag_name]
                             modified = True
 
+        if self._prune_orphan_sync_entries(last_update_dict, partial_resources_dict):
+            modified = True
+
+        if last_update_dict:
+            for source_type in ("DATABASE", "TAG"):
+                if source_type in last_update_dict and not last_update_dict[source_type]:
+                    del last_update_dict[source_type]
+                    modified = True
+
         if modified:
             self.update_last_update(last_update_dict, partial_resources_dict)
+
+    @timed
+    def _prune_orphan_sync_entries(self, last_update_dict, partial_resources_dict):
+        """
+        Drops sync metadata entries that no longer have any document backing them.
+
+        A resource can stop having documents without being named in the deletion
+        request: deleting a database also removes the only views a tag was covering.
+        The leftover entry is invisible while the store is empty, but it reappears
+        with its old timestamp as soon as a matching view is indexed again, and it
+        makes is_non_conflicting_doc treat those views as protected, so they can no
+        longer be deleted. Both dicts are modified in place.
+
+        Returns True if anything was removed.
+        """
+        modified = False
+
+        if last_update_dict:
+            for source_type, filter_key in (("DATABASE", "database_names"), ("TAG", "tag_names")):
+                for source_name in list(last_update_dict.get(source_type, {})):
+                    if not self.check_existence(None, **{filter_key: [source_name]}):
+                        del last_update_dict[source_type][source_name]
+                        modified = True
+                        logging.info(f"Pruned orphan {source_type} sync entry: {source_name}")
+
+        if partial_resources_dict:
+            buckets = (
+                ("partial_tags_by_db", lambda db, tag: {"database_names": [db], "tag_names": [tag]}),
+                ("partial_dbs_by_tag", lambda tag, db: {"database_names": [db], "tag_names": [tag]}),
+                ("partial_tags_by_tag", lambda tag, other: {"tag_names": [tag, other]}),
+            )
+
+            for bucket_name, build_filters in buckets:
+                bucket = partial_resources_dict.get(bucket_name, {})
+                for source_name in list(bucket):
+                    current = bucket[source_name] or []
+                    surviving = [
+                        target_name for target_name in current
+                        if self.check_existence(None, **build_filters(source_name, target_name))
+                    ]
+
+                    if not surviving:
+                        del bucket[source_name]
+                        modified = True
+                        logging.info(f"Pruned orphan {bucket_name} entry: {source_name}")
+                    elif surviving != current:
+                        bucket[source_name] = surviving
+                        modified = True
+                        logging.info(f"Pruned orphan {bucket_name} targets for {source_name}")
+
+        return modified
 
     @log_params
     @timed

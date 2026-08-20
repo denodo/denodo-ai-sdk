@@ -6,10 +6,12 @@ from flask import Blueprint
 
 from sample_chatbot.routes.auth import auth_bp
 from sample_chatbot.routes.chat import chat_bp
+from sample_chatbot.routes.health import health_bp
 from sample_chatbot.routes.csv import csv_bp
 from sample_chatbot.routes.metadata import metadata_bp
 from sample_chatbot.routes.settings import settings_bp
 from sample_chatbot.routes.reporting import reporting_bp
+from sample_chatbot.routes.skills import skills_bp
 from sample_chatbot.routes.deepquery import deepquery_bp
 from sample_chatbot.routes.frontend import frontend_bp
 
@@ -25,12 +27,14 @@ def register_blueprints(app, url_prefix=""):
     chatbot_bp = Blueprint('chatbot', __name__)
 
     # Register sub-blueprints with the main chatbot blueprint
+    chatbot_bp.register_blueprint(health_bp)
     chatbot_bp.register_blueprint(auth_bp)
     chatbot_bp.register_blueprint(chat_bp)
     chatbot_bp.register_blueprint(csv_bp)
     chatbot_bp.register_blueprint(metadata_bp)
     chatbot_bp.register_blueprint(settings_bp)
     chatbot_bp.register_blueprint(reporting_bp)
+    chatbot_bp.register_blueprint(skills_bp)
     chatbot_bp.register_blueprint(deepquery_bp)
     chatbot_bp.register_blueprint(frontend_bp)
 

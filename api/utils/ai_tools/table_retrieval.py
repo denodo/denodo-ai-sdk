@@ -5,7 +5,6 @@ from utils import utils
 from utils.data_marketplace.connection import get_user_permissions
 from api.utils import sdk_utils
 
-
 @utils.log_params
 @utils.timed
 async def get_relevant_tables(
@@ -139,7 +138,6 @@ async def get_relevant_tables(
 
     return relevant_tables, sample_data, timings, error_message, permissions_data
 
-
 def _process_and_append_document(
     doc, seen_view_ids, relevant_tables, security_policies_by_view, filter_associations=False, valid_view_ids=None
 ):
@@ -157,7 +155,6 @@ def _process_and_append_document(
     )
     relevant_tables.append(parsed_doc)
     return True
-
 
 def _perform_additional_rounds(
     vector_store,
@@ -195,7 +192,6 @@ def _perform_additional_rounds(
 
             current_round += 1
 
-
 def _collect_additional_view_ids(vector_store, relevant_tables, seen_view_ids, valid_view_ids, use_views_list):
     """
     Gathers view IDs from view associations and explicitly requested views, avoiding duplicates.
@@ -217,7 +213,6 @@ def _collect_additional_view_ids(vector_store, relevant_tables, seen_view_ids, v
 
     return [v_id for v_id in additional_ids if v_id in valid_view_ids]
 
-
 def _passes_external_filters(assoc_doc, allow_external_associations, vdb_list, tag_list):
     """Checks if a view document passes database and tag filters when external associations are restricted."""
     if allow_external_associations or not (vdb_list or tag_list):
@@ -229,7 +224,6 @@ def _passes_external_filters(assoc_doc, allow_external_associations, vdb_list, t
     )
 
     return db_match and tag_match
-
 
 def _get_and_append_associations(
     vector_store,
@@ -282,7 +276,6 @@ def _get_and_append_associations(
             valid_view_ids=valid_view_ids,
         )
 
-
 def _fetch_sample_data(
     relevant_tables,
     sample_data_vector_store,
@@ -325,7 +318,6 @@ def _fetch_sample_data(
                 sample_data[view_id] = column_samples
 
     return sample_data
-
 
 def _build_no_table_error_message(
     vector_store, valid_view_ids, vector_search, relevant_tables, vdb_list, tag_list, use_views, expand_set_views

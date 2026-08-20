@@ -24,7 +24,6 @@ def ai_sdk_health_check(api_host, verify_ssl=False, timeout=10):
     except Exception:
         return False
 
-
 def ai_sdk_wait_until_healthy(api_host, verify_ssl=False, total_timeout=30.0, poll_interval=0.5):
     """
     Poll the AI SDK /health endpoint until it returns 200 or `total_timeout`
@@ -187,7 +186,6 @@ def get_ai_sdk_info(api_host, username, password, verify_ssl=False):
     except requests.exceptions.RequestException as e:
         logging.warning(f"Failed to connect to /getAISDKInfo: {str(e)}")
         return None
-
 
 def get_synced_resources(api_host, username, password, verify_ssl=False):
     """

@@ -8,7 +8,7 @@ import "./LoginPage.css";
 
 const assetBaseUrl = import.meta.env.BASE_URL;
 
-const LoginPage = ({ onSignIn, renderLogo, showBrandAsk = true }) => {
+const LoginPage = ({ onSignIn, renderLogo, showBrandAsk = true, isCheckingLogo = false }) => {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -58,9 +58,18 @@ const LoginPage = ({ onSignIn, renderLogo, showBrandAsk = true }) => {
       className="login-container d-flex justify-content-center align-items-center vh-100"
       style={{
         backgroundImage: `url(${assetBaseUrl}header/header_background.png)`,
+        backgroundColor: "#143142",
+        backgroundSize: "cover",
+        backgroundPosition: "center"
       }}
     >
-      <div className="login-box p-4 rounded">
+      <div 
+        className="login-box p-4 rounded"
+        style={{ 
+          opacity: isCheckingLogo ? 0 : 1, 
+          transition: "opacity 0.5s ease-in-out" 
+        }}
+      >
         <Navbar.Brand
           href="#home"
           className="flex-grow-1 text-nowrap d-flex align-items-baseline justify-content-center"
@@ -124,6 +133,7 @@ LoginPage.propTypes = {
   onSignIn: PropTypes.func.isRequired,
   renderLogo: PropTypes.func.isRequired,
   showBrandAsk: PropTypes.bool,
+  isCheckingLogo: PropTypes.bool,
 };
 
 export default LoginPage;

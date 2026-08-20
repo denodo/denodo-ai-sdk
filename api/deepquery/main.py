@@ -99,8 +99,10 @@ async def process_analysis(
 
         # Create system prompt for analysis
         logger.info("Creating analysis agent system prompt")
+        # Escape {tag(s): ...} etc. so ChatPromptTemplate does not treat them as variables
+        escaped_schema = schema.replace("{", "{{").replace("}", "}}")
         analysis_agent_system_prompt = ANALYSIS_SYSTEM_PROMPT.format(
-            database_schema=schema,
+            database_schema=escaped_schema,
             database_explanation=schema_explanation,
             default_rows=default_rows
         )
@@ -199,6 +201,7 @@ async def generate_report_from_deepquery_metadata(
     deepquery_metadata,
     executing_llm,
     color_palette="red",
+    language="English",
     max_reporting_loops=None,
     include_failed_tool_calls_appendix=False,
     auth=None,
@@ -211,6 +214,7 @@ async def generate_report_from_deepquery_metadata(
         deepquery_metadata: Metadata from analysis phase
         executing_llm: LLM for executing tasks
         color_palette: Color theme for the report ("red", "blue", "green", "black")
+        language: Language for the generated report
         max_reporting_loops: Maximum number of reporting loops
         include_failed_tool_calls_appendix: Whether to include failed tool calls appendix
         auth: Authentication token for database access
@@ -226,7 +230,7 @@ async def generate_report_from_deepquery_metadata(
             "html_report": None
         }
 
-    logger.info("Starting report generation from deepquery metadata")
+    logger.info(f"Starting report generation from deepquery metadata in language: {language}")
 
     try:
         question = deepquery_metadata.get("question", "")
@@ -245,7 +249,8 @@ async def generate_report_from_deepquery_metadata(
                 tool_calls,
                 analysis_body,
                 deepquery_metadata.get("default_rows", 10)
-            )
+            ),
+            language=language
         )
         reporting_agent = ReportingAgent(
             llm=executing_llm,
@@ -253,7 +258,8 @@ async def generate_report_from_deepquery_metadata(
             system_prompt=reporting_agent_system_prompt,
             auth=auth,
             custom_headers=custom_headers,
-            max_loops=max_reporting_loops
+            max_loops=max_reporting_loops,
+            language=language
         )
 
         analysis_result = {
@@ -265,7 +271,20 @@ async def generate_report_from_deepquery_metadata(
         viz_start_time = time.time()
         visualization_tool_calls = await reporting_agent.generate_visualizations(analysis_result, question)
         viz_duration = time.time() - viz_start_time
-        logger.info(f"Visualization generation completed in {viz_duration:.2f}s, created {len(visualization_tool_calls)} visualizations")
+        attempted_visualizations = [
+            tool_call for tool_call in visualization_tool_calls
+            if tool_call.get("tool_name") != "final_answer"
+        ]
+        successful_visualizations = sum(
+            1 for tool_call in attempted_visualizations
+            if not tool_call.get("error", False)
+            and str(tool_call.get("output", {}).get("raw_graph", "")).startswith("data:image/svg")
+        )
+        logger.info(
+            f"Visualization generation completed in {viz_duration:.2f}s. "
+            f"Attempted {len(attempted_visualizations)} visualizations, "
+            f"{successful_visualizations} were generated successfully"
+        )
 
         logger.info("Generating report content")
         report_start_time = time.time()
@@ -289,7 +308,10 @@ async def generate_report_from_deepquery_metadata(
             selected_palette_name = "red"
 
         selected_palette = COLOR_PALETTES[selected_palette_name]
-        html_report = build_styled_html(html_body, selected_palette, analysis_title)
+        final_translated_title = deepquery_metadata.get("analysis_title", analysis_title)
+        text_direction = deepquery_metadata.get("text_direction", "ltr")
+
+        html_report = build_styled_html(html_body, selected_palette, final_translated_title, text_direction)
 
         total_duration = time.time() - start_time
         logger.info(f"Report HTML generation completed in {total_duration:.2f}s")

@@ -7,9 +7,6 @@ import Badge from 'react-bootstrap/Badge';
 const ScannedFileRow = ({ scannedFile, onAdd }) => {
   return (
     <tr style={{ backgroundColor: '#fff9e6', verticalAlign: 'middle' }}>
-      <td className="text-center">
-        <Form.Check type="switch" checked={false} disabled title="Add this source first" />
-      </td>
       <td style={{ maxWidth: '260px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
         <strong>{scannedFile.source_name}</strong>
       </td>

@@ -35,6 +35,43 @@ def attach_sample_data(json_table):
         field_name = field['name'].strip('"')
         field['sample_data'] = sample_data_dict.get(field_name, [])
 
+def flatten_text(text):
+    """Collapse a value to a single stripped line of text ('' when empty)."""
+    if not text:
+        return ''
+    return str(text).replace('\n', ' ').strip()
+
+def normalize_tag_details(raw_tags):
+    """Normalize Data Marketplace tag payloads into [{'name': ..., 'description': ...}].
+
+    Accepts both view-level `tagDetails` and column-level `tags` entries, which
+    arrive as dicts with `name`/`description` keys. Non-dict entries and entries
+    without a name are dropped; descriptions are flattened to a single line.
+    """
+    if not isinstance(raw_tags, list):
+        return []
+
+    normalized_tags = []
+    for tag in raw_tags:
+        if not isinstance(tag, dict):
+            continue
+
+        name = str(tag.get('name') or '').strip()
+        if not name:
+            continue
+
+        normalized_tags.append({'name': name, 'description': flatten_text(tag.get('description'))})
+
+    return normalized_tags
+
+def format_tag_names(tag_details):
+    """Join tag names with ', ', quoting any name that contains the delimiter itself."""
+    names = []
+    for tag in tag_details:
+        name = tag['name']
+        names.append(f'"{name}"' if ',' in name else name)
+    return ', '.join(names)
+
 def normalize_schema_columns(schema, use_column_descriptions):
     normalized_schema = []
     for item in schema:

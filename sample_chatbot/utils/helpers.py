@@ -7,6 +7,11 @@ import sys
 import logging
 from io import BytesIO
 from PIL import Image, UnidentifiedImageError
+from utils import langfuse
+from utils.utils import custom_tag_parser
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from sample_chatbot.engine.prompts import CONV_HISTORY_TITLE_GENERATION_PROMPT
 
 def setup_user_details(user_details):
     """
@@ -31,6 +36,15 @@ def format_user_instructions_for_prompt(chatbot_custom_instructions):
     if not text:
         return ""
     return f"<user_instructions>\n{text}\n</user_instructions>"
+
+def format_chat_log(agent_id, conversation_id, event, tokens=None):
+    """Build a structured chat event log prefix for admin triage."""
+    agent = agent_id or "global"
+    conversation = conversation_id or "unknown"
+    base = f"[agent_id: {agent}] [conversation_id: {conversation}] [{event}]"
+    if tokens is not None:
+        return f"{base} [tokens: {tokens}]"
+    return base
 
 def check_env_variables(required_vars):
     """
@@ -71,7 +85,6 @@ def get_config_value(settings_dict, key, env_name, default=None, cast_type=str):
     2. From environment variables.
     3. From a default.
     """
-
     val = settings_dict.get(key)
 
     if val is None:
@@ -123,3 +136,41 @@ def get_icon_as_base64(filename, max_size=(256, 256)):
     except Exception as e:
         logging.error(f"An unexpected error occurred processing {filename}: {e}")
         return None
+
+def generate_chat_title(llm, user_query, session_id=None):
+    """
+    Generates a short title using the LLM based on the first question.
+
+    Args:
+        llm: UniformLLM instance to use for generation
+        user_query: The user's first message
+        session_id: Optional Langfuse session ID (thread_id) for tracing
+    """
+    try:
+        logging.debug(f"Generating title for query: {user_query[:30]}...")
+
+        prompt = PromptTemplate.from_template(CONV_HISTORY_TITLE_GENERATION_PROMPT)
+        chain = prompt | llm.llm | StrOutputParser()
+
+        chain_config = langfuse.build_config(
+            model_id=f"{llm.provider_name}.{llm.model_name}",
+            session_id=session_id,
+            run_name="generate_chat_title"
+        )
+
+        response = chain.invoke({"user_query": user_query}, config=chain_config)
+        logging.debug(f"Raw LLM response for title generation: {response}")
+
+        titles = custom_tag_parser(response, 'title', default='')
+
+        if titles and titles[0]:
+            new_title = titles[0].strip()
+        else:
+            new_title = response.strip().strip('"').strip("'").replace('<title>', '').replace('</title>', '')
+
+        logging.debug(f"Successfully generated title: {new_title}")
+        return new_title
+
+    except Exception as e:
+        logging.error(f"Error generating title: {str(e)}")
+        return (user_query[:30] + '...') if len(user_query) > 30 else user_query

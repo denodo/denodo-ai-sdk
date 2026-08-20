@@ -51,6 +51,20 @@ def _default_run_name():
         return frame.f_back.f_code.co_name
     return "unknown"
 
+def resolve_langfuse_user_id(request_user=None):
+    """
+    Build the Langfuse user id.
+
+    When LANGFUSE_USER is set and a request user is provided, returns
+    {LANGFUSE_USER}_{REQUEST_USER} (e.g. IT_admin). Otherwise returns whichever
+    of the two is available.
+    """
+    prefix = (os.getenv("LANGFUSE_USER") or "").strip()
+    request_user = (request_user or "").strip()
+    if prefix and request_user:
+        return f"{prefix}_{request_user}"
+    return request_user or prefix or None
+
 def build_config(model_id=None, session_id=None, run_name=None, user_id=None, extra_metadata=None):
     global _warned_missing_init
     config = {}
@@ -70,7 +84,7 @@ def build_config(model_id=None, session_id=None, run_name=None, user_id=None, ex
     config["callbacks"] = [_handler]
 
     metadata = {}
-    resolved_user_id = user_id or os.getenv("LANGFUSE_USER")
+    resolved_user_id = resolve_langfuse_user_id(user_id)
     if resolved_user_id:
         metadata["langfuse_user_id"] = resolved_user_id
     if session_id:

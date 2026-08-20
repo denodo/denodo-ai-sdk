@@ -46,6 +46,17 @@ settings:
   databases:
     - "samples_bank"
 
+  ## Restrict which system skills apply to this agent. If not set, all system
+  ## skills apply. Personal skills of each user always apply.
+  skills:
+    - "deepquery"
+
+  ## Knowledge base collections the agent will have access to. If a collection is missing from the vector store,
+  ## the agent will not be usable. See api/agents/custom/ai_sdk_helper.yaml for a
+  ## complete example.
+  # knowledge_bases:
+  #   - "my_collection"
+
   custom_instructions:
     ai_sdk: >-
       Always return the loan officer associated with a loan when returning information about a loan.

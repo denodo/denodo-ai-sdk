@@ -5,9 +5,8 @@ import useToolSelector from "./useToolSelector";
 
 const useQuestionForm = (currentQuestion, setCurrentQuestion, results, dispatch, sdk, isAuthenticated, selectedChatbot) => {
   const { config } = useConfig();
-  const { isLoading, processQuestion, cancelDeepQuery, runningDeepQueries } = sdk;
+  const { isLoading, processQuestion, cancelQuery, runningRequests } = sdk;
 
-  const [lastRequestId, setLastRequestId] = useState(null);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [searchFilters, setSearchFilters] = useState({
     databases: [],
@@ -26,8 +25,8 @@ const useQuestionForm = (currentQuestion, setCurrentQuestion, results, dispatch,
     setAllowExternalAssociations(true);
   }, [selectedChatbot]);
 
-  const isDeepQueryRunning =
-    config.enable_deep_query && lastRequestId !== null && runningDeepQueries.includes(lastRequestId);
+  const activeRequestId = runningRequests.length > 0 ? runningRequests[runningRequests.length - 1] : null;
+  const isQueryRunning = activeRequestId !== null;
   const isAnyQueryRunning = isLoading || results.some((r) => r.isLoading);
   const filterCount = searchFilters.databases.length + searchFilters.tags.length;
 
@@ -77,27 +76,14 @@ const useQuestionForm = (currentQuestion, setCurrentQuestion, results, dispatch,
       allow_external_associations: allowExternalAssociations
     };
 
-    const requestId = await processQuestion(finalQuestion, toolName, resultIndex, options);
-    
-    if (requestId) {
-      setLastRequestId(requestId);
-    }
-    
+    await processQuestion(finalQuestion, toolName, resultIndex, options);
+
     setCurrentQuestion("");
   };
 
   const handleSubmit = (event, forceType = null) => {
     if (event && event.preventDefault) event.preventDefault();
     submitQuestion(currentQuestion, forceType);
-  };
-
-  const handleKeyDown = (event, forceType = null) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      if (!isAnyQueryRunning) {
-        event.preventDefault();
-        handleSubmit(event, forceType);
-      }
-    }
   };
 
   const handleSendClick = (event, forceType = null) => {
@@ -111,9 +97,9 @@ const useQuestionForm = (currentQuestion, setCurrentQuestion, results, dispatch,
     handleSubmit(event, forceType);
   };
 
-  const handleCancelDeepQuery = () => {
-    if (lastRequestId && runningDeepQueries.includes(lastRequestId)) {
-      cancelDeepQuery(lastRequestId);
+  const handleCancelQuery = () => {
+    if (activeRequestId) {
+      cancelQuery(activeRequestId);
     }
   };
 
@@ -124,16 +110,15 @@ const useQuestionForm = (currentQuestion, setCurrentQuestion, results, dispatch,
     setShowFilterModal,
     searchFilters,
     allowExternalAssociations,
-    isDeepQueryRunning,
+    isQueryRunning,
     isAnyQueryRunning,
     filterCount,
     textInputRef,
     handleQuestionChange,
     handleFilterSave,
     handleSubmit,
-    handleKeyDown,
     handleSendClick,
-    handleCancelDeepQuery,
+    handleCancelQuery,
     lastToolRequest,
     config
   };

@@ -22,13 +22,11 @@ from api.utils.sdk_utils import get_custom_request_headers
 
 router = APIRouter()
 
-
 class UserPermissionsResponse(BaseModel):
     username: str
     is_admin: bool
     roles: List[str]
     legacy_permissions_endpoint: bool
-
 
 @router.get(
     "/getUserPermissions", response_class=JSONResponse, response_model=UserPermissionsResponse, tags=["Authentication"]

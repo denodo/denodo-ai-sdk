@@ -40,7 +40,6 @@ def strip_conditions(explanation):
         return explanation.split("Conditions:")[0].strip()
     return explanation
 
-
 class ExplanationLog:
     """Builds the cumulative query explanation: base reasoning + one block per failed
     attempt (attempted VQL, error, fix reasoning) + a terminal status line."""

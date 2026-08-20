@@ -48,7 +48,6 @@ class VectorDBInfoResponse(BaseModel):
     # NOTE: Will be deprecated in Pydantic v3.
     model_config = {"populate_by_name": True}
 
-
 @router.get(
     '/getVectorDBInfo',
     response_class=JSONResponse,

@@ -12,6 +12,7 @@ import api from '../../api/client';
 import OverlayTrigger from 'react-bootstrap/OverlayTrigger';
 import Tooltip from 'react-bootstrap/Tooltip';
 import NotificationToast from "../NotificationToast/NotificationToast";
+import CustomTooltip from "../CustomTooltip/CustomTooltip";
 
 const formatTimestamp = (timestamp) => {
   if (!timestamp) return 'N/A';
@@ -53,17 +54,15 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
   const [parallel, setParallel] = useState(true);
 
   // Delete state
-  const [deleteVdbs, setDeleteVdbs] = useState('');
-  const [deleteTags, setDeleteTags] = useState('');
+  const [selectedDatabases, setSelectedDatabases] = useState([]);
+  const [selectedTags, setSelectedTags] = useState([]);
   const [deleteConflicting, setDeleteConflicting] = useState(false);
 
   useEffect(() => {
     if (show) {
-      if (!isLoading) {
-        setStatusData(syncedResources || {});
-      }
+      setStatusData(syncedResources || {});
     }
-  }, [show, syncedResources, isLoading]);
+  }, [show, syncedResources]);
 
   const showToast = (message, variant, title, duration = 5000) => {
     setToastConfig({ show: true, message, variant, title, duration });
@@ -183,6 +182,21 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
           });
         }
 
+        if (response.data) {
+          if (response.data.syncedResources) {
+            setStatusData(response.data.syncedResources);
+          }
+
+          if (onResourcesUpdate) {
+            onResourcesUpdate(response.data);
+          }
+        }
+
+        setSyncVdbs('');
+        setSyncTags('');
+        setIgnoreTags('');
+        setActiveTab('status'); 
+
         // append timings to toast
         if (errors.length > 0) {
           const formatError = (errObj) => {
@@ -208,16 +222,6 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
           let successMsg = response.data.message || "Synchronization successful.";
           successMsg += timingsMsg;
 
-          if (response.data) {
-            if (response.data.syncedResources) {
-              setStatusData(response.data.syncedResources);
-            }
-
-            if (onResourcesUpdate) {
-              onResourcesUpdate(response.data);
-            }
-          }
-
           showToast(successMsg, 'success', 'Sync completed', 15000);
         }
       }
@@ -236,15 +240,46 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
     }
   };
 
-  const handleDeleteSubmit = async (e) => {
-    e.preventDefault();
+  const handleSelectResource = (type, name, isChecked) => {
+    if (type === 'DATABASE') {
+      if (isChecked) {
+        setSelectedDatabases(prev => [...prev, name]);
+      } else {
+        setSelectedDatabases(prev => prev.filter(item => item !== name));
+      }
+    } else if (type === 'TAG') {
+      if (isChecked) {
+        setSelectedTags(prev => [...prev, name]);
+      } else {
+        setSelectedTags(prev => prev.filter(item => item !== name));
+      }
+    }
+  };
+
+  const handleSelectAll = (type, isChecked) => {
+    if (type === 'DATABASE') {
+      if (isChecked) {
+        setSelectedDatabases(Object.keys(statusData.DATABASE || {}));
+      } else {
+        setSelectedDatabases([]);
+      }
+    } else if (type === 'TAG') {
+      if (isChecked) {
+        setSelectedTags(Object.keys(statusData.TAG || {}));
+      } else {
+        setSelectedTags([]);
+      }
+    }
+  };
+
+  const handleDeleteSubmit = async () => {
     setIsLoading(true);
 
     try {
       const response = await api.delete("delete_metadata", {
         data: {
-          vdp_database_names: deleteVdbs,
-          vdp_tag_names: deleteTags,
+          vdp_database_names: selectedDatabases.join(','),
+          vdp_tag_names: selectedTags.join(','),
           delete_conflicting: deleteConflicting
         }
       });
@@ -268,6 +303,10 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
               onResourcesUpdate(response.data);
             }
           }
+
+          // Clear selection after successful deletion
+          setSelectedDatabases([]);
+          setSelectedTags([]);
       }
 
     } catch (error) {
@@ -278,28 +317,73 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
     }
   };
 
-  const renderResourceList = (resources) => {
+  const renderSectionHeader = (title, type) => {
+    const resources = type === 'DATABASE' ? statusData.DATABASE : statusData.TAG;
+    const selectedList = type === 'DATABASE' ? selectedDatabases : selectedTags;
+    
+    if (!resources) return null;
+    
+    const allKeys = Object.keys(resources);
+    const isAllSelected = allKeys.length > 0 && selectedList.length === allKeys.length;
+    const isIndeterminate = selectedList.length > 0 && selectedList.length < allKeys.length;
+
+    return (
+      <div className="d-flex justify-content-between align-items-center mb-2">
+        <h5 className="m-0">{title}</h5>
+        {allKeys.length > 1 && (
+          <Form.Check
+            type="checkbox"
+            id={`select-all-${type}`}
+            label={<span className="text-muted resource-timestamp">Select all</span>}
+            checked={isAllSelected}
+            ref={input => {
+              if (input) input.indeterminate = isIndeterminate;
+            }}
+            onChange={(e) => handleSelectAll(type, e.target.checked)}
+            disabled={isLoading}
+            className="mb-0"
+          />
+        )}
+      </div>
+    );
+  };
+
+  const renderResourceList = (resources, type) => {
     if (!resources || Object.keys(resources).length === 0) {
       return null;
     }
+    const selectedList = type === 'DATABASE' ? selectedDatabases : selectedTags;
+
     return (
       <>
         {Object.entries(resources).map(([name, timestamp]) => (
           <ListGroup.Item key={name} className="d-flex justify-content-between align-items-center gap-3">
-            <OverlayTrigger
-              placement="top"
-              delay={{ show: 250, hide: 400 }}
-              overlay={
-                <Tooltip id={`tooltip-${name}`}>
+            <div className="d-flex align-items-center gap-2 resource-name-container">
+              <div> 
+                <Form.Check
+                  type="checkbox"
+                  className="m-0"
+                  id={`delete-${type}-${name}`}
+                  checked={selectedList.includes(name)}
+                  onChange={(e) => handleSelectResource(type, name, e.target.checked)}
+                  disabled={isLoading}
+                />
+              </div>
+              <OverlayTrigger
+                placement="top"
+                delay={{ show: 250, hide: 400 }}
+                overlay={
+                  <Tooltip id={`tooltip-${name}`}>
+                    {name}
+                  </Tooltip>
+                }
+              >
+                <code className="text-truncate resource-name-code">
                   {name}
-                </Tooltip>
-              }
-            >
-              <code className="text-truncate" style={{ minWidth: 0 }}>
-                {name}
-              </code>
-            </OverlayTrigger>
-            <span style={{fontSize: '0.9em'}} className="text-nowrap flex-shrink-0">
+                </code>
+              </OverlayTrigger>
+            </div>
+            <span className="text-nowrap flex-shrink-0 resource-timestamp">
               {formatTimestamp(timestamp)}
             </span>
           </ListGroup.Item>
@@ -311,28 +395,45 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
   const hasDatabases = statusData && statusData.DATABASE && Object.keys(statusData.DATABASE).length > 0;
   const hasTags = statusData && statusData.TAG && Object.keys(statusData.TAG).length > 0;
   const hasAnyData = hasDatabases || hasTags;
+  const hasSelections = selectedDatabases.length > 0 || selectedTags.length > 0;
 
   const resetState = () => {
     setActiveTab('status');
     setSyncVdbs('');
     setSyncTags('');
     setIgnoreTags('');
-    setDeleteVdbs('');
-    setDeleteTags('');
+    setSelectedDatabases([]);
+    setSelectedTags([]);
     setDeleteConflicting(false);
   };
 
   const handleOnExited = () => {
-    resetState();
+    if (!isLoading) {
+      resetState();
+    }
     setToastConfig((prev) => ({ ...prev, show: false }));
   };
 
   const renderFooterButtons = () => {
     if (activeTab === 'status') {
       return (
-        <Button variant="light" onClick={handleClose}>
-          Close
-        </Button>
+        <>
+          <Button variant="light" onClick={handleClose}>
+            Close
+          </Button>
+          {hasSelections && (
+            <Button variant="danger" onClick={handleDeleteSubmit} disabled={isLoading}>
+              {isLoading ? (
+                <>
+                  <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" />
+                  <span className="ms-2">Deleting...</span>
+                </>
+              ) : (
+                'Delete selected'
+              )}
+            </Button>
+          )}
+        </>
       );
     }
 
@@ -340,7 +441,7 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
       return (
         <>
           <Button variant="light" onClick={handleClose}>
-            Cancel
+            Close
           </Button>
           <Button
               variant="dark"
@@ -354,23 +455,6 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
                 <span className="ms-2">Syncing...</span>
               </>
             ) : ( 'Sync' )}
-          </Button>
-        </>
-      );
-    }
-    if (activeTab === 'delete') {
-      return (
-        <>
-          <Button variant="light" onClick={handleClose}>
-            Cancel
-          </Button>
-          <Button variant="danger" type="submit" disabled={isLoading} form="delete-form">
-            {isLoading ? (
-              <>
-                <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" />
-                <span className="ms-2">Deleting...</span>
-              </>
-            ) : ( 'Delete' )}
           </Button>
         </>
       );
@@ -407,28 +491,59 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
               className="mb-3"
               data-bs-theme="light"
             >
-              <Tab eventKey="status" title="Vector DB Info" disabled={isLoading}>
-                <p>This tab shows the synchronized VDBs and tags with their last synchronization date.</p>
+              <Tab eventKey="status" title="Manage resources" disabled={isLoading}>
+                <p className="text-muted mb-4">This tab shows your synchronized VDBs and tags. You can select items to delete them.</p>
+                
                 {hasDatabases && (
-                  <>
-                    <h5>Synchronized Databases</h5>
-                    <div className="border rounded" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                  <div className="mb-4">
+                    {renderSectionHeader('Synchronized VDBs', 'DATABASE')}
+                    <div className="border rounded bg-white resource-list-container">
                       <ListGroup variant="flush">
-                        {renderResourceList(statusData.DATABASE)}
+                        {renderResourceList(statusData.DATABASE, 'DATABASE')}
                       </ListGroup>
                     </div>
-                  </>
+                  </div>
                 )}
+                
                 {hasTags && (
-                  <>
-                    <h5 className={hasDatabases ? "mt-4" : ""}>Synchronized Tags</h5>
-                    <div className="border rounded" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                  <div className="mb-4">
+                    {renderSectionHeader('Synchronized tags', 'TAG')}
+                    <div className="border rounded bg-white resource-list-container">
                       <ListGroup variant="flush">
-                        {renderResourceList(statusData.TAG)}
+                        {renderResourceList(statusData.TAG, 'TAG')}
                       </ListGroup>
                     </div>
-                  </>
+                  </div>
                 )}
+                
+                {hasSelections && (
+                  <div className="mt-4 p-3 border rounded bg-light">
+                    <Form.Group>
+                      <Form.Check
+                        type="checkbox"
+                        id="delete-conflicting-check"
+                        label={
+                          <span className="d-inline-flex align-items-center">
+                            <span className="fw-medium">Delete conflicting entries</span>
+                            <span className="ms-2">
+                              <CustomTooltip
+                                id="tooltip-delete-conflicting"
+                                content="If checked, entries linked to other synchronized sources will also be deleted. For example, if you synced both 'example_tag' and 'example_database', and you delete only 'example_tag', any views present in both will also be deleted."
+                                delay={{ show: 200, hide: 300 }}
+                              >
+                                <i className="bi bi-info-circle info-icon"></i>
+                              </CustomTooltip>
+                            </span>
+                          </span>
+                        }
+                        checked={deleteConflicting}
+                        onChange={(e) => setDeleteConflicting(e.target.checked)}
+                        disabled={isLoading}
+                      />
+                    </Form.Group>
+                  </div>
+                )}
+
                 {!hasAnyData && (
                   <Alert variant="info" className="mt-3">
                     No synchronized resources found for your account. Use the 'Sync' tab to add them.
@@ -439,7 +554,7 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
               <Tab eventKey="sync" title="Sync" disabled={isLoading}>
                 <Form id="sync-form" onSubmit={handleSyncSubmit}>
                   <Form.Group className="mb-3">
-                    <Form.Label>VDBs to Sync (comma-separated)</Form.Label>
+                    <Form.Label>VDBs to sync (comma-separated)</Form.Label>
                     <Form.Control
                       type="text"
                       placeholder="Specify a comma-separated list of VDBs to sync"
@@ -448,7 +563,7 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
                     />
                   </Form.Group>
                   <Form.Group className="mb-3">
-                    <Form.Label>Tags to Sync (comma-separated)</Form.Label>
+                    <Form.Label>Tags to sync (comma-separated)</Form.Label>
                     <Form.Control
                       type="text"
                       placeholder="Specify a comma-separated list of tags to sync"
@@ -468,7 +583,7 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
                   <div className="row">
                     <div className="col-md-6">
                         <Form.Group className="mb-3">
-                            <Form.Label>Examples per Table</Form.Label>
+                            <Form.Label>Examples per table</Form.Label>
                             <Form.Control
                                 type="number"
                                 min="0"
@@ -513,43 +628,6 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
                       checked={parallel}
                       onChange={(e) => setParallel(e.target.checked)}
                     />
-                  </Form.Group>
-                </Form>
-              </Tab>
-
-              <Tab eventKey="delete" title="Delete" disabled={isLoading}>
-                <Form id="delete-form" onSubmit={handleDeleteSubmit}>
-                  <Form.Group className="mb-3">
-                    <Form.Label>VDBs to Delete (comma-separated)</Form.Label>
-                    <Form.Control
-                      type="text"
-                      placeholder="Leave empty to ignore, or list VDBs"
-                      value={deleteVdbs}
-                      onChange={(e) => setDeleteVdbs(e.target.value)}
-                    />
-                  </Form.Group>
-                  <Form.Group className="mb-3">
-                    <Form.Label>Tags to Delete (comma-separated)</Form.Label>
-                    <Form.Control
-                      type="text"
-                      placeholder="Leave empty to ignore, or list tags"
-                      value={deleteTags}
-                      onChange={(e) => setDeleteTags(e.target.value)}
-                    />
-                    <Form.Text>
-                      At least one VDB or tag must be provided.
-                    </Form.Text>
-                  </Form.Group>
-                  <Form.Group className="mb-3">
-                    <Form.Check
-                      type="checkbox"
-                      label="Delete conflicting entries"
-                      checked={deleteConflicting}
-                      onChange={(e) => setDeleteConflicting(e.target.checked)}
-                    />
-                    <Form.Text>
-                      If unchecked, entries linked to other synchronized sources will be preserved.
-                    </Form.Text>
                   </Form.Group>
                 </Form>
               </Tab>

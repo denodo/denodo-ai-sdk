@@ -64,40 +64,71 @@ def _user():
     """Resolve the underlying user (not the LocalProxy)."""
     return current_user._get_current_object()
 
-def _present_source(meta, user, agent_id):
+def _resolve_agent_config(user, agent_id):
+    """Return the ChatbotConfig for agent_id (default: the user's current agent).
+
+    Raises PermissionError if the user may not use that agent, KeyError if the
+    agent does not exist. Used by the per-agent Settings modal, which can
+    manage activation for agents other than the currently selected one.
+    """
+    from sample_chatbot import config as chatbot_configs
+    if not agent_id or agent_id == user._config.id:
+        return user._config
+    config = chatbot_configs._configs.get(agent_id)
+    if config is None:
+        raise KeyError(agent_id)
+    if not config.is_user_allowed(
+        username=user.id,
+        roles=getattr(user, 'roles', []),
+        is_admin=getattr(user, 'is_admin', False),
+        legacy_permissions_endpoint=getattr(user, 'legacy_permissions_endpoint', False),
+    ):
+        raise PermissionError(agent_id)
+    return config
+
+def _present_source(meta, user, agent_id, can_toggle_collections=False, agent_declares_kbs=False):
     """Shape a registry entry for the API."""
     csv_path = meta.get("csv_path") or ""
     path_valid, _ = validate_csv_path(csv_path) if csv_path else (False, None)
     active_by_user = meta.get("active_by_user") or {}
     user_agents = active_by_user.get(user.id) or []
     can_subscribe = _can_subscribe(meta, user)
+    # Per-agent activation requires unstructured-mode permission and covers the
+    # user's OWN PRIVATE collections. Mirroring the skills rule: when the agent
+    # declares knowledge_bases in its YAML, public collections apply only
+    # through that declaration; when it declares none (e.g. general chat),
+    # public collections are user-toggleable too.
+    own_private = bool(meta.get("private")) and meta.get("owner") == user.id
+    public = not meta.get("private")
+    can_toggle = (own_private or (public and not agent_declares_kbs)) and can_toggle_collections
     return {
         "source_name": meta["name"],
         "description": meta.get("description", ""),
         "delimiter": meta.get("delimiter", ";"),
         "document_count": meta.get("num_rows", 0),
         "last_vectorized": meta.get("last_vectorized"),
-        # `active` is whether this collection is on for THIS user on THIS agent.
-        # If the user cannot subscribe (e.g. admin viewing someone else's
-        # private collection) it's never active regardless of registry state.
-        "active": can_subscribe and (agent_id in user_agents),
+        # `active` is whether this collection is on for THIS user on THIS
+        # agent. Only collections the user can toggle count here; agent-declared
+        # collections are forced active by the caller.
+        "active": can_toggle and (agent_id in user_agents),
         "owner": meta.get("owner"),
         "is_owner": meta.get("owner") == user.id,
         "vectorized_columns": meta.get("vectorized_columns", []),
         "private": bool(meta.get("private", False)),
         "path_valid": path_valid,
         # Per-row capability flags so the UI can render the right controls.
+        # can_subscribe covers content access (e.g. downloads); can_toggle
+        # covers per-agent activation.
         "can_subscribe": can_subscribe,
+        "can_toggle": can_toggle,
         "can_delete": _can_delete(meta, user),
         "can_edit": _can_edit(meta, user),
         "can_make_public": _can_make_public(meta, user),
         "can_make_private": _can_make_private(meta, user),
     }
 
-
 def _is_admin(user):
     return bool(getattr(user, "is_admin", False))
-
 
 def _is_visible_to(meta, user):
     """Public collections are visible to everyone; private ones to their owner
@@ -108,13 +139,11 @@ def _is_visible_to(meta, user):
         return True
     return _is_admin(user)
 
-
 def _can_subscribe(meta, user):
     """May this user activate/deactivate or download this collection?"""
     if not meta.get("private"):
         return True
     return meta.get("owner") == user.id
-
 
 def _can_delete(meta, user):
     """Owner or any admin may delete a collection."""
@@ -122,27 +151,22 @@ def _can_delete(meta, user):
         return True
     return _is_admin(user)
 
-
 def _can_edit(meta, user):
     """Description edits — owner only (same intent as before)."""
     return meta.get("owner") == user.id
-
 
 def _can_make_public(meta, user):
     """Toggling a collection to public requires admin + ownership."""
     return _is_admin(user) and meta.get("owner") == user.id
 
-
 def _can_make_private(meta, user):
     """Owner may always make their own collection private."""
     return meta.get("owner") == user.id
-
 
 # Collection names are used as identifiers in the vector store, in metadata
 # filters, in URLs (e.g. /api/csv/download/<name>) and in the system prompt;
 # we want them safe across all of those layers.
 _SOURCE_NAME_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,80}$")
-
 
 def _validate_source_name(name):
     """Return (ok_name, error_message)."""
@@ -161,14 +185,39 @@ def _validate_source_name(name):
 @login_required
 def list_csv_sources():
     user = _user()
-    agent_id = user._config.id
+    try:
+        agent_config = _resolve_agent_config(user, request.args.get('agent_id'))
+    except KeyError:
+        return jsonify({"success": False, "error": "Unknown agent."}), 404
+    except PermissionError:
+        return jsonify({"success": False, "error": "You are not allowed to use this agent."}), 403
+    agent_id = agent_config.id
     registry = get_registry_for(user._config)
     collections = registry.list_collections()
+    can_toggle_collections = agent_config.is_unstructured_mode_allowed_for_user(
+        username=user.id,
+        roles=getattr(user, 'roles', []),
+        is_admin=getattr(user, 'is_admin', False),
+        legacy_permissions_endpoint=getattr(user, 'legacy_permissions_endpoint', False),
+    )
+    agent_declares_kbs = bool(agent_config.knowledge_bases)
     sources = [
-        _present_source(meta, user, agent_id)
+        _present_source(meta, user, agent_id, can_toggle_collections, agent_declares_kbs)
         for meta in collections.values()
         if _is_visible_to(meta, user)
     ]
+
+    # Collections declared in the agent's YAML are always active for every
+    # user of the agent (and cannot be unsubscribed from).
+    agent_kb_names = set(agent_config.knowledge_bases)
+    for source in sources:
+        if source["source_name"] in agent_kb_names:
+            source["active"] = True
+            source["agent_managed"] = True
+            source["can_toggle"] = False
+        else:
+            source["agent_managed"] = False
+
     sources.sort(key=lambda s: s["source_name"])
     active_sources = [s["source_name"] for s in sources if s["active"]]
     logger.info(f"[CSV] '{user.id}' on agent '{agent_id}': {len(sources)} collections, {len(active_sources)} active")
@@ -179,7 +228,6 @@ def list_csv_sources():
         "agent_id": agent_id,
         "current_user_is_admin": _is_admin(user),
     }), 200
-
 
 @csv_bp.route('/api/csv/scan', methods=['GET'])
 @login_required
@@ -284,7 +332,6 @@ def _parse_columns(value):
         except ValueError:
             return [c.strip() for c in value.split(",") if c.strip()]
     return None
-
 
 @csv_bp.route('/api/csv/add', methods=['POST'])
 @login_required
@@ -393,6 +440,9 @@ def add_csv_source():
             auto_activate_agent=user._config.id,
             private=private,
         )
+
+        user.chatbot = None
+
         return jsonify({
             "success": True,
             "source_name": source_name,
@@ -401,7 +451,6 @@ def add_csv_source():
     except Exception as e:  # noqa: BLE001
         logger.exception("[CSV] add_csv_source failed")
         return jsonify({"success": False, "error": f"Could not add CSV: {e}"}), 400
-
 
 # --------------------------------------------------------------------------- delete
 
@@ -439,8 +488,9 @@ def delete_csv_source(source_name):
             except Exception as e:
                 logger.warning(f"Could not delete CSV file: {e}")
 
-    return jsonify({"success": True}), 200
+    user.chatbot = None
 
+    return jsonify({"success": True}), 200
 
 # --------------------------------------------------------------------------- activate
 
@@ -452,22 +502,59 @@ def activate_csv_sources():
     data = request.json or {}
     source_name = data.get('source_name')
     active = bool(data.get('active', True))
+
+    try:
+        agent_config = _resolve_agent_config(user, data.get('agent_id'))
+    except KeyError:
+        return jsonify({"success": False, "error": "Unknown agent."}), 404
+    except PermissionError:
+        return jsonify({"success": False, "error": "You are not allowed to use this agent."}), 403
+
+    # Collections declared in the agent's YAML are always active for every
+    # user of the agent and cannot be toggled.
+    if source_name in agent_config.knowledge_bases:
+        return jsonify({
+            "success": False,
+            "error": "This collection is managed by the agent and is always active."
+        }), 400
     if not source_name:
         return jsonify({"success": False, "error": "source_name is required"}), 400
 
     existing = registry.get_collection(source_name)
     if existing is None or not _is_visible_to(existing, user):
         return jsonify({"success": False, "error": f"Source '{source_name}' not found"}), 404
-    if not _can_subscribe(existing, user):
+    if not agent_config.is_unstructured_mode_allowed_for_user(
+        username=user.id,
+        roles=getattr(user, 'roles', []),
+        is_admin=getattr(user, 'is_admin', False),
+        legacy_permissions_endpoint=getattr(user, 'legacy_permissions_endpoint', False),
+    ):
         return jsonify({
             "success": False,
-            "error": "You can't activate this collection. It belongs to another user and is private.",
+            "error": "You are not allowed to activate collections on this agent.",
+        }), 403
+    # Own private collections are always toggleable (given the permission
+    # above). Public ones are toggleable only on agents that declare no
+    # knowledge_bases in their YAML (e.g. general chat); on declaring agents
+    # they apply solely through the declaration.
+    own_private = existing.get("private") and existing.get("owner") == user.id
+    public_togglable = not existing.get("private") and not agent_config.knowledge_bases
+    if not (own_private or public_togglable):
+        return jsonify({
+            "success": False,
+            "error": "Only your own private collections can be activated per agent. "
+                     "Public collections apply only when declared in an agent's configuration.",
         }), 403
 
-    agent_id = user._config.id
+    agent_id = agent_config.id
     meta = registry.set_active(source_name, user.id, agent_id, active)
     if meta is None:
         return jsonify({"success": False, "error": f"Source '{source_name}' not found"}), 404
+
+    # Only rebuild the engine when the change affects the current agent.
+    if agent_id == user._config.id:
+        user.chatbot = None
+
     return jsonify({
         "success": True,
         "source_name": source_name,
@@ -475,7 +562,6 @@ def activate_csv_sources():
         "agent_id": agent_id,
         "active_sources": registry.active_for_user(user.id, agent_id),
     }), 200
-
 
 # --------------------------------------------------------------------------- description
 
@@ -501,7 +587,6 @@ def update_csv_description():
 
     registry.update_description(source_name, description)
     return jsonify({"success": True, "description": description}), 200
-
 
 # --------------------------------------------------------------------------- access
 

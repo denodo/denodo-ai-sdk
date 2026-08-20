@@ -6,6 +6,7 @@ from flask_login import UserMixin
 
 from utils.uniformLLM import UniformLLM
 from sample_chatbot.engine.chatbot import ChatbotEngine
+from sample_chatbot.engine.skills import active_skills_for_user
 from sample_chatbot.extensions import get_unstructured_vector_store
 from sample_chatbot.services.kb_registry import get_registry_for
 
@@ -18,7 +19,6 @@ def _normalize_instruction_entry(val):
             'chatbot': (val.get('chatbot') or '').strip(),
         }
     return {'ai_sdk': '', 'chatbot': ''}
-
 
 def _normalize_instruction_map(payload):
     if payload is None:
@@ -53,7 +53,6 @@ class User(UserMixin):
         self.chatbot = None
         self.custom_instructions_map = {}
         self.user_details = ""
-        self.thread_id = None
 
         # Synced resources
         self.synced_resources = {}
@@ -89,8 +88,38 @@ class User(UserMixin):
 
     @property
     def active_csv_sources(self):
-        """Collections this user has switched on for the *current* agent."""
-        return self._registry().active_for_user(self.id, self._config.id)
+        """Collections active for this user on the current agent.
+
+        Collections declared in the agent's YAML (knowledge_bases) are always
+        active for every user of the agent, regardless of permissions. On top
+        of those, users with unstructured-mode permission can activate their
+        own private collections. Public collections apply through an agent's
+        YAML; on agents that declare no knowledge_bases (e.g. general chat)
+        they are user-toggleable like private ones.
+        """
+        registry = self._registry()
+        actives = []
+        agent_declares_kbs = bool(self._config.knowledge_bases)
+        if self._config.is_unstructured_mode_allowed_for_user(
+            username=self.id,
+            roles=self.roles,
+            is_admin=self.is_admin,
+            legacy_permissions_endpoint=self.legacy_permissions_endpoint,
+        ):
+            for name in registry.active_for_user(self.id, self._config.id):
+                meta = registry.get_collection(name) or {}
+                own_private = meta.get('private') and meta.get('owner') == self.id
+                public_togglable = not meta.get('private') and not agent_declares_kbs
+                if own_private or public_togglable:
+                    actives.append(name)
+        for name in self._config.knowledge_bases:
+            # Agents can only use PUBLIC collections: a declared name that
+            # matches someone's private collection is treated as not found,
+            # never exposed to the agent's users.
+            meta = registry.get_collection(name) or {}
+            if name not in actives and registry.has_collection(name) and not meta.get('private'):
+                actives.append(name)
+        return actives
 
     @property
     def unstructured_vector_store_description(self):
@@ -205,7 +234,6 @@ class User(UserMixin):
         if use_base_llm_for_execution is not None:
             self.use_base_llm_for_execution = bool(use_base_llm_for_execution)
 
-
     def get_or_create_chatbot(self):
         if not self.chatbot:
             chatbot_llm = self.get_chatbot_llm()
@@ -256,7 +284,14 @@ class User(UserMixin):
             deep_query_allowed = self.ai_sdk_info.get("can_use_deepquery", True) if self.ai_sdk_info else True
             deepquery_enabled = self._config.deepquery_enabled and deep_query_allowed
 
-            unstructured_mode_allowed = self._config.is_unstructured_mode_allowed_for_user(
+            # Effective disabled skills for this user's engine: the agent's
+            # feature-disabled set plus the deepquery skill when this user is
+            # not allowed to use DeepQuery at the SDK level.
+            disabled_skills = set(self._config.disabled_skills)
+            if not deepquery_enabled:
+                disabled_skills.add("deepquery")
+
+            can_manage_skills = self._config.is_skill_management_allowed_for_user(
                 username=self.id,
                 roles=self.roles,
                 is_admin=self.is_admin,
@@ -269,21 +304,28 @@ class User(UserMixin):
                 api_host=self._config.ai_sdk_host,
                 username=self.id,
                 password=self.password,
-                vector_store_provider=self._config.vector_store_provider if unstructured_mode_allowed else None,
-                vector_store=self.chatbot_vector_store if unstructured_mode_allowed else None,
+                # KB params are always passed: active_csv_sources already
+                # applies per-user permissions, and agent-declared collections
+                # work for every user. With no active collections the engine
+                # does not register the knowledge_query tool at all.
+                vector_store_provider=self._config.vector_store_provider,
+                vector_store=self.chatbot_vector_store,
                 user_details=self.user_details,
                 enable_deepquery=deepquery_enabled,
-                deep_query_guidance=self._config.deepquery_guidance,
+                skills=active_skills_for_user(self.id, self._config.id, self._config.agent_skills, disabled_skills),
+                can_manage_skills=can_manage_skills,
+                agent_id=self._config.id,
+                allowed_system_skills=self._config.agent_skills,
+                disabled_skills=disabled_skills,
                 ai_sdk_custom_instructions=self._effective_ai_sdk_instructions(),
                 chatbot_custom_instructions=self._effective_chatbot_instructions(),
-                thread_id=self.thread_id,
                 verify_ssl=self._config.ai_sdk_verify_ssl,
                 ai_sdk_params=ai_sdk_params,
                 data_agent_limit_max=data_agent_limit_max,
                 auto_graph=self._config.auto_graph,
-                kb_description=self.unstructured_vector_store_description if unstructured_mode_allowed else "",
-                active_csv_sources=self.active_csv_sources if unstructured_mode_allowed else None,
-                kb_collections=self.kb_collections_map if unstructured_mode_allowed else None,
+                kb_description=self.unstructured_vector_store_description,
+                active_csv_sources=self.active_csv_sources,
+                kb_collections=self.kb_collections_map,
                 timeout=self._config.chatbot_timeout,
             )
         return self.chatbot
@@ -311,7 +353,6 @@ class User(UserMixin):
         self.agent_id = config.id
         self.chatbot = None
         self.user_details = ""
-        self.thread_id = None
 
         self.chatbot_llm_preferences = {}
         self.ai_sdk_base_llm_preferences = {}

@@ -1,3 +1,19 @@
+version 1.3-beta - 20260803
+----------------------
+
+- Added Skills feature to the sample chatbot
+- Added the ability to store, export and share chat conversations with other users or teams in the sample chatbot
+- Added option to cancel long-running queries in the sample chatbot
+- Added selectable dropdowns for database and tags in the Chatbot UI
+- Added CHATBOT_INPUT_METHOD to configure Enter vs Ctrl+Enter for sending questions in the sample chatbot
+- Added token usage breakdown (input/output/total) to the sample chatbot Additional Information modal
+- Improved Google Vertex AI provider support for Gemini and Anthropic models
+- Fixed DeepQuery PDF reports so they are generated in the selected language instead of always English
+- Included tags and tag descriptions in VQL schema representation of views to enhance context in VQL generation prompts
+- Fixed DeepQuery related questions so clicking them selects the DeepQuery tool
+- Fixed AI SDK Docker image startup failure in production mode due to hardcoded Gunicorn path
+- Updated adbc-driver-flightsql to 1.11.0 to remediate Go CVEs in the bundled Flight SQL driver
+
 version 1.2.1 - 20260622
 ----------------------
 

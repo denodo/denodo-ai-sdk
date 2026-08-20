@@ -14,6 +14,7 @@ import RelatedQuestions from "./RelatedQuestions";
 import ContextTablesAction from "./ContextTablesAction";
 import ChatItemActions from "./ChatItemActions";
 import ToolBlocks from "./ToolBlocks";
+import NotificationToast from "../NotificationToast/NotificationToast";
 
 const ChatItem = ({
   result,
@@ -22,7 +23,6 @@ const ChatItem = ({
   setCurrentQuestion,
   setQuestionType,
   onGenerateReport,
-  isGeneratingReport,
   resultsContainerRef,
 }) => {
   const { config } = useConfig();
@@ -37,13 +37,21 @@ const ChatItem = ({
     tables: [],
     vql: "",
   });
+
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
 
   const [modalOverride, setModalOverride] = useState(null);
 
+  const [toastConfig, setToastConfig] = useState({
+    show: false,
+    message: "",
+    variant: "info",
+    title: "",
+  });
+
   const handleAskRelated = (question) => {
     setCurrentQuestion(question);
-    setQuestionType(result?.toolName || null);
+    setQuestionType(result?.toolName || 'auto');
   };
 
   const handleAskDeepQuery = (question) => {
@@ -55,6 +63,7 @@ const ChatItem = ({
       setModalOverride(null);
       setShowInfoModal(true);
   };
+
   const handleCloseInfo = () => {
       setShowInfoModal(false);
       setModalOverride(null);
@@ -75,6 +84,7 @@ const ChatItem = ({
     setGraph(g);
     setShowGraphModal(true);
   };
+
   const handleCloseGraph = () => {
     setShowGraphModal(false);
     setGraph(null);
@@ -100,15 +110,17 @@ const ChatItem = ({
     setContextTables({ tables, vql });
     setShowContextModal(true);
   };
+
   const handleCloseContext = () => {
     setShowContextModal(false);
     setContextTables({ tables: [], vql: "" });
   };
 
   const handleOpenFeedback = () => {
-    if (!config.chatbot_feedback) return;
+    if (!config.chatbot_feedback || result.disableFeedback) return;
     setShowFeedbackModal(true);
   };
+
   const handleCloseFeedback = () => {
     setShowFeedbackModal(false);
   };
@@ -165,7 +177,6 @@ const ChatItem = ({
             <ToolBlocks
               blocks={result.blocks}
               result={result}
-              isGeneratingReport={isGeneratingReport}
               onGenerateReport={onGenerateReport}
               resultsContainerRef={resultsContainerRef}
               onOpenGraph={handleOpenGraph}
@@ -203,7 +214,7 @@ const ChatItem = ({
                     icons={
                         <ChatItemActions
                             result={result}
-                            config={config}
+                            config={{ ...config, chatbot_feedback: config.chatbot_feedback && !result.disableFeedback }}
                             onOpenInfo={handleOpenInfo}
                             onFeedback={handleOpenFeedback}
                             resultsContainerRef={resultsContainerRef}
@@ -228,7 +239,7 @@ const ChatItem = ({
                     >
                       <ChatItemActions
                         result={result}
-                        config={config}
+                        config={{ ...config, chatbot_feedback: config.chatbot_feedback && !result.disableFeedback }}
                         onOpenInfo={handleOpenInfo}
                         onFeedback={handleOpenFeedback}
                         resultsContainerRef={resultsContainerRef}
@@ -315,6 +326,14 @@ const ChatItem = ({
         dispatch={dispatch}
         resultIndex={index}
         feedbackEnabled={config.chatbot_feedback}
+        onShowToast={setToastConfig}
+      />
+      <NotificationToast
+        show={toastConfig.show}
+        message={toastConfig.message}
+        variant={toastConfig.variant}
+        title={toastConfig.title}
+        onClose={() => setToastConfig((prev) => ({ ...prev, show: false }))}
       />
     </>
   );
@@ -333,6 +352,5 @@ ChatItem.propTypes = {
   setCurrentQuestion: PropTypes.func,
   setQuestionType: PropTypes.func,
   onGenerateReport: PropTypes.func,
-  isGeneratingReport: PropTypes.bool,
   resultsContainerRef: PropTypes.object,
 };

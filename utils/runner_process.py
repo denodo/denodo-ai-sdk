@@ -1,19 +1,22 @@
 import os
-import re
 import sys
 import time
 import platform
 import threading
 import subprocess
-from rich.panel import Panel
+import requests
+import urllib3
 from rich.console import Console
-from dotenv import dotenv_values
 from utils.utils import normalize_root_path
 from utils.version import AI_SDK_VERSION
 from utils.yaml.validate_and_parse import load_and_validate_agents
-from utils.runner_display import print_status, PANEL_WIDTH
+from utils.runner_display import print_status
 
 console = Console()
+
+# The readiness probe targets the service on loopback, so a self-signed
+# certificate is the norm rather than a problem worth warning about.
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def spawn_services(process_types, args):
     """
@@ -25,7 +28,7 @@ def spawn_services(process_types, args):
 
 def wait_for_services(specs, args):
     """
-    Wait for every spawned service to print its "ready" line, in parallel.
+    Wait for every spawned service to answer its /health endpoint.
     Returns (succeeded, failed) lists of (process_type, spec) tuples.
 
     The timeout budget is shared across all services from a single wall-clock
@@ -36,14 +39,58 @@ def wait_for_services(specs, args):
     failed = []
     deadline = time.monotonic() + args.timeout
     for spec in specs:
-        remaining = max(0.0, deadline - time.monotonic())
-        if spec["success_event"].wait(remaining):
+        if _wait_until_healthy(spec, deadline):
+            print_status(
+                spec["process_type"],
+                [spec["display_url"]],
+                AI_SDK_VERSION if spec["process_type"] == "api" else None,
+                root_path_prefix=spec["root_path"],
+                imported_agent_names=spec["imported_agent_names"],
+            )
             succeeded.append((spec["process_type"], spec))
         else:
             spec["process"].kill()
-            spec["log_thread"].join()
+            if spec["log_thread"] is not None:
+                spec["log_thread"].join()
             failed.append((spec["process_type"], spec))
     return succeeded, failed
+
+def _wait_until_healthy(spec, deadline):
+    """
+    Poll the service's /health endpoint until it answers with 200, the service
+    dies, or the shared deadline elapses.
+    """
+    while time.monotonic() < deadline:
+        if spec["process"].poll() is not None:
+            return False
+
+        remaining = deadline - time.monotonic()
+        try:
+            response = requests.get(
+                spec["health_url"],
+                verify=False, # noqa: S501
+                timeout=max(0.5, min(2.0, remaining)),
+            )
+            if response.status_code == 200:
+                return True
+        except requests.RequestException:
+            pass
+
+        time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
+    return False
+
+def _build_service_urls(host, port, root_path, ssl_enabled):
+    """
+    Return the URL shown to the user and the /health URL run.py polls.
+    """
+    scheme = "https" if ssl_enabled else "http"
+    display_url = f"{scheme}://{host}:{port}"
+
+    probe_host = {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(host, host)
+    if ":" in probe_host:
+        probe_host = f"[{probe_host}]"
+
+    return display_url, f"{scheme}://{probe_host}:{port}{root_path}/health"
 
 def _spawn_service(process_type, args):
     env = os.environ.copy()
@@ -73,42 +120,30 @@ def _spawn_service(process_type, args):
         else:
             # Solo mode: a single short probe matches the prior fast-fail
             # behavior — `requests` returns immediately on connection
-            # refused, so this adds ~no latency when the AI SDK isn't there.
+            # refused, so this adds no latency when the AI SDK isn't there.
             env.setdefault('CHATBOT_AI_SDK_WAIT_TIMEOUT', '0')
 
+    # Settings are read from the environment, which run.py has already
+    # populated from the service configuration files.
     if process_type == "api":
-        if os.path.exists("api/utils/sdk_config.env"):
-            sdk_vars = dotenv_values("api/utils/sdk_config.env")
-        else:
-            console.print("[yellow]Warning:[/] Environment file api/utils/sdk_config.env not found.")
-            sdk_vars = {}
-
-        HOST = sdk_vars.get("AI_SDK_HOST") or os.getenv("AI_SDK_HOST", "0.0.0.0")
-        PORT = sdk_vars.get("AI_SDK_PORT") or os.getenv("AI_SDK_PORT", "8008")
-        WORKERS = sdk_vars.get("AI_SDK_WORKERS") or os.getenv("AI_SDK_WORKERS", "1")
-        SSL_CERT = sdk_vars.get("AI_SDK_SSL_CERT") or os.getenv("AI_SDK_SSL_CERT")
-        SSL_KEY = sdk_vars.get("AI_SDK_SSL_KEY") or os.getenv("AI_SDK_SSL_KEY")
-        TIMEOUT = sdk_vars.get("AI_SDK_TIMEOUT") or os.getenv("AI_SDK_TIMEOUT", "1200")
-
-        root_path_value = sdk_vars.get("AI_SDK_ROOT_PATH") or os.getenv("AI_SDK_ROOT_PATH")
-        ROOT_PATH = normalize_root_path(root_path_value or "")
+        HOST = os.getenv("AI_SDK_HOST")
+        PORT = os.getenv("AI_SDK_PORT")
+        WORKERS = os.getenv("AI_SDK_WORKERS")
+        SSL_CERT = os.getenv("AI_SDK_SSL_CERT")
+        SSL_KEY = os.getenv("AI_SDK_SSL_KEY")
+        TIMEOUT = os.getenv("AI_SDK_TIMEOUT")
+        ROOT_PATH = normalize_root_path(os.getenv("AI_SDK_ROOT_PATH") or "")
 
     elif process_type == "sample_chatbot":
-        if os.path.exists("sample_chatbot/chatbot_config.env"):
-            chatbot_vars = dotenv_values("sample_chatbot/chatbot_config.env")
-        else:
-            console.print("[yellow]Warning:[/] Environment file sample_chatbot/chatbot_config.env not found.")
-            chatbot_vars = {}
+        HOST = os.getenv("CHATBOT_HOST")
+        PORT = os.getenv("CHATBOT_PORT")
+        WORKERS = os.getenv("CHATBOT_WORKERS")
+        SSL_CERT = os.getenv("CHATBOT_SSL_CERT")
+        SSL_KEY = os.getenv("CHATBOT_SSL_KEY")
+        TIMEOUT = os.getenv("CHATBOT_TIMEOUT")
+        ROOT_PATH = normalize_root_path(os.getenv("CHATBOT_ROOT_PATH") or "")
 
-        HOST = chatbot_vars.get("CHATBOT_HOST") or os.getenv("CHATBOT_HOST", "0.0.0.0")
-        PORT = chatbot_vars.get("CHATBOT_PORT") or os.getenv("CHATBOT_PORT", "9992")
-        WORKERS = chatbot_vars.get("CHATBOT_WORKERS") or os.getenv("CHATBOT_WORKERS", "1")
-        SSL_CERT = chatbot_vars.get("CHATBOT_SSL_CERT") or os.getenv("CHATBOT_SSL_CERT")
-        SSL_KEY = chatbot_vars.get("CHATBOT_SSL_KEY") or os.getenv("CHATBOT_SSL_KEY")
-        TIMEOUT = chatbot_vars.get("CHATBOT_TIMEOUT") or os.getenv("CHATBOT_TIMEOUT", "1200")
-
-        root_path_value = chatbot_vars.get("CHATBOT_ROOT_PATH") or os.getenv("CHATBOT_ROOT_PATH")
-        ROOT_PATH = normalize_root_path(root_path_value or "")
+    display_url, health_url = _build_service_urls(HOST, PORT, ROOT_PATH, bool(SSL_CERT and SSL_KEY))
 
     imported_agent_names = []
     if process_type == "sample_chatbot":
@@ -117,31 +152,42 @@ def _spawn_service(process_type, args):
             for agent_config in load_and_validate_agents()
         ]
 
-    success_event = threading.Event()
-
     with console.status(f"[bold blue]Starting {process_type}...", spinner="dots"):
         if args.production:
-            venv_path = sys.prefix
             app_target = f"{process_type}.main:app"
             cmd = []
 
             if platform.system() == "Windows":
                 if process_type == "sample_chatbot":
-                    # Flask WSGI app (sample_chatbot)
-                    waitress_path = os.path.join(venv_path, "Scripts", "waitress-serve.exe")
-                    cmd = [waitress_path, f"--host={HOST}", f"--port={PORT}", f"--threads={WORKERS}", app_target]
+                    # Flask WSGI app (sample_chatbot) - Waitress
+                    cmd = [
+                        sys.executable, "-m", "waitress",
+                        f"--host={HOST}",
+                        f"--port={PORT}",
+                        f"--threads={WORKERS}",
+                        app_target
+                    ]
                 else:
-                    # ASGI app (api)
-                    uvicorn_path = os.path.join(venv_path, "Scripts", "uvicorn.exe")
-                    cmd = [uvicorn_path, app_target, "--host", HOST, "--port", PORT, "--workers", WORKERS]
+                    # ASGI app (api) - Uvicorn
+                    cmd = [
+                        sys.executable, "-m", "uvicorn",
+                        app_target,
+                        "--host", HOST,
+                        "--port", PORT,
+                        "--workers", WORKERS
+                    ]
                     if SSL_CERT and SSL_KEY:
                         cmd.extend(["--ssl-certfile", SSL_CERT, "--ssl-keyfile", SSL_KEY])
 
             else:
-                gunicorn_path = os.path.join(venv_path, "bin", "gunicorn")
-                cmd = [gunicorn_path, app_target, "--workers", WORKERS, "--bind", f"{HOST}:{PORT}"]
+                # Linux / Docker - Gunicorn
+                cmd = [
+                    sys.executable, "-m", "gunicorn",
+                    app_target,
+                    "--workers", WORKERS,
+                    "--bind", f"{HOST}:{PORT}"
+                ]
                 cmd.extend(["--timeout", TIMEOUT, "--graceful-timeout", TIMEOUT])
-
                 cmd.extend(["--access-logfile", "-", "--error-logfile", "-"])
 
                 if process_type == "api":
@@ -154,7 +200,7 @@ def _spawn_service(process_type, args):
 
         process = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE,
+            stdout=subprocess.PIPE if no_logs else subprocess.DEVNULL,
             stderr=subprocess.STDOUT,
             text=True,
             encoding='utf-8',
@@ -162,72 +208,29 @@ def _spawn_service(process_type, args):
             env=env
         )
 
-    log_thread = threading.Thread(
-        target=log_output,
-        args=(process, process_type, success_event, args.production, ROOT_PATH, no_logs, imported_agent_names)
-    )
-
-    if args.background:
-        log_thread.daemon = True
-
-    log_thread.start()
+    log_thread = None
+    if no_logs:
+        log_thread = threading.Thread(target=log_output, args=(process,))
+        log_thread.start()
 
     return {
         "process_type": process_type,
         "process": process,
         "log_thread": log_thread,
-        "success_event": success_event,
+        "display_url": display_url,
+        "health_url": health_url,
+        "root_path": ROOT_PATH,
+        "imported_agent_names": imported_agent_names,
     }
 
-def log_output(process, process_type, success_event, production=False, root_path_prefix="", print_to_console=False,
-               imported_agent_names=None):
-    urls = []
-    version = AI_SDK_VERSION if process_type == "api" else None
-    data_catalog_warning_shown = False
-    imported_agent_names = imported_agent_names or []
-
+def log_output(process):
+    """
+    Echo the service's output to the console. Only used with `--no-logs`.
+    """
     try:
         for line in process.stdout:
-            if print_to_console:
-                sys.stdout.write(line)
-                sys.stdout.flush()
-
-            if (process_type == "api" and
-                    not data_catalog_warning_shown and
-                    "Could not establish connection to Data Marketplace" in line):
-                console.print(Panel(
-                    "[bold yellow]WARNING: Data Marketplace connection failed[/]\n"
-                    "[yellow]Could not establish connection to Data Marketplace. Please check your configuration.",
-                    border_style="yellow",
-                    width=PANEL_WIDTH
-                ))
-                data_catalog_warning_shown = True
-
-            if process_type == "api":
-                if "Uvicorn running on" in line or "Listening at:" in line:
-                    match = re.search(r"(https?://[\w.:]+)", line)
-                    if match:
-                        urls.append(match.group(1))
-                        print_status("api", urls, version, root_path_prefix=root_path_prefix)
-                        success_event.set()
-
-            elif process_type == "sample_chatbot":
-                # Waitress: "Serving on http://0.0.0.0:9992"
-                # Flask Dev: "Running on http://127.0.0.1:9992"
-                # Uvicorn: "Uvicorn running on http://0.0.0.0:9992"
-                # Gunicorn: "Listening at: http://0.0.0.0:9992"
-                if "Serving on" in line or "Running on" in line or "Listening at:" in line:
-                    match = re.search(r"(https?://[\w.:]+)", line)
-                    if match:
-                        urls.append(match.group(1))
-                        if not success_event.is_set():
-                            print_status(
-                                "sample_chatbot",
-                                urls,
-                                root_path_prefix=root_path_prefix,
-                                imported_agent_names=imported_agent_names
-                            )
-                            success_event.set()
+            sys.stdout.write(line)
+            sys.stdout.flush()
 
     except ValueError as e:
         if "I/O operation on closed file" in str(e):

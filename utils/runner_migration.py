@@ -95,7 +95,6 @@ def _parse_env_variables(filepath):
                 variables[var_name] = info
     return variables, duplicates
 
-
 def _parse_example_template(filepath):
     """Parse a .env.example into an ordered list of template lines and a variable dict.
 
@@ -165,7 +164,6 @@ def _apply_renames(variables, rename_rules):
 
     return renamed, rename_log
 
-
 def _apply_renames_to_duplicates(duplicates, rename_rules):
     """Apply rename rules to duplicate variable names."""
     renamed = []
@@ -191,7 +189,6 @@ def _get_active_custom_providers(env_vars, provider_keys, known_providers):
                 providers.add(pname.upper())
     return providers
 
-
 def _detect_orphaned_providers(unknown_vars, known_providers):
     candidates = {}
     all_suffixes = CUSTOM_OPENAI_SUFFIXES + CUSTOM_AZURE_SUFFIXES
@@ -209,7 +206,6 @@ def _detect_orphaned_providers(unknown_vars, known_providers):
         elif {"_API_KEY"} & suffixes:
             orphans[prefix] = "openai"
     return orphans
-
 
 def _classify_extra_var(var_name, active_providers, orphaned_providers):
     """Returns (category, detail) or None."""
@@ -287,7 +283,6 @@ def _truncate(value, max_len=25):
         return "(empty)"
     return value[:max_len] + ("…" if len(value) > max_len else "")
 
-
 def _print_migration_header():
     header = Text.assemble(
         ("Migration Tool\n", "bold white"),
@@ -314,7 +309,6 @@ def _print_migration_header():
     ))
     console.print()
 
-
 def _print_summary_line(analysis):
     matching = len(analysis["matching_vars"])
     renames = len(analysis["rename_log"])
@@ -339,7 +333,6 @@ def _print_summary_line(analysis):
     console.print("  " + "  |  ".join(parts))
     console.print()
 
-
 def _section_table(col1_header="Variable", extra_cols=None):
     """Create a standard section table with Variable + Status + Value columns,
     plus any extra leading columns (like # for deprecated).
@@ -353,10 +346,8 @@ def _section_table(col1_header="Variable", extra_cols=None):
     table.add_column("Value", no_wrap=True, overflow="ellipsis")
     return table
 
-
 def _status_cell(active):
     return "[green]active[/]" if active else "[dim]inactive[/]"
-
 
 def _render_sections(analysis, kept_indices=None, title=None):
     """Render the full analysis as grouped sections, one per category.
@@ -446,7 +437,6 @@ def _render_sections(analysis, kept_indices=None, title=None):
 
         console.print(table)
         console.print()
-
 
 def _prompt_deprecated_selection(deprecated_count, duplicate_count=0):
     """Ask which deprecated/duplicate vars to keep. Returns a set of 1-based indices.

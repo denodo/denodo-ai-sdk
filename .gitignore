@@ -1,5 +1,6 @@
 ai_sdk_vector_store/
 ai_sdk_sample_data/
+conversations_history/
 unstructured_*/
 node_modules/
 __pycache__/
@@ -10,6 +11,8 @@ uploads/
 .agents/
 .claude/
 skills/*
+!skills/deepquery/
+!skills/deepquery/**
 tests/
 logs/
 venv/

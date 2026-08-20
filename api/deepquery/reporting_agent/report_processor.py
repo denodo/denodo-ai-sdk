@@ -7,21 +7,24 @@ from api.deepquery.utils import (
 )
 from utils import langfuse
 from api.deepquery.agent.xml_utils import parse_xml
+from utils.execution_result_helpers import get_llm_execution_result_rows
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from api.deepquery.reporting_agent.prompts import SEQUENTIAL_REPORT_PROMPT
+from api.deepquery.reporting_agent.prompts import SEQUENTIAL_REPORT_PROMPT, TRANSLATE_REPORT_HEADERS_PROMPT
 
 # Set up logging
 logger = logging.getLogger(__name__)
 
 class ReportProcessor:
-    def __init__(self, visualization_tool_calls, analysis_tool_calls, llm, deepquery_metadata=None, include_failed_tool_calls_appendix=False):
+    def __init__(self, visualization_tool_calls, analysis_tool_calls, llm, deepquery_metadata=None, include_failed_tool_calls_appendix=False, language="English"):
         self.visualization_tool_calls = visualization_tool_calls
         self.analysis_tool_calls = analysis_tool_calls
         self.llm = llm
         self.deepquery_metadata = deepquery_metadata
         self.include_failed_tool_calls_appendix = include_failed_tool_calls_appendix
+        self.language = language
         self.tool_id_map = {call['tool_id']: call for call in self.analysis_tool_calls + self.visualization_tool_calls}
+        self.i18n_labels = {}
 
     async def generate_report(self, trace):
         """
@@ -33,6 +36,7 @@ class ReportProcessor:
         Returns:
             The generated report in markdown format as a string
         """
+        await self._translate_static_headers()
 
         report_template = await self._generate_sequential_report(trace, self.llm)
 
@@ -42,6 +46,56 @@ class ReportProcessor:
         processed_appendix = self.process_template(appendix)
 
         return processed_report + "<div class='page-break'></div>" + processed_appendix
+
+    async def _translate_static_headers(self):
+        original_title = self.deepquery_metadata.get("analysis_title", "Unknown Report") if self.deepquery_metadata else "Unknown Report"
+
+        default_labels = {
+            "introduction": "Introduction",
+            "executive_summary": "Executive Summary",
+            "detailed_analysis": "Detailed Analysis",
+            "methodology": "Methodology",
+            "recommendations": "Recommendations",
+            "conclusion": "Conclusion",
+            "report_title": original_title,
+            "text_direction": ""
+        }
+
+        if self.language.lower() in ["en", "english"]:
+            self.i18n_labels = default_labels
+            return
+
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", TRANSLATE_REPORT_HEADERS_PROMPT),
+            ("human", "{json_data}")
+        ])
+
+        chain = prompt | self.llm | StrOutputParser()
+
+        try:
+            with langfuse.trace_context(run_name="translate_report_headers") as config:
+                result = await chain.ainvoke(
+                    {
+                        "language": self.language,
+                        "json_data": json.dumps(default_labels, indent=2)
+                    },
+                    config=config
+                )
+
+            result_clean = result.replace("```json", "").replace("```", "").strip()
+            translated_labels = json.loads(result_clean)
+
+            self.i18n_labels = {**default_labels, **translated_labels}
+
+            if self.deepquery_metadata:
+                self.deepquery_metadata["analysis_title"] = self.i18n_labels.get("report_title", original_title)
+                raw_direction = self.i18n_labels.get("text_direction", "").lower()
+                self.deepquery_metadata["text_direction"] = "rtl" if "rtl" in raw_direction else "ltr"
+
+            logger.info("Report static headers and title translated successfully.")
+        except Exception as e:
+            logger.warning(f"Failed to translate report headers, falling back to English: {e}")
+            self.i18n_labels = default_labels
 
     async def _generate_sequential_report(self, trace, llm):
         """Generate a report by sequentially building it one section at a time."""
@@ -70,7 +124,9 @@ class ReportProcessor:
         current_report = ""
         section_contents = {}
 
-        for section_tag, section_name in sections:
+        for section_tag, default_section_name in sections:
+            section_name = self.i18n_labels.get(section_tag, default_section_name)
+
             logger.info(f"Generating section: {section_name}")
             prompt = ChatPromptTemplate.from_messages([
                 ("human", SEQUENTIAL_REPORT_PROMPT)
@@ -98,7 +154,8 @@ class ReportProcessor:
                         "trace": trace_data,
                         "current_report": current_report,
                         "next_section": section_name,
-                        "section_tag": section_tag
+                        "section_tag": section_tag,
+                        "language": self.language
                     },
                     config=config
                 )
@@ -125,9 +182,11 @@ class ReportProcessor:
         Retry section generation when XML parsing fails.
         Gives the LLM one more chance to properly format the response with required tags.
         """
+        # Keep failed_result as an invoke-time variable so braces in LLM output
+        # (e.g. {tag(s): ...}) are not parsed as ChatPromptTemplate variables.
         retry_prompt = ChatPromptTemplate.from_messages([
             ("human", SEQUENTIAL_REPORT_PROMPT),
-            ("ai", failed_result),
+            ("ai", "{failed_result}"),
             ("human", f"I did not detect the <{section_tag}> or </{section_tag}> tags. Did you finish the section? Please proceed now to return the complete section in between <{section_tag}> </{section_tag}> as shown in the initial instructions.")
         ])
 
@@ -140,7 +199,9 @@ class ReportProcessor:
                         "trace": trace_data,
                         "current_report": current_report,
                         "next_section": section_name,
-                        "section_tag": section_tag
+                        "section_tag": section_tag,
+                        "language": self.language,
+                        "failed_result": failed_result,
                     },
                     config=config
                 )
@@ -242,6 +303,16 @@ class ReportProcessor:
         """
         Format data as a markdown table with sorting, limiting, and proper data handling.
         """
+        # Unwrap execution_result bundles ({"full": ..., "llm": ...}) to their LLM-facing
+        # rows while leaving plain row dicts and lists untouched for the generic branches below
+        if isinstance(data, dict) and ("llm" in data or "full" in data):
+            data = get_llm_execution_result_rows(data)
+
+        showing_lbl = self.i18n_labels.get('showing', 'Showing')
+        of_lbl = self.i18n_labels.get('of', 'of')
+        tr_lbl = self.i18n_labels.get('total_rows_label', 'total rows')
+        sorted_lbl = self.i18n_labels.get('sorted_by', 'Sorted by')
+
         # Handle different data structures
         if isinstance(data, dict) and any(key.startswith("Row ") for key in data.keys()):
             # Handle Row-based dictionary structure (execution_result format)
@@ -315,19 +386,21 @@ class ReportProcessor:
 
                 # Add note about limited rows if applicable
                 if row_limit and row_limit < total_rows:
-                    md_table += f"\n_Showing {row_limit} of {total_rows} total rows_\n"
+                    md_table += f"\n_{showing_lbl} {row_limit} {of_lbl} {total_rows} {tr_lbl}_\n"
 
                 # Add note about sorting if applicable
                 if order_by:
                     col_name = headers[sort_idx] if sort_idx < len(headers) else order_by
-                    md_table += f"\n_Sorted by {col_name} {sort_direction}_\n"
+                    md_table += f"\n_{sorted_lbl} {col_name} {sort_direction}_\n"
 
                 return md_table
 
         # Generic handling for other JSON structures
         elif isinstance(data, dict):
+            k_lbl = self.i18n_labels.get('key', 'Key')
+            v_lbl = self.i18n_labels.get('value', 'Value')
             # Try to convert dictionary to a table
-            md_table = "| Key | Value |\n| --- | --- |\n"
+            md_table = f"| {k_lbl} | {v_lbl} |\n| --- | --- |\n"
             items = list(data.items())
 
             # Sort items by key or value
@@ -363,11 +436,11 @@ class ReportProcessor:
 
             # Add note about limited rows if applicable
             if row_limit and row_limit < total_rows:
-                md_table += f"\n_Showing {row_limit} of {total_rows} total rows_\n"
+                md_table += f"\n_{showing_lbl} {row_limit} {of_lbl} {total_rows} {tr_lbl}_\n"
 
             # Add note about sorting if applicable
             if order_by:
-                md_table += f"\n_Sorted by {order_by} {sort_direction}_\n"
+                md_table += f"\n_{sorted_lbl} {order_by} {sort_direction}_\n"
 
             return md_table
         elif isinstance(data, list) and data and isinstance(data[0], dict):
@@ -431,11 +504,11 @@ class ReportProcessor:
 
             # Add note about limited rows if applicable
             if row_limit and row_limit < total_rows:
-                md_table += f"\n_Showing {row_limit} of {total_rows} total rows_\n"
+                md_table += f"\n_{showing_lbl} {row_limit} {of_lbl} {total_rows} {tr_lbl}_\n"
 
             # Add note about sorting if applicable
             if order_by:
-                md_table += f"\n_Sorted by {order_by} {sort_direction}_\n"
+                md_table += f"\n_{sorted_lbl} {order_by} {sort_direction}_\n"
 
             return md_table
 
@@ -466,7 +539,8 @@ class ReportProcessor:
         filtered_tool_calls = filter_tool_calls_appendix(
             analysis_tool_calls,
             self.visualization_tool_calls,
-            self.include_failed_tool_calls_appendix
+            self.include_failed_tool_calls_appendix,
+            self.i18n_labels
         )
 
         handled_fields = {"execution_result", "sql_query", "query_explanation", "raw_graph", "answer", "execution_result_note"}
@@ -509,7 +583,9 @@ class ReportProcessor:
     def _format_tool_input_table(self, tool_input) -> str:
         if not tool_input:
             return ""
-        lines = ["**Input Parameters:**\n\n", "| Parameter | Value |\n", "|-----------|-------|\n"]
+        lines = ["**Input Parameters:**\n\n", 
+                 "| Parameter | Value |\n",
+                 "|-----------|-------|\n"]
         for key, value in tool_input.items():
             lines.append(f"| {key} | {value} |\n")
         lines.append("\n")
@@ -526,7 +602,7 @@ class ReportProcessor:
     def _format_sql_block(self, tool_call) -> str:
         tool_id = tool_call.get("tool_id", "unknown")
         return (
-            "**SQL Query**:\n\n"
+            f"**SQL Query**:\n\n"
             f"<code>\n<tool_id>{tool_id}</tool_id>\n<tool_value>sql_query</tool_value>\n<language>sql</language>\n</code>\n\n"
         )
 
@@ -539,7 +615,7 @@ class ReportProcessor:
     def _format_graph_block(self, tool_call) -> str:
         tool_id = tool_call.get("tool_id", "unknown")
         return (
-            "**Graph**:\n\n"
+            f"**Graph**:\n\n"
             f"<image>\n<tool_id>{tool_id}</tool_id>\n<tool_value>raw_graph</tool_value>\n</image>\n\n"
         )
 
@@ -550,7 +626,9 @@ class ReportProcessor:
         return f"**Answer**:\n\n{answer}\n\n"
 
     def _format_other_fields_table(self, other_fields) -> str:
-        lines = ["**Output**:\n\n", "| Field | Value |\n", "|-------|-------|\n"]
+        lines = ["**Output**:\n\n",
+                 "| Field | Value |\n",
+                 "|-------|-------|\n"]
         for key, value in other_fields.items():
             value_str = str(value)
             if len(value_str) > 200:
@@ -572,9 +650,12 @@ class ReportProcessor:
         if analysis_time > 60:
             minutes = int(analysis_time // 60)
             seconds = int(analysis_time % 60)
-            summary += f"- **Total Analysis Time**: {int(analysis_time)} seconds ({minutes} minute{'s' if minutes != 1 else ''} and {seconds} second{'s' if seconds != 1 else ''})\n"
+            min_label = 'minutes' if minutes != 1 else 'minute'
+            sec_label = 'seconds' if seconds != 1 else 'second'
+            summary += f"- **Total Analysis Time**: {int(analysis_time)} seconds ({minutes} {min_label} and {seconds} {sec_label})\n"
         else:
-            summary += f"- **Total Analysis Time**: {int(analysis_time)} second{'s' if int(analysis_time) != 1 else ''}\n"
+            sec_label = 'seconds' if int(analysis_time) != 1 else 'second'
+            summary += f"- **Total Analysis Time**: {int(analysis_time)} {sec_label}\n"
 
         iterations = metadata.get("analysis_iterations", 0)
         summary += f"- **Analysis Iterations**: {iterations} loops\n"

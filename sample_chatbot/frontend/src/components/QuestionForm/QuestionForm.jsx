@@ -2,7 +2,6 @@ import Form from "react-bootstrap/Form";
 import Navbar from "react-bootstrap/Navbar";
 import Button from "react-bootstrap/Button";
 import Dropdown from "react-bootstrap/Dropdown";
-import Modal from "react-bootstrap/Modal"; 
 import React, { useEffect, useState } from "react";
 import ResourcesFilterModal from "./ResourcesFilterModal";
 import useQuestionForm from "../../hooks/useQuestionForm";
@@ -23,10 +22,11 @@ const QuestionForm = ({
   isAuthenticated, 
   currentQuestion: propCurrentQuestion,
   setCurrentQuestion: propSetCurrentQuestion,
+  questionType,
+  setQuestionType,
   sdk,
   syncedResources,
   partialResources,
-  handleClearResults,
   selectedChatbot
 }) => {
   const {
@@ -35,14 +35,14 @@ const QuestionForm = ({
     setShowFilterModal,
     searchFilters,
     allowExternalAssociations,
-    isDeepQueryRunning,
+    isQueryRunning,
     isAnyQueryRunning,
     filterCount,
     textInputRef,
     handleQuestionChange,
     handleFilterSave,
     handleSendClick,
-    handleCancelDeepQuery,
+    handleCancelQuery,
     lastToolRequest,
     config,
   } = useQuestionForm(
@@ -62,19 +62,17 @@ const QuestionForm = ({
     title: "",
   });
 
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-
   const toolOptions = baseToolOptions.filter(tool => {
     if (tool.id === 'deep_query') return config.enable_deep_query;
     if (tool.id === 'knowledge_query') return config.unstructured_mode;
     return true;
   });
 
-  const [activeTool, setActiveTool] = useState(toolOptions[0]);
+  const activeTool = toolOptions.find(t => t.id === questionType) || toolOptions.find(t => t.id === 'auto') || baseToolOptions[0];
 
   useEffect(() => {
-    setActiveTool(baseToolOptions[0]);
-  }, [selectedChatbot]);
+    setQuestionType('auto');
+  }, [selectedChatbot, setQuestionType]);
 
   const handleToastClose = () => {
     setToastConfig((prev) => ({ ...prev, show: false }));
@@ -97,16 +95,29 @@ const QuestionForm = ({
     }
   }, [lastToolRequest, config.enable_deep_query, config.unstructured_mode]);
 
-  const handleCustomSubmit = (e) => {
+  const handleSubmitWithTool = (e) => {
     if (e && e.preventDefault) e.preventDefault();
     const forceTool = activeTool.id === 'auto' ? null : activeTool.id;
     handleSendClick(e, forceTool);
+    setQuestionType('auto');
   };
 
-  const onCustomKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+  const handleQuestionKeyDown = (e) => {
+    if (e.key !== 'Enter') return;
+
+    if (config.input_method === 'ctrl_enter') {
+      // metaKey is checked because macOS reports Cmd as metaKey, never as ctrlKey,
+      // so Cmd+Enter is accepted alongside Ctrl+Enter on Mac keyboards
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        handleSubmitWithTool(e);
+      } else if (!e.shiftKey) {
+        // Plain Enter is ignored so the Enter that completes an IME conversion never sends
+        e.preventDefault();
+      }
+    } else if (!e.shiftKey) {
       e.preventDefault();
-      handleCustomSubmit(e);
+      handleSubmitWithTool(e);
     }
   };
 
@@ -121,11 +132,11 @@ const QuestionForm = ({
   };
 
   const getPaddingRight = () => {
-    let base = 90;
-    if (isDeepQueryRunning) {
+    let base = 60;
+    if (isQueryRunning) {
       base += 80;
     } else {
-      base += 70;
+      base += 40;
     }
     return `${base}px`;
   };
@@ -143,7 +154,7 @@ const QuestionForm = ({
     <Navbar className="justify-content-center w-100" data-bs-theme="dark" style={{ backgroundColor: "transparent" }}>
       <div className="w-100 d-flex justify-content-center">
         <div style={{ width: '80%', maxWidth: '800px' }}>
-          <Form onSubmit={handleCustomSubmit}>
+          <Form onSubmit={handleSubmitWithTool}>
             <div className="position-relative">
               <div
                 className="position-absolute" 
@@ -187,7 +198,7 @@ const QuestionForm = ({
                 placeholder={getPlaceholder()}
                 value={currentQuestion}
                 onChange={handleQuestionChange}
-                onKeyDown={onCustomKeyDown}
+                onKeyDown={handleQuestionKeyDown}
                 disabled={!isAuthenticated}
                 className="question-textarea bg-white"
                 style={{ 
@@ -204,12 +215,12 @@ const QuestionForm = ({
                 }}
               />
               <div className="position-absolute" style={{ right: '12px', top: '50%', transform: 'translateY(-50%)', display: 'flex', gap: '8px', alignItems: 'center' }}>
-                {isDeepQueryRunning ? (
+                {isQueryRunning ? (
                   <Button
                     variant="link"
                     type="button"
-                    onClick={handleCancelDeepQuery}
-                    title="Stop DeepQuery"
+                    onClick={handleCancelQuery}
+                    title="Stop"
                     style={{
                       color: '#dc3545',
                       textDecoration: 'none',
@@ -270,7 +281,7 @@ const QuestionForm = ({
                       {toolOptions.map(tool => (
                         <Dropdown.Item
                           key={tool.id}
-                          onClick={() => setActiveTool(tool)}
+                          onClick={() => setQuestionType(tool.id)}
                           className={`py-2 d-flex align-items-center ${activeTool.id === tool.id ? 'fw-bold' : ''}`}
                           style={{
                             color: '#212529',
@@ -295,7 +306,7 @@ const QuestionForm = ({
                 <Button
                   variant="link"
                   type="button"
-                  onClick={handleCustomSubmit}
+                  onClick={handleSubmitWithTool}
                   disabled={!isAuthenticated || isAnyQueryRunning}
                   title="Send question"
                   style={{
@@ -319,26 +330,6 @@ const QuestionForm = ({
                 >
                   <i className="bi bi-send" style={{ fontSize: '1.2rem', pointerEvents: 'none' }}></i>
                 </Button>
-
-                <div style={{ width: '1px', height: '22px', backgroundColor: '#e9ecef', margin: '0 2px' }}></div>
-
-                <Button
-                  variant="link"
-                  onClick={() => setShowDeleteModal(true)}
-                  disabled={!isAuthenticated || isAnyQueryRunning || results.length === 0}
-                  title="Clear Chat"
-                  style={{
-                    color: results.length > 0 ? '#dc3545' : '#adb5bd', 
-                    textDecoration: 'none',
-                    padding: '0.2rem',
-                    opacity: results.length > 0 ? 1 : 0.6,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                >
-                  <i className="bi bi-trash3" style={{ fontSize: '1.2rem' }}></i>
-                </Button>
                </div>
              </div>
            </Form>
@@ -355,39 +346,6 @@ const QuestionForm = ({
       currentAllowExternalAssociations={allowExternalAssociations}
       onSave={handleFilterSave}
     />
-
-    <Modal
-      show={showDeleteModal}
-      onHide={() => setShowDeleteModal(false)}
-      centered
-      backdrop="static"
-    >
-      <Modal.Header closeButton data-bs-theme="light">
-        <Modal.Title>Clear conversation</Modal.Title>
-      </Modal.Header>
-      <Modal.Body style={{ color: '#495057', fontSize: '1.05rem' }}>
-        Are you sure you want to delete all messages in this chat? This action cannot be undone.
-      </Modal.Body>
-      <Modal.Footer className="border-0 pt-0">
-        <Button
-          variant="light"
-          onClick={() => setShowDeleteModal(false)}
-          style={{ fontWeight: 500 }}
-        >
-          Cancel
-        </Button>
-        <Button
-          variant="danger"
-          onClick={() => {
-            handleClearResults();
-            setShowDeleteModal(false);
-          }}
-          style={{ fontWeight: 500 }}
-        >
-          Yes, delete chat
-        </Button>
-      </Modal.Footer>
-    </Modal>
   </>
   );
 };

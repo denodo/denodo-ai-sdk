@@ -9,6 +9,7 @@ export const actionTypes = {
   DELETE_CHAT_ITEM: "DELETE_CHAT_ITEM",
   PURGE_EXITING_ITEMS: "PURGE_EXITING_ITEMS",
   SET_CHAT_ITEM_FEEDBACK: "SET_CHAT_ITEM_FEEDBACK",
+  SET_CHAT_HISTORY: "SET_CHAT_HISTORY",
 };
 
 export const chatReducer = (state, action) => {
@@ -137,6 +138,9 @@ export const chatReducer = (state, action) => {
           : r
       );
     }
+
+    case actionTypes.SET_CHAT_HISTORY:
+      return action.payload;
 
     default:
       return state;

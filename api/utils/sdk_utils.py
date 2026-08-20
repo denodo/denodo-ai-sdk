@@ -99,7 +99,6 @@ def match_nested_parentheses(text):
 VQL_ISSUE_LIMIT_SUBQUERY = 'LIMIT_SUBQUERY'
 VQL_ISSUE_LIMIT_OFFSET = 'LIMIT_OFFSET'
 
-
 def normalize_vql(vql):
     """Cleans an LLM-generated VQL query."""
     # Look for LLM code styling
@@ -484,7 +483,6 @@ def check_feature_permission(auth, permissions_data, users_env_var, roles_env_va
 
     return False
 
-
 def check_metadata_user_permission(auth, permissions_data=None):
     """
     Check if the authenticated user is allowed to use metadata endpoints.
@@ -495,7 +493,6 @@ def check_metadata_user_permission(auth, permissions_data=None):
         users_env_var="AI_SDK_ALLOWED_METADATA_USERS",
         roles_env_var="AI_SDK_ALLOWED_METADATA_ROLES"
     )
-
 
 def check_deepquery_user_permission(auth, permissions_data=None):
     """
@@ -978,19 +975,25 @@ def get_user_synced_resources(vector_store, allowed_view_ids_str):
 
     # Filter Databases
     if "DATABASE" in full_last_update:
-        filtered_last_update["DATABASE"] = {}
+        filtered_dbs = {}
         for db_name, timestamp in full_last_update["DATABASE"].items():
             # Check if at least 1 view exists in this DB AND in the user's permissions
             if vector_store.check_existence(allowed_view_ids_str, database_names=[db_name]):
-                filtered_last_update["DATABASE"][db_name] = timestamp
+                filtered_dbs[db_name] = timestamp
+
+        if filtered_dbs:
+            filtered_last_update["DATABASE"] = filtered_dbs
 
     # Filter Tags
     if "TAG" in full_last_update:
-        filtered_last_update["TAG"] = {}
+        filtered_tags = {}
         for tag_name, timestamp in full_last_update["TAG"].items():
             # Check if at least 1 view exists with this Tag AND in the user's permissions
             if vector_store.check_existence(allowed_view_ids_str, tag_names=[tag_name]):
-                filtered_last_update["TAG"][tag_name] = timestamp
+                filtered_tags[tag_name] = timestamp
+
+        if filtered_tags:
+            filtered_last_update["TAG"] = filtered_tags
 
     # Filter partial_tags_by_db
     p_tags_by_db = full_partial_resources.get("partial_tags_by_db", {})

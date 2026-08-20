@@ -18,6 +18,11 @@ class UserContext:
     vector_store: object = None
     active_csv_sources: list | None = None  # List of active CSV source names to filter knowledge queries
     kb_collections: dict = field(default_factory=dict)  # name -> description for the user's active collections
+    can_manage_skills: bool = False  # Whether the user may create/edit skills
+    agent_id: str = "global"  # Agent this engine serves
+    allowed_system_skills: list | None = None  # Agent-declared skills (None = all system skills apply)
+    disabled_skills: object = None  # Skills force-deactivated by feature flags (e.g. 'deepquery')
+    cancel_event: object = None  # threading.Event set when the user cancels the query; aborts in-flight AI SDK requests
 
 # Tool definitions for frontend configuration
 TOOL_DEFINITIONS = {
@@ -44,5 +49,41 @@ TOOL_DEFINITIONS = {
         "aliases": ["@knowledge_query", "@kb", "@knowledge"],
         "optional": True,
         "tool_public_text_key": "search_query",
+    },
+    "read_skill": {
+        "pretty_name": "Read Skill",
+        "aliases": ["@read_skill"],
+        "optional": True,
+        "tool_public_text_key": "skill_name",
+    },
+    "read_skill_reference": {
+        "pretty_name": "Read Skill Reference",
+        "aliases": ["@read_skill_reference"],
+        "optional": True,
+        "tool_public_text_key": "skill_name",
+    },
+    "edit_skill": {
+        "pretty_name": "Edit Skill",
+        "aliases": ["@edit_skill"],
+        "optional": True,
+        "tool_public_text_key": "skill_name",
+    },
+    "edit_skill_reference": {
+        "pretty_name": "Edit Skill Reference",
+        "aliases": ["@edit_skill_reference"],
+        "optional": True,
+        "tool_public_text_key": "skill_name",
+    },
+    "create_skill": {
+        "pretty_name": "Create Skill",
+        "aliases": ["@create_skill"],
+        "optional": True,
+        "tool_public_text_key": "skill_name",
+    },
+    "create_skill_reference": {
+        "pretty_name": "Create Skill Reference",
+        "aliases": ["@create_skill_reference"],
+        "optional": True,
+        "tool_public_text_key": "skill_name",
     },
 }

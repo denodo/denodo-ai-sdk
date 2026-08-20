@@ -46,7 +46,7 @@ const ReportManagementModal = () => {
       const link = document.createElement('a');
       link.href = report.downloadUrl;
       const defaultFilename = report.reportTitle 
-        ? `${report.reportTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_report.html`
+        ? `${report.reportTitle.trim().replace(/[/\\?%*:|"<>]/g, '').replace(/\s+/g, '_')}_report.html`
         : `${report.id}_report.html`;
       link.download = report.filename || defaultFilename;
       document.body.appendChild(link);
@@ -95,10 +95,11 @@ const ReportManagementModal = () => {
               )}
             </div>
             
-            <Table striped bordered hover variant="light" className="table-responsive">
+            <Table striped bordered hover variant="light" className="table-responsive align-middle">
               <thead>
                 <tr>
-                  <th style={{ width: '40%' }}>Report Title</th>
+                  <th style={{ width: '30%' }}>Report Title</th>
+                  <th style={{ width: '10%' }}>Language</th>
                   <th style={{ width: '15%' }}>Status</th>
                   <th style={{ width: '15%' }}>Requested</th>
                   <th style={{ width: '15%' }}>Generated</th>
@@ -109,14 +110,31 @@ const ReportManagementModal = () => {
                 {reports.map((report) => (
                   <tr key={report.id}>
                     <td>
-                      <div style={{ maxWidth: '500px' }}>
+                      <div style={{ maxWidth: '400px' }}>
                         <OverlayTrigger
                           placement="top"
                           overlay={renderTooltip(report.reportTitle || report.question)}
                         >
-                          <span className="text-truncate d-block">
+                          <span className="text-truncate d-block fw-medium">
                             {report.reportTitle || report.question}
                           </span>
+                        </OverlayTrigger>
+                      </div>
+                    </td>
+                    <td>
+                      <div style={{ maxWidth: '120px' }}>
+                        <OverlayTrigger
+                          placement="top"
+                          overlay={renderTooltip(report.language || 'English')}
+                        >
+                          <Badge
+                            bg="light"
+                            text="dark"
+                            className="border border-secondary-subtle text-truncate"
+                            style={{ maxWidth: '100%' }}
+                          >
+                            {report.language || 'English'}
+                          </Badge>
                         </OverlayTrigger>
                       </div>
                     </td>
@@ -132,10 +150,10 @@ const ReportManagementModal = () => {
                       )}
                     </td>
                     <td>
-                      <small>{formatDate(report.createdAt)}</small>
+                      <small className="text-muted">{formatDate(report.createdAt)}</small>
                     </td>
                     <td>
-                      <small>
+                      <small className="text-muted">
                         {report.completedAt ? formatDate(report.completedAt) : '-'}
                       </small>
                     </td>

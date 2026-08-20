@@ -53,7 +53,7 @@ async def graph_generator(
         return "LLM failed to generate a valid Python code, please try again.", tokens
 
     python_code = GENERATE_VISUALIZATION_PYTHON_TEMPLATE.format(python_code=python_code)
-    python_repl = PythonREPL(_locals={"data": execution_result_df})
+    python_repl = PythonREPL(_globals={"data": execution_result_df}, _locals=None)
     output = await asyncio.to_thread(python_repl.run, python_code)
 
     if not output.startswith('data:image'):

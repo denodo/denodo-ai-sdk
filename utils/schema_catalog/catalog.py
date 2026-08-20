@@ -23,11 +23,34 @@ Three different schema representations are supported:
     fixing prompts
   - Used by: VQL generation, reviewer, and fixer flows
   - Characteristics: markdown-oriented output with PK / NOT NULL flags, sample
-    values, and join lines
+    values, join lines, view/column tags, and a tag description appendix
 """
 
-from .helpers import build_table_name
+from .helpers import build_table_name, format_tag_names
 from .view import SchemaTable
+
+# Single source of truth for the `vql` schema representation grammar.
+# render_vql_text (view.py) emits the table blocks and _render_tag_appendix the
+# tag appendix; LLM-facing prompts that describe the format (e.g. the sample
+# chatbot's metadata_search output) must embed this constant instead of copying it.
+VQL_SCHEMA_GRAMMAR = """# Table: "<database>"."<view>"
+## Type: Metric
+## Description: <description>
+## Tag(s): <tag1>, <tag2>
+## Columns:
+- <column_name> (<type>) {tag(s): <tag3>, <tag4>} [DIMENSION]
+- <column_name> (<type>) [METRIC]
+- <column_name> (<type>) [PK] [NOT NULL] [OBLIGATORY] [<extra_key>: <extra_val>] ...
+- <column_name> (<type>) → <logical_name>
+- <column_name> (<type>) → <logical_name>: <description>.
+- <column_name> (<type>) → <logical_name>. sample values: a, b, c
+- <column_name> (<type>) sample values: a, b, c
+## JOINs:
+→ <join_clause>. Description: <association_description>
+→ <join_clause>
+
+# Tag: <tag1>
+## Description: <tag_description>"""
 
 class SchemaCatalog:
     def __init__(self, views=None):
@@ -113,27 +136,45 @@ class SchemaCatalog:
         table_lookup = {view.get_name(): view for view in self.views}
         present_tables = [view.get_name() for view in self.views]
 
-        if not filtered_tables:
-            return "\n\n".join(
-                view.render_vql_text(sample_data, present_tables, examples_per_table)
-                for view in self.views
-            )
+        views_to_render = self.views
+        reference_tables = present_tables
+        if filtered_tables:
+            selected_views = [
+                table_lookup[filtered_table]
+                for filtered_table in filtered_tables
+                if filtered_table in table_lookup
+            ]
+            if selected_views:
+                views_to_render = selected_views
+                reference_tables = filtered_tables
 
-        formatted_tables = []
-        for filtered_table in filtered_tables:
-            if filtered_table not in table_lookup:
-                continue
-            formatted_tables.append(
-                table_lookup[filtered_table].render_vql_text(sample_data, filtered_tables, examples_per_table)
-            )
-
-        if formatted_tables:
-            return "\n\n".join(formatted_tables)
-
-        return "\n\n".join(
-            view.render_vql_text(sample_data, present_tables, examples_per_table)
-            for view in self.views
+        schema_text = "\n\n".join(
+            view.render_vql_text(sample_data, reference_tables, examples_per_table)
+            for view in views_to_render
         )
+
+        tag_appendix = self._render_tag_appendix(views_to_render)
+        if tag_appendix:
+            schema_text = f"{schema_text}\n\n{tag_appendix}"
+
+        return schema_text
+
+    @staticmethod
+    def _render_tag_appendix(views):
+        # Emits the tag appendix section of VQL_SCHEMA_GRAMMAR.
+        collected_tags = {}
+        for view in views:
+            for name, description in view.collect_tag_details().items():
+                if not collected_tags.get(name):
+                    collected_tags[name] = description
+
+        lines = []
+        for name, description in collected_tags.items():
+            lines.append(f"# Tag: {format_tag_names([{'name': name}])}")
+            if description:
+                lines.append(f"## Description: {description}")
+
+        return "\n".join(lines)
 
     def render_metadata_prompt_payload(self):
         return self.to_view_jsons()

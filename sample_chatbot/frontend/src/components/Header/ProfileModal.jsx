@@ -6,14 +6,17 @@ import Spinner from 'react-bootstrap/Spinner';
 import api from '../../api/client';
 import CustomTooltip from '../CustomTooltip/CustomTooltip';
 import NotificationToast from '../NotificationToast/NotificationToast';
+import { useConfig, getSavedInputMethod } from '../../contexts/ConfigContext';
 
 const ProfileModal = ({ 
   show, 
   handleClose,
   selectedChatbot 
 }) => {
+  const { config, updateConfig } = useConfig();
   const [userDetails, setUserDetails] = useState('');
   const [username, setUsername] = useState('');
+  const [inputMethod, setInputMethod] = useState('enter');
   const [isLoading, setIsLoading] = useState(false);
 
   const [toastConfig, setToastConfig] = useState({
@@ -34,8 +37,10 @@ const ProfileModal = ({
 
       const savedUserDetails = localStorage.getItem(`${currentUser}_user_details`) || '';
       setUserDetails(savedUserDetails);
+
+      setInputMethod(getSavedInputMethod(currentUser) || config.input_method || 'enter');
     }
-  }, [show]);
+  }, [show, config.input_method]);
 
   const handleOnExited = () => {
     setIsLoading(false);
@@ -64,6 +69,8 @@ const ProfileModal = ({
       
       if (response.status === 200) {
         localStorage.setItem(`${username}_user_details`, userDetails);
+        localStorage.setItem(`${username}_input_method`, inputMethod);
+        updateConfig({ input_method: inputMethod });
         showToast('Your user profile has been successfully updated.', 'success', 'Profile Saved');
         handleClose();
       }
@@ -114,6 +121,30 @@ const ProfileModal = ({
                 value={userDetails}
                 onChange={(e) => setUserDetails(e.target.value)}
               />
+            </Form.Group>
+
+            <Form.Group controlId="formInputMethod" className="mb-3">
+              <Form.Label className="d-flex align-items-center">
+                Input method
+                <CustomTooltip
+                  id="tooltip-input-method"
+                  content="Key combination used to send a question. 'Ctrl+Enter to send' is recommended for IME-based languages (Japanese, Chinese, Korean...) where Enter confirms the character conversion."
+                >
+                  <i
+                    className="bi bi-info-circle ms-2"
+                    style={{ cursor: 'help', fontSize: '0.85rem', color: '#adb5bd', transition: 'color 0.2s' }}
+                    onMouseEnter={(e) => e.target.style.color = '#112533'}
+                    onMouseLeave={(e) => e.target.style.color = '#adb5bd'}
+                  ></i>
+                </CustomTooltip>
+              </Form.Label>
+              <Form.Select
+                value={inputMethod}
+                onChange={(e) => setInputMethod(e.target.value)}
+              >
+                <option value="enter">Enter to send</option>
+                <option value="ctrl_enter">Ctrl+Enter to send</option>
+              </Form.Select>
             </Form.Group>
           </Form>
         </Modal.Body>

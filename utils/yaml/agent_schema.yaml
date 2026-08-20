@@ -129,6 +129,20 @@ properties:
         type: integer
         description: "Maximum number of report CSV files to keep in the reports/{agent_id} directory. Set to 0 to disable the limit."
 
+      skills:
+        type: array
+        items:
+          type: string
+        description: "Restricts the system skills that apply to this agent to the listed skill names. If not set, all system skills apply. Personal skills of each user always apply."
+
+      knowledge_bases:
+        type: array
+        description: "Knowledge base collection names that are always active for every user of this agent. The collections must already exist in the shared vector store (add them through the Knowledge Base Manager, where their descriptions are also set); the agent is not usable while any declared collection is missing."
+        items:
+          type: string
+          description: "Collection name in the shared unstructured vector store."
+          pattern: "^[A-Za-z0-9_.\\-]{1,80}$"
+
       databases:
         type: array
         items:

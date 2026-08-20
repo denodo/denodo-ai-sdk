@@ -85,7 +85,6 @@ _STATIC_REWRITES = {
     ),
 }
 
-
 def _as_fixer_turn(query, error, reasoning, vql):
     """Frame an exchange as a query-fixer turn (human error report + AI thoughts/vql),
     so a static rewrite that seeds the fixer conversation reads like a normal fix turn."""

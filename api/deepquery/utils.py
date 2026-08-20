@@ -3,7 +3,7 @@ import json
 
 from api.deepquery.prompts import ANALYSIS_TRACE_TEMPLATE
 from api.endpoints.answerQuestion import process_question, answerQuestionRequest
-from utils.execution_result_helpers import get_full_execution_result_rows
+from utils.execution_result_helpers import get_llm_execution_result_rows
 
 def filter_tool_calls_report_agent(tool_calls, default_rows=10):
     """
@@ -26,7 +26,7 @@ def filter_tool_calls_report_agent(tool_calls, default_rows=10):
         # Step 2: For database_agent aggregate_metric, require execution_result != {}
         if (tool_call.get("tool_name") == "database_agent" and
             tool_call.get("input", {}).get("action") == "aggregate_metric"):
-            execution_result = get_full_execution_result_rows(tool_call.get("output", {}).get("execution_result", {}))
+            execution_result = get_llm_execution_result_rows(tool_call.get("output", {}).get("execution_result", {}))
             if not execution_result:
                 continue
 
@@ -61,7 +61,7 @@ def filter_tool_calls_report_agent(tool_calls, default_rows=10):
 
             # Step 6: Limit execution_result to DEFAULT_ROWS
             if "execution_result" in filtered_output:
-                execution_result = get_full_execution_result_rows(filtered_output["execution_result"])
+                execution_result = get_llm_execution_result_rows(filtered_output["execution_result"])
                 if isinstance(execution_result, dict):
                     limited_result = {}
                     for i in range(1, default_rows + 1):
@@ -107,7 +107,7 @@ def filter_tool_calls_visualization(tool_calls, default_rows=10):
                 }
 
                 # Add execution_result with row limiting
-                execution_result = get_full_execution_result_rows(output.get("execution_result", {}))
+                execution_result = get_llm_execution_result_rows(output.get("execution_result", {}))
                 if execution_result and isinstance(execution_result, dict):
                     limited_result = {}
                     for i in range(1, default_rows + 1):
@@ -128,7 +128,7 @@ def filter_tool_calls_visualization(tool_calls, default_rows=10):
 
     return filtered_calls
 
-def filter_tool_calls_appendix(analysis_tool_calls, visualization_tool_calls, include_failed_tool_calls=False):
+def filter_tool_calls_appendix(analysis_tool_calls, visualization_tool_calls, include_failed_tool_calls=False, i18n_labels=None):
     """
     Filter tool calls for appendix generation with specific field filtering rules.
 
@@ -136,10 +136,18 @@ def filter_tool_calls_appendix(analysis_tool_calls, visualization_tool_calls, in
         analysis_tool_calls: List of tool calls from AnalysisAgent
         visualization_tool_calls: List of tool calls from ReportingAgent
         include_failed_tool_calls: Whether to include failed tool calls
+        i18n_labels: Dictionary of translated labels
 
     Returns:
         List of filtered tool calls for appendix
     """
+    if i18n_labels is None:
+        i18n_labels = {}
+
+    limited_to_10_rows = i18n_labels.get("limited_to_10_rows", "(Limited to 10 rows)")
+    row_str = i18n_labels.get("row", "row")
+    rows_str = i18n_labels.get("rows", "rows")
+
     all_tool_calls = []
 
     # Combine analysis and visualization tool calls
@@ -164,7 +172,7 @@ def filter_tool_calls_appendix(analysis_tool_calls, visualization_tool_calls, in
             # Skip aggregate_metric calls with empty execution_result
             if (tool_call.get("tool_name") == "database_agent" and
                 tool_call.get("input", {}).get("action") == "aggregate_metric"):
-                execution_result = get_full_execution_result_rows(tool_call.get("output", {}).get("execution_result", {}))
+                execution_result = get_llm_execution_result_rows(tool_call.get("output", {}).get("execution_result", {}))
                 if not execution_result or execution_result == {}:
                     continue
 
@@ -210,7 +218,7 @@ def filter_tool_calls_appendix(analysis_tool_calls, visualization_tool_calls, in
 
             # Apply execution_result limiting for database_agent tools
             if "execution_result" in filtered_call["output"]:
-                execution_result = get_full_execution_result_rows(filtered_call["output"]["execution_result"])
+                execution_result = get_llm_execution_result_rows(filtered_call["output"]["execution_result"])
                 if isinstance(execution_result, dict):
                     # Count actual data rows (exclude metadata)
                     row_keys = [k for k in execution_result.keys() if k.startswith("Row ")]
@@ -222,9 +230,10 @@ def filter_tool_calls_appendix(analysis_tool_calls, visualization_tool_calls, in
                             if row_key in execution_result:
                                 limited_result[row_key] = execution_result[row_key]
                         filtered_call["output"]["execution_result"] = limited_result
-                        filtered_call["output"]["execution_result_note"] = "(Limited to 10 rows)"
+                        filtered_call["output"]["execution_result_note"] = limited_to_10_rows
                     elif len(row_keys) > 0:
-                        filtered_call["output"]["execution_result_note"] = f"({len(row_keys)} row{'s' if len(row_keys) != 1 else ''})"
+                        filtered_call["output"]["execution_result"] = execution_result
+                        filtered_call["output"]["execution_result_note"] = f"({len(row_keys)} {rows_str if len(row_keys) != 1 else row_str})"
         else:
             # For non-database_agent tools, keep all output fields
             filtered_call["output"] = tool_call.get("output", {})
@@ -274,7 +283,7 @@ def format_tool_calls_for_prompt(tool_calls):
                 note = tool_output.get("execution_result_note", "")
                 formatted_lines.append(f"    - Execution Result {note}:")
                 # Print the limited execution result data
-                execution_result = get_full_execution_result_rows(tool_output.get("execution_result", {}))
+                execution_result = get_llm_execution_result_rows(tool_output.get("execution_result", {}))
                 if execution_result:
                     for row_key, row_data in execution_result.items():
                         if row_key.startswith("Row "):

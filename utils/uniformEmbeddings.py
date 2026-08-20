@@ -115,13 +115,24 @@ class UniformEmbeddings:
         self.base_embeddings = NVIDIAEmbeddings(**kwargs)
 
     def setup_google(self):
-        from langchain_google_vertexai import VertexAIEmbeddings
+        from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-        api_key = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-        if api_key is None:
-            logging.warning("GOOGLE_APPLICATION_CREDENTIALS environment variable not set. Attempting to use Application Default Credentials (ADC).")
+        if os.getenv('GOOGLE_APPLICATION_CREDENTIALS') is None:
+            logging.warning(
+                "GOOGLE_APPLICATION_CREDENTIALS environment variable not set. "
+                "Attempting to use Application Default Credentials (ADC)."
+            )
 
-        self.base_embeddings = VertexAIEmbeddings(model_name = self.model_name)
+        google_region = os.getenv("GOOGLE_REGION")
+
+        kwargs = {
+            "model": self.model_name,
+            "vertexai": True,
+        }
+        if google_region:
+            kwargs["location"] = google_region
+
+        self.base_embeddings = GoogleGenerativeAIEmbeddings(**kwargs)
 
     def setup_openai(self):
         from langchain_openai import OpenAIEmbeddings
@@ -173,7 +184,6 @@ class UniformEmbeddings:
 
         self.base_embeddings = OpenAIEmbeddings(**kwargs)
 
-
     def setup_openrouter(self):
         from langchain_openai import OpenAIEmbeddings
 
@@ -194,7 +204,6 @@ class UniformEmbeddings:
             kwargs["base_url"] = base_url
 
         self.base_embeddings = OpenAIEmbeddings(**kwargs)
-
 
     def setup_azure(self):
         from langchain_openai import AzureOpenAIEmbeddings

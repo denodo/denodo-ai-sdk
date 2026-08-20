@@ -36,7 +36,7 @@ COLOR_PALETTES = load_color_palettes()
 
 def get_denodo_logo():
     """Load the local Denodo logo and convert to base64 for embedding."""
-    logo_path = Path("api/static/denodo-logo.png")
+    logo_path = Path("api/static/denodo_logo.png")
 
     try:
         if logo_path.exists():
@@ -182,6 +182,8 @@ def get_css_styles(palette):
         border-radius: 3pt;
         font-size: 10pt;
         border: 1px solid #e2e8f0;
+        direction: ltr !important;
+        unicode-bidi: embed;
     }}
 
     /* Code blocks */
@@ -198,6 +200,9 @@ def get_css_styles(palette):
         page-break-inside: auto; /* Allow code blocks to break to prevent large gaps */
         white-space: pre-wrap;
         word-wrap: break-word;
+        direction: ltr !important;
+        text-align: left !important;
+        unicode-bidi: embed;
     }}
 
     pre code {{
@@ -298,6 +303,15 @@ def get_css_styles(palette):
         color: #2d3748;
     }}
 
+    [dir="rtl"] td, [dir="rtl"] th {{
+        text-align: right !important;
+    }}
+
+    [dir="rtl"] td.numeric {{
+        text-align: left !important;
+        direction: ltr !important;
+    }}
+
     .avoid-break {{
         page-break-inside: avoid;
     }}
@@ -354,6 +368,24 @@ def get_css_styles(palette):
     pre code[class*="language-sql"] {{
         color: #0066cc;
     }}
+
+    .appendix-ltr-container {{
+        direction: ltr !important;
+        text-align: left !important;
+        padding-top: 20pt;
+    }}
+
+    .appendix-ltr-container h2,
+    .appendix-ltr-container h3,
+    .appendix-ltr-container p,
+    .appendix-ltr-container ul,
+    .appendix-ltr-container li,
+    .appendix-ltr-container table,
+    .appendix-ltr-container th,
+    .appendix-ltr-container td {{
+        text-align: left !important;
+        direction: ltr !important;
+    }}
     """
 
 def prepare_html(html_content, logo_data_uri=None):
@@ -366,6 +398,19 @@ def prepare_html(html_content, logo_data_uri=None):
     body = soup.find('body')
     if not body:
         body = soup
+
+    appendix_header = body.find(
+        lambda tag: tag.name == 'h2' and 'Appendix' in tag.get_text(strip=True)
+    )
+
+    if appendix_header:
+        ltr_wrapper = soup.new_tag('div', dir='ltr')
+        ltr_wrapper['class'] = 'appendix-ltr-container'
+        siblings = appendix_header.find_next_siblings()
+        appendix_header.wrap(ltr_wrapper)
+
+        for sibling in siblings:
+            ltr_wrapper.append(sibling)
 
     if logo_data_uri:
         header_html = f"""
@@ -394,12 +439,8 @@ def prepare_html(html_content, logo_data_uri=None):
         elif th_count >= 4: existing_classes.append('medium-table')
         else: existing_classes.append('narrow-table')
 
-        # Only apply definition-table class if the table has exactly 2 columns
-        # AND the headers are specifically 'Parameter' and 'Value'
         if th_count == 2 and header_row:
-            headers = [th.get_text(strip=True).lower() for th in header_row.find_all(['th', 'td'])]
-            if len(headers) == 2 and 'parameter' in headers and 'value' in headers:
-                existing_classes.append('definition-table')
+            existing_classes.append('definition-table')
 
         table['class'] = list(set(existing_classes))
 
@@ -422,13 +463,14 @@ def prepare_html(html_content, logo_data_uri=None):
 
     return str(body)
 
-def build_styled_html(html_content: str, color_palette: dict, title: str) -> str:
+def build_styled_html(html_content: str, color_palette: dict, title: str, text_direction: str = "ltr") -> str:
     """
-    Build a complete styled HTML document with Denodo branding and color palette.
+    Build a complete styled HTML document with Denodo branding and color palette,
+    supporting RTL and LTR text directions dynamically.
     """
     logger.info(
         f"Building styled HTML document (input length: {len(html_content)}) "
-        f"using '{color_palette['name']}' theme."
+        f"using '{color_palette['name']}' theme. Text direction: {text_direction}"
     )
 
     logo_data_uri = get_denodo_logo()
@@ -437,7 +479,7 @@ def build_styled_html(html_content: str, color_palette: dict, title: str) -> str
 
     final_html_doc = f"""
     <!DOCTYPE html>
-    <html lang="en">
+    <html dir="{text_direction}">
     <head>
         <meta charset="UTF-8">
         <title>{title}</title>

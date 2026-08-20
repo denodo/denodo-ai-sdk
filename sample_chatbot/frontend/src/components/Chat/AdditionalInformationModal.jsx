@@ -86,6 +86,11 @@ const AdditionalInformationModal = ({ show, onClose, result }) => {
         const sqlTime = activeArtifact.sql_execution_time;
         const hasBreakdown = vectorTime != null || llmTime != null || sqlTime != null;
 
+        const totalTokens = activeArtifact.total_tokens ?? activeArtifact.tokens ?? result.tokens;
+        const inputTokens = activeArtifact.input_tokens ?? result.input_tokens;
+        const outputTokens = activeArtifact.output_tokens ?? result.output_tokens;
+        const hasTokenBreakdown = inputTokens != null || outputTokens != null;
+
         return (
           <div>
             <p>
@@ -103,9 +108,25 @@ const AdditionalInformationModal = ({ show, onClose, result }) => {
             <p>
               <strong>Query explanation:</strong> {activeArtifact.query_explanation || result.query_explanation || "N/A"}
             </p>
-            <p>
-              <strong>AI SDK Tokens:</strong> {activeArtifact.tokens || result.tokens || "N/A"}
+            {/* --- TOKEN BREAKDOWN RENDER --- */}
+            <p style={{ marginBottom: hasTokenBreakdown ? "0.25rem" : "1rem" }}>
+              <strong>AI SDK Tokens (Total):</strong>{" "}
+              {totalTokens != null ? totalTokens : "N/A"}
             </p>
+
+            {hasTokenBreakdown && (
+              <div style={{ paddingLeft: "1.25rem", marginBottom: "1rem", fontSize: "0.95rem", color: "#555" }}>
+                <div style={{ marginBottom: "0.25rem" }}>
+                  <span style={{ color: "#adb5bd", marginRight: "6px" }}>↳</span>
+                  <strong>Input Tokens:</strong> {inputTokens != null ? inputTokens : 0}
+                </div>
+                <div>
+                  <span style={{ color: "#adb5bd", marginRight: "6px" }}>↳</span>
+                  <strong>Output Tokens:</strong> {outputTokens != null ? outputTokens : 0}
+                </div>
+              </div>
+            )}
+            {/* ------------------------------- */}
 
             {/* --- TIMING BREAKDOWN RENDER --- */}
             <p style={{ marginBottom: hasBreakdown ? "0.25rem" : "1rem" }}>

@@ -13,10 +13,12 @@ from utils.utils import validate_data_dir
 from utils.logging_utils import get_logging_config
 from utils.yaml.validate_and_parse import load_and_validate_agents
 from sample_chatbot.config import init_agents, setup_agents_directories, log_agents_config
+from sample_chatbot.engine.skills import log_skills
 from sample_chatbot.extensions import login_manager
 from sample_chatbot.services.user_store import user_store
 from sample_chatbot.utils.helpers import check_env_variables, setup_directories
 from sample_chatbot.utils.ai_sdk_client import ai_sdk_health_check, ai_sdk_wait_until_healthy
+from utils.database_utils import HistoryMetadata
 
 # Required environment variables (prompts are now in engine/prompts.py)
 REQUIRED_VARS = [
@@ -72,6 +74,9 @@ def create_app(config=None):
     # Log agents configuration
     log_agents_config(logging)
 
+    # Log discovered skills
+    log_skills(logging)
+
     # Create Flask app first so all the Python-side initialization (blueprints,
     # login manager, agent configs) is done. The AI SDK reachability probe is
     # the last thing we do before returning the app.
@@ -92,6 +97,13 @@ def create_app(config=None):
     @login_manager.user_loader
     def load_user(user_id):
         return user_store.get(user_id)
+
+    # Database initialization
+    try:
+        HistoryMetadata.init_db()
+        logging.info("Chat history database metadata initialized successfully.")
+    except Exception as e:
+        logging.error(f"Failed to initialize database gracefully. Chat history may be unavailable: {e}")
 
     # Register blueprints
     from sample_chatbot.routes import register_blueprints

@@ -2,6 +2,7 @@ import React from "react";
 import Button from "react-bootstrap/Button";
 import OverlayTrigger from "react-bootstrap/OverlayTrigger";
 import Tooltip from "react-bootstrap/Tooltip";
+import { buildViewCatalogUrl } from "../../utils/viewUrl";
 
 const assetBaseUrl = import.meta.env.BASE_URL;
 
@@ -39,14 +40,7 @@ const ContextTablesAction = ({ tables, vql, dataCatalogUrl, icons, onOpenContext
   });
 
   const renderTableButton = (table, index, isUsed = true) => {
-    const cleanTable = table.replace(/"/g, "").toLowerCase();
-    const tableParts = cleanTable.split(".");
-    const schema = tableParts[0];
-    const tableName = tableParts[1] || schema;
-
-    const catalogUrl = dataCatalogUrl
-      ? `${dataCatalogUrl}/#/view/${schema}/${tableName}`
-      : null;
+    const catalogUrl = buildViewCatalogUrl(dataCatalogUrl, table);
 
     if (catalogUrl) {
       return (

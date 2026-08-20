@@ -7,6 +7,7 @@ from flask import Blueprint, request, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
 
 from sample_chatbot.config import get_config, get_agents_metadata_by_user
+from sample_chatbot.services.agent_prerequisites import missing_agent_prerequisites, missing_prerequisites_message
 from sample_chatbot.services.user_store import user_store
 from sample_chatbot.utils.ai_sdk_client import (
     get_user_access_info,
@@ -87,7 +88,16 @@ def login():
         "config": {
             "can_edit_instructions": config.user_edit_instructions,
             "chatbot_feedback": config.feedback_enabled,
-            "unstructured_mode": config.is_unstructured_mode_allowed_for_user(
+            # Whether KB querying is available on this agent: agent-declared
+            # collections work for everyone; otherwise the user needs
+            # unstructured-mode permission for their own private collections.
+            "unstructured_mode": bool(config.knowledge_bases) or config.is_unstructured_mode_allowed_for_user(
+                username=username,
+                roles=roles,
+                is_admin=is_admin,
+                legacy_permissions_endpoint=legacy_permissions_endpoint
+            ),
+            "can_manage_skills": config.is_skill_management_allowed_for_user(
                 username=username,
                 roles=roles,
                 is_admin=is_admin,
@@ -140,6 +150,16 @@ def change_agent():
     ):
         return jsonify({"success": False, "message": "User is not allowed to use this agent"}), 403
 
+    # Declared skills / knowledge bases must exist before the agent can be used.
+    missing = missing_agent_prerequisites(agent_config)
+    if any(missing.values()):
+        logging.warning(f"[Auth] Agent '{agent_config.id}' rejected for '{current_user.id}': missing prerequisites {missing}")
+        return jsonify({
+            "success": False,
+            "message": missing_prerequisites_message(missing),
+            "missing_prerequisites": missing,
+        }), 409
+
     if current_user.agent_id != agent_config.id:
         current_user.set_agent_config(agent_config)
         current_user.thread_id = str(current_user.id) + '-' + str(agent_config.id)
@@ -184,7 +204,15 @@ def change_agent():
         "config": {
             "can_edit_instructions": agent_config.user_edit_instructions,
             "chatbot_feedback": agent_config.feedback_enabled,
-            "unstructured_mode": agent_config.is_unstructured_mode_allowed_for_user(
+            # See login(): KB querying is available with agent-declared
+            # collections or with unstructured-mode permission.
+            "unstructured_mode": bool(agent_config.knowledge_bases) or agent_config.is_unstructured_mode_allowed_for_user(
+                username=current_user.id,
+                roles=current_user.roles,
+                is_admin=current_user.is_admin,
+                legacy_permissions_endpoint=current_user.legacy_permissions_endpoint
+            ),
+            "can_manage_skills": agent_config.is_skill_management_allowed_for_user(
                 username=current_user.id,
                 roles=current_user.roles,
                 is_admin=current_user.is_admin,

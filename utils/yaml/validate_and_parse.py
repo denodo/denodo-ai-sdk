@@ -17,7 +17,6 @@ import json
 
 logger = logging.getLogger(__name__)
 
-
 def load_and_validate_agents() -> list:
     """
     Reads YAML files from the custom agents directory, validates them against

@@ -6,7 +6,15 @@ import { actionTypes } from "../../reducers/chatReducer";
 import { buildApiUrl } from "../../api/client";
 import CustomTooltip from "../CustomTooltip/CustomTooltip";
 
-const FeedbackModal = ({ show, onClose, result, dispatch, resultIndex, feedbackEnabled }) => {
+const FeedbackModal = ({ 
+  show, 
+  onClose, 
+  result, 
+  dispatch, 
+  resultIndex, 
+  feedbackEnabled,
+  onShowToast
+}) => {
   const [feedbackValue, setFeedbackValue] = useState("");
   const [feedbackDetails, setFeedbackDetails] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -45,19 +53,58 @@ const FeedbackModal = ({ show, onClose, result, dispatch, resultIndex, feedbackE
             type: actionTypes.SET_CHAT_ITEM_FEEDBACK,
             payload: { resultIndex, feedback: feedbackValue, feedbackDetails }
         });
+        
+        if (onShowToast) {
+          onShowToast({
+            show: true,
+            title: "Feedback Submitted",
+            message: "Thank you for your feedback.",
+            variant: "success"
+          });
+        }
+        
         onClose();
       } else {
-        const detail =
-          data.message ||
-          `Feedback could not be saved (HTTP ${response.status}).`;
-        alert(detail);
+        if (data.error === "uuid_not_found") {
+          if (onShowToast) {
+            onShowToast({
+              show: true,
+              title: "Feedback Not Saved",
+              message: "This conversation is too old and its original record has been deleted to save space. Your feedback could not be saved.",
+              variant: "warning"
+            });
+          }
+          onClose();
+        } else {
+          const detail = data.message || `Feedback could not be saved (HTTP ${response.status}).`;
+          if (onShowToast) {
+            onShowToast({
+              show: true,
+              title: "Error",
+              message: detail,
+              variant: "danger"
+            });
+          } else {
+            alert(detail);
+          }
+        }
       }
     } catch (error) {
       console.error("Error submitting feedback:", error);
       const detail =
         error?.message ||
         "Unable to reach the server. Check your connection and try again.";
-      alert(`Error submitting feedback: ${detail}`);
+      
+      if (onShowToast) {
+        onShowToast({
+          show: true,
+          title: "Connection Error",
+          message: `Error submitting feedback: ${detail}`,
+          variant: "danger"
+        });
+      } else {
+        alert(`Error submitting feedback: ${detail}`);
+      }
     } finally {
       setSubmitting(false);
     }

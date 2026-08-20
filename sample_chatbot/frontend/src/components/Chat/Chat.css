@@ -57,7 +57,6 @@
   line-height: 1.4; /* Better line spacing for multi-line text */
 }
 
-
 .w-60 {
   width: 60% !important;
   max-width: 60% !important;
@@ -198,13 +197,12 @@ tr:nth-child(even) {
   /* Center the image */
   display: block;
   margin: 0 auto;
-  
+
   /* Add a border */
   border: 2px solid #ccc; 
   padding: 5px; 
   border-radius: 8px;
 }
-
 
 .markdown-container table {
   max-width: none; 
@@ -277,8 +275,6 @@ tr:nth-child(even) {
   margin: 0 !important;
 }
 
-
-
 /* Context more button styling */
 .context-more-btn {
   border: 2px solid #28a745 !important;
@@ -299,8 +295,6 @@ tr:nth-child(even) {
 h3 {
   font-size: 1.25em !important;
 }
-
-
 
 /* Related Questions Styling */
 .related-question-btn {
@@ -397,30 +391,7 @@ h3 {
   animation: slideInLeft 0.4s ease;
 }
 
-.report-palette-popup {
-  position: absolute;
-  bottom: 100%;
-  right: 0;
-  margin-bottom: 8px;
-  background-color: #e7e9ea;
-  color: #112533;
-  padding: 8px 10px;
-  border-radius: 0.5rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  z-index: 20;
-  min-width: 190px;
-}
-
-.report-palette-label {
-  display: block;
-  font-size: 0.8rem;
-  margin-bottom: 4px;
-  font-weight: 600;
-}
-
-.report-palette-select {
-  font-size: 0.8rem;
-}
+/* Report palette popup styles live in ToolBlocks.css */
 
 /* Tool arguments styling */
 .args-container {

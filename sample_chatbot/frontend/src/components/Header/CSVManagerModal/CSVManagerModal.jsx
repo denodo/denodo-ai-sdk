@@ -9,6 +9,7 @@ import api from '../../../api/client';
 import AddCSVForm from './AddCSVForm';
 import SourceRow from './SourceRow';
 import ScannedFileRow from './ScannedFileRow';
+import NotificationToast from '../../NotificationToast/NotificationToast';
 
 const emptyNewCSV = {
   file: null,
@@ -21,7 +22,6 @@ const emptyNewCSV = {
 };
 
 const CSVManagerModal = ({ show, handleClose, hasActiveConversation = false, selectedChatbot }) => {
-  const agentName = selectedChatbot?.name || 'General Chat';
   const [sources, setSources] = useState([]);
   const [scannedFiles, setScannedFiles] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -39,11 +39,27 @@ const CSVManagerModal = ({ show, handleClose, hasActiveConversation = false, sel
   const [downloadingSources, setDownloadingSources] = useState(() => new Set());
   const [deletingSources, setDeletingSources] = useState(() => new Set());
   const [togglingPrivateSources, setTogglingPrivateSources] = useState(() => new Set());
+  
   // Tracks whether the user has made any change to sources during this
   // open-session of the modal. Used to decide whether to warn on close
   // that changes won't apply to an ongoing conversation.
   const [hasChanges, setHasChanges] = useState(false);
-  const [showCloseWarning, setShowCloseWarning] = useState(false);
+  
+  const [toastConfig, setToastConfig] = useState({
+    show: false,
+    message: '',
+    variant: 'info',
+    title: '',
+    duration: 8000,
+  });
+
+  const showToast = (message, variant, title, duration = 8000) => {
+    setToastConfig({ show: true, message, variant, title, duration });
+  };
+
+  const handleToastClose = () => {
+    setToastConfig((prev) => ({ ...prev, show: false }));
+  };
 
   // Flip the dirty flag whenever a mutation succeeds, so we know on close
   // whether to warn that changes won't apply to the ongoing conversation.
@@ -55,25 +71,21 @@ const CSVManagerModal = ({ show, handleClose, hasActiveConversation = false, sel
   useEffect(() => {
     if (show) {
       setHasChanges(false);
-      setShowCloseWarning(false);
     }
   }, [show]);
 
   // Intercept the Close button / backdrop dismiss: if the user made changes
-  // and there's an ongoing conversation, show the warning first.
+  // and there's an ongoing conversation, show the warning via Toast.
   const requestClose = () => {
     if (hasChanges && hasActiveConversation) {
-      // Close the Knowledge Base Manager underneath and surface the warning
-      // on its own so the user only sees one modal at a time.
-      handleClose();
-      setShowCloseWarning(true);
-      return;
+      showToast(
+        "Changes saved. The agent may rely on previous context and ignore new files. Ask it to 'search again' or start a new chat.",
+        "info",
+        "Knowledge base updated",
+        8000
+      );
     }
     handleClose();
-  };
-
-  const confirmCloseWarning = () => {
-    setShowCloseWarning(false);
   };
 
   const addBusy = (setter, name) =>
@@ -126,23 +138,6 @@ const CSVManagerModal = ({ show, handleClose, hasActiveConversation = false, sel
 
   useEffect(() => { fetchSources(); }, [fetchSources]);
   useEffect(() => { fetchScannedFiles(); }, [fetchScannedFiles]);
-
-  const handleToggleActive = async (sourceName, currentActive) => {
-    const source = sources.find((s) => s.source_name === sourceName);
-    if (!currentActive && source && !source.description?.trim()) {
-      setError('Cannot activate source without a description.');
-      return;
-    }
-    try {
-      const response = await api.post('csv/activate', { source_name: sourceName, active: !currentActive });
-      if (response.data.success) {
-        setSources((prev) => prev.map((s) => s.source_name === sourceName ? { ...s, active: !currentActive } : s));
-        notifySourcesChanged();
-      }
-    } catch (err) {
-      setError(`Failed to toggle source: ${err.response?.data?.error || err.message}`);
-    }
-  };
 
   const handleDelete = async (sourceName, deleteFile = false) => {
     if (deletingSources.has(sourceName)) return;
@@ -384,143 +379,124 @@ const CSVManagerModal = ({ show, handleClose, hasActiveConversation = false, sel
 
   return (
     <>
-    <Modal show={show} onHide={requestClose} centered size="xl" dialogClassName="modal-90w">
-      <Modal.Header closeButton data-bs-theme="light">
-        <Modal.Title>Knowledge Base Manager</Modal.Title>
-      </Modal.Header>
-      <Modal.Body style={{ maxHeight: '70vh', overflowY: 'auto' }}>
-        {error && (
-          <Alert variant="danger" onClose={() => setError(null)} dismissible>
-            {error}
+      <Modal show={show} onHide={requestClose} centered size="xl" dialogClassName="modal-90w">
+        <Modal.Header closeButton data-bs-theme="light">
+          <Modal.Title>Knowledge Base Manager</Modal.Title>
+        </Modal.Header>
+        <Modal.Body style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+          {error && (
+            <Alert variant="danger" onClose={() => setError(null)} dismissible>
+              {error}
+            </Alert>
+          )}
+
+          <Alert variant="primary" className="mb-3 py-2">
+            <small>
+              <i className="bi bi-info-circle me-1" />
+              Knowledge base collections are available to both the general chatbot and
+              specialized agents. To activate or deactivate collections per agent, open
+              that agent's settings under <strong>Administration</strong>.
+            </small>
           </Alert>
-        )}
 
-        <Alert variant="primary" className="mb-3 py-2">
-          <small>
-            <i className="bi bi-info-circle me-1" />
-            You are configuring the knowledge base for <strong>{agentName}</strong>.
-            <strong> Active</strong> toggles apply <strong>only to this chatbot</strong> — the
-            same collection can be active in some chatbots and inactive in others.
-            Uploading, deleting and changing <strong>Public/Private</strong> visibility apply to
-            every chatbot.
-          </small>
-        </Alert>
+          {showAddForm ? (
+            <AddCSVForm
+              newCSV={newCSV}
+              setNewCSV={setNewCSV}
+              preview={preview}
+              isLoadingPreview={isLoadingPreview}
+              isGeneratingDescription={isGeneratingDescription}
+              isAdding={isAdding}
+              currentUserIsAdmin={currentUserIsAdmin}
+              onSubmit={handleAddSource}
+              onCancel={handleCancelAddForm}
+              onFileChange={handleFileChange}
+              onGenerateDescription={handleGenerateDescription}
+            />
+          ) : (
+            <Button
+              variant="outline-dark"
+              size="sm"
+              className="mb-3"
+              onClick={() => setShowAddForm(true)}
+            >
+              + Add CSV Source
+            </Button>
+          )}
 
-        {showAddForm ? (
-          <AddCSVForm
-            newCSV={newCSV}
-            setNewCSV={setNewCSV}
-            preview={preview}
-            isLoadingPreview={isLoadingPreview}
-            isGeneratingDescription={isGeneratingDescription}
-            isAdding={isAdding}
-            currentUserIsAdmin={currentUserIsAdmin}
-            onSubmit={handleAddSource}
-            onCancel={handleCancelAddForm}
-            onFileChange={handleFileChange}
-            onGenerateDescription={handleGenerateDescription}
-          />
-        ) : (
-          <Button
-            variant="outline-dark"
-            size="sm"
-            className="mb-3"
-            onClick={() => setShowAddForm(true)}
-          >
-            + Add CSV Source
-          </Button>
-        )}
+          {isLoading && !showAddForm && (
+            <div className="text-center p-4"><Spinner animation="border" /></div>
+          )}
 
-        {isLoading && !showAddForm && (
-          <div className="text-center p-4"><Spinner animation="border" /></div>
-        )}
+          {!isLoading && hasNoData && (
+            <Alert variant="warning">
+              No CSV sources configured. Click "Add CSV Source" to add one.
+            </Alert>
+          )}
 
-        {!isLoading && hasNoData && (
-          <Alert variant="warning">
-            No CSV sources configured. Click "Add CSV Source" to add one.
+          {!isLoading && !hasNoData && (
+            <Table striped bordered hover size="sm" variant="light">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th style={{ width: '130px' }}>Status</th>
+                  <th>Description</th>
+                  <th style={{ width: '120px' }}>Owner</th>
+                  <th style={{ width: '140px' }}>Uploaded</th>
+                  <th style={{ width: '200px' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sources.map((source) => (
+                  <SourceRow
+                    key={source.source_name}
+                    source={source}
+                    currentUsername={currentUsername}
+                    editingSource={editingSource}
+                    editingDescription={editingDescription}
+                    onDelete={handleDelete}
+                    onDownload={handleDownload}
+                    isDownloading={downloadingSources.has(source.source_name)}
+                    isDeleting={deletingSources.has(source.source_name)}
+                    isTogglingPrivate={togglingPrivateSources.has(source.source_name)}
+                    onTogglePrivate={handleTogglePrivate}
+                    onStartEditing={handleStartEditing}
+                    onUpdateDescription={handleUpdateDescription}
+                    onCancelEditing={handleCancelEditing}
+                    setEditingDescription={setEditingDescription}
+                  />
+                ))}
+                {scannedFiles.map((scannedFile) => (
+                  <ScannedFileRow
+                    key={`scanned-${scannedFile.source_name}`}
+                    scannedFile={scannedFile}
+                    onAdd={handleAddScannedFile}
+                  />
+                ))}
+              </tbody>
+            </Table>
+          )}
+
+          <Alert variant="info" className="mb-3 py-2">
+            <small>
+              <strong>Note:</strong> Files in <code>sample_chatbot/sample_data/unstructured</code> are scanned automatically and shown
+              as "Scanned" until someone adds them.
+            </small>
           </Alert>
-        )}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="light" onClick={requestClose}>Close</Button>
+        </Modal.Footer>
+      </Modal>
 
-        {!isLoading && !hasNoData && (
-          <Table striped bordered hover size="sm" variant="light">
-            <thead>
-              <tr>
-                <th style={{ width: '70px' }}>Active</th>
-                <th>Name</th>
-                <th style={{ width: '130px' }}>Status</th>
-                <th>Description</th>
-                <th style={{ width: '120px' }}>Owner</th>
-                <th style={{ width: '140px' }}>Uploaded</th>
-                <th style={{ width: '200px' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sources.map((source) => (
-                <SourceRow
-                  key={source.source_name}
-                  source={source}
-                  currentUsername={currentUsername}
-                  editingSource={editingSource}
-                  editingDescription={editingDescription}
-                  onToggleActive={handleToggleActive}
-                  onDelete={handleDelete}
-                  onDownload={handleDownload}
-                  isDownloading={downloadingSources.has(source.source_name)}
-                  isDeleting={deletingSources.has(source.source_name)}
-                  isTogglingPrivate={togglingPrivateSources.has(source.source_name)}
-                  onTogglePrivate={handleTogglePrivate}
-                  onStartEditing={handleStartEditing}
-                  onUpdateDescription={handleUpdateDescription}
-                  onCancelEditing={handleCancelEditing}
-                  setEditingDescription={setEditingDescription}
-                />
-              ))}
-              {scannedFiles.map((scannedFile) => (
-                <ScannedFileRow
-                  key={`scanned-${scannedFile.source_name}`}
-                  scannedFile={scannedFile}
-                  onAdd={handleAddScannedFile}
-                />
-              ))}
-            </tbody>
-          </Table>
-        )}
-
-        <Alert variant="info" className="mb-3 py-2">
-          <small>
-            <strong>Note:</strong> Files in <code>sample_chatbot/sample_data/unstructured</code> are scanned automatically and shown
-            as "Scanned" until someone adds them.
-          </small>
-        </Alert>
-      </Modal.Body>
-      <Modal.Footer>
-        <Button variant="light" onClick={requestClose}>Close</Button>
-      </Modal.Footer>
-    </Modal>
-
-    <Modal
-      show={showCloseWarning}
-      onHide={() => setShowCloseWarning(false)}
-      centered
-      backdrop="static"
-    >
-      <Modal.Header closeButton data-bs-theme="light">
-        <Modal.Title>Knowledge base changed</Modal.Title>
-      </Modal.Header>
-      <Modal.Body style={{ color: '#495057', fontSize: '1.05rem' }}>
-        The changes you made won't apply to your current conversation.
-        Please start a new conversation for the changes to take effect.
-      </Modal.Body>
-      <Modal.Footer className="border-0 pt-0">
-        <Button
-          variant="primary"
-          onClick={confirmCloseWarning}
-          style={{ fontWeight: 500 }}
-        >
-          OK
-        </Button>
-      </Modal.Footer>
-    </Modal>
+      <NotificationToast
+        show={toastConfig.show}
+        message={toastConfig.message}
+        variant={toastConfig.variant}
+        title={toastConfig.title}
+        duration={toastConfig.duration}
+        onClose={handleToastClose}
+      />
     </>
   );
 };

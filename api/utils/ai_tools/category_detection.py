@@ -27,17 +27,13 @@ from api.utils.ai_tools.prompts import (
 from api.utils.ai_tools.schema_text import selector_schema_for_prompt
 from api.utils.ai_tools.types import CategoryDecision, usage_tokens
 
-
 def _metadata_response_instructions(markdown_response, layout):
     if layout == "direct":
         return DIRECT_METADATA_RESPONSE_MARKDOWN if markdown_response else DIRECT_METADATA_RESPONSE_PLAIN
     return METADATA_CATEGORY_RESPONSE_MARKDOWN if markdown_response else METADATA_CATEGORY_RESPONSE_PLAIN
 
-
-
 def _decision_tuple(decision):
     return decision.category, decision.category_response, decision.related_questions, decision.tokens
-
 
 def _parse_sql_category_response(response, tokens, check_ambiguity):
     category = utils.custom_tag_parser(response, 'cat', default="OTHER")[0].strip()
@@ -54,7 +50,6 @@ def _parse_sql_category_response(response, tokens, check_ambiguity):
         related_questions=[],
         tokens=tokens
     )
-
 
 @utils.log_params
 @utils.timed
@@ -87,7 +82,6 @@ async def metadata_category(query, vector_search_tables, llm, custom_instruction
     )
     return _decision_tuple(decision)
 
-
 @utils.log_params
 @utils.timed
 async def direct_metadata_category(query, vector_search_tables, llm, custom_instructions='', session_id=None, markdown_response=True):
@@ -118,7 +112,6 @@ async def direct_metadata_category(query, vector_search_tables, llm, custom_inst
         tokens=usage_tokens(cb)
     )
     return _decision_tuple(decision)
-
 
 @utils.log_params
 @utils.timed
@@ -151,7 +144,6 @@ async def direct_sql_category(
     decision = _parse_sql_category_response(response, usage_tokens(cb), check_ambiguity)
     decision.category = "SQL"
     return _decision_tuple(decision)
-
 
 @utils.log_params
 @utils.timed

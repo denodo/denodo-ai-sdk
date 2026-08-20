@@ -26,6 +26,7 @@ def get_frontend_config():
         "unstructured_mode": config.unstructured_mode,
         "user_edit_llm": config.user_edit_llm,
         "enable_deep_query": config.deepquery_enabled,
+        "input_method": config.input_method,
         "chatbot_tools": [
             {
                 "name": name,
@@ -71,8 +72,30 @@ def update_custom_instructions():
 @settings_bp.route('/api/llm_settings', methods=['GET'])
 @login_required
 def get_llm_settings():
-    """Return the user's current LLM preferences and cached AI SDK configuration."""
+    """Return the user's current LLM preferences and cached AI SDK configuration.
+
+    Accepts an optional agent_id so the per-agent Settings modal can show any
+    agent's defaults without switching agents. Session preferences only apply
+    to the user's current agent; for other agents the frontend falls back to
+    its stored per-agent settings.
+    """
     agent_id = 'global' if not current_user.is_authenticated else current_user.agent_id
+
+    requested_agent = request.args.get('agent_id')
+    is_current_agent = not requested_agent or requested_agent == agent_id
+    if not is_current_agent:
+        from sample_chatbot import config as chatbot_configs
+        requested_config = chatbot_configs._configs.get(requested_agent)
+        if requested_config is None:
+            return jsonify({"success": False, "error": "Unknown agent."}), 404
+        if not requested_config.is_user_allowed(
+            username=current_user.id,
+            roles=getattr(current_user, 'roles', []),
+            is_admin=getattr(current_user, 'is_admin', False),
+            legacy_permissions_endpoint=getattr(current_user, 'legacy_permissions_endpoint', False),
+        ):
+            return jsonify({"success": False, "error": "You are not allowed to use this agent."}), 403
+        agent_id = requested_agent
 
     config = get_config(agent_id)
 
@@ -105,11 +128,16 @@ def get_llm_settings():
         "ai_sdk_thinking_llm_defaults": ai_sdk_thinking_llm_defaults,
         "use_base_llm_for_execution_default": config.use_base_llm_for_execution,
         "check_ambiguity_default": config.check_ambiguity,
-        "use_base_llm_for_execution": current_user.use_base_llm_for_execution,
-        "chatbot_llm_preferences": current_user.chatbot_llm_preferences,
-        "ai_sdk_base_llm_preferences": current_user.ai_sdk_base_llm_preferences,
-        "ai_sdk_thinking_llm_preferences": current_user.ai_sdk_thinking_llm_preferences,
-        "check_ambiguity": current_user.check_ambiguity,
+        # Session preferences belong to the CURRENT agent only; when asked
+        # about another agent, return None/empty so the frontend uses its own
+        # stored per-agent settings instead.
+        "use_base_llm_for_execution": current_user.use_base_llm_for_execution if is_current_agent else None,
+        "chatbot_llm_preferences": current_user.chatbot_llm_preferences if is_current_agent else {},
+        "ai_sdk_base_llm_preferences": current_user.ai_sdk_base_llm_preferences if is_current_agent else {},
+        "ai_sdk_thinking_llm_preferences": current_user.ai_sdk_thinking_llm_preferences if is_current_agent else {},
+        "check_ambiguity": current_user.check_ambiguity if is_current_agent else None,
+        "user_edit_llm": config.user_edit_llm,
+        "user_edit_instructions": config.user_edit_instructions,
         "ai_sdk_info": current_user.ai_sdk_info,
         "chatbot_deepquery": config.deepquery_enabled,
         "default_custom_instructions": {
@@ -117,7 +145,6 @@ def get_llm_settings():
             "chatbot": config.custom_instructions_chatbot,
         },
     }), 200
-
 
 @settings_bp.route('/api/reset_llm_settings', methods=['POST'])
 @login_required
@@ -162,7 +189,6 @@ def reset_llm_settings():
     current_user.chatbot = None
 
     return jsonify({"message": "LLM settings reset to defaults"}), 200
-
 
 @settings_bp.route('/api/update_llm_settings', methods=['POST'])
 @login_required

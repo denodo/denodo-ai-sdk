@@ -91,7 +91,6 @@ async def logging_context_middleware(request, call_next):
             return Response(status_code=499)
         raise
 
-
 class RequestCancelledMiddleware:
     """
     ASGI middleware: cancel the request task when the client disconnects.

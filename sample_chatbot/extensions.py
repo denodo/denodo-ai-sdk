@@ -24,7 +24,6 @@ UNSTRUCTURED_KB_INDEX_NAME = "unstructured_chatbot_kb"
 _unstructured_store = None
 _unstructured_store_lock = threading.Lock()
 
-
 def get_unstructured_vector_store(config):
     """Return (creating on first call) the shared chatbot vector store."""
     global _unstructured_store

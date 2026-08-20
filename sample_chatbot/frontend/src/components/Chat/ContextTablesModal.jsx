@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import Modal from "react-bootstrap/Modal";
 import Button from "react-bootstrap/Button";
+import { buildViewCatalogUrl } from "../../utils/viewUrl";
 
 const assetBaseUrl = import.meta.env.BASE_URL;
 
@@ -36,13 +37,7 @@ const ContextTablesModal = ({ show, onClose, tables, vql, dataCatalogUrl }) => {
   }, [tables, vql]);
 
   const renderTableButton = (table, index, variant) => {
-    const cleanTable = table.replace(/"/g, "").toLowerCase();
-    const tableParts = cleanTable.split(".");
-    const schema = tableParts[0];
-    const tableName = tableParts[1] || schema;
-    const catalogUrl = dataCatalogUrl
-      ? `${dataCatalogUrl}/#/view/${schema}/${tableName}`
-      : null;
+    const catalogUrl = buildViewCatalogUrl(dataCatalogUrl, table);
 
     if (catalogUrl) {
       return (

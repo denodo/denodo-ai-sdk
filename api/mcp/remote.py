@@ -14,7 +14,6 @@ from utils.utils import filter_allowed_headers
 
 logger = logging.getLogger(__name__)
 
-
 def get_mcp_app(host, port, root_path):
     """
     Factory function to create and configure the FastMCP app.

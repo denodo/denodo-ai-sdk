@@ -29,6 +29,13 @@ router = APIRouter()
 class generateDeepQueryReportRequest(BaseModel):
     deepquery_metadata: Dict[str, Any]
     color_palette: str = "red"
+    language: str = Field(
+        default="English",
+        min_length=1,
+        max_length=30,
+        pattern=r"^[a-zA-Z\u00C0-\u024F\s-]+$",
+        description="The language in which the report should be generated."
+    )
     max_reporting_loops: int = int(os.getenv("DEEPQUERY_MAX_REPORTING_LOOPS", "25"))
     include_failed_tool_calls_appendix: bool = False
     thinking_llm_provider: str = os.getenv("THINKING_LLM_PROVIDER")
@@ -49,6 +56,7 @@ class generateDeepQueryReportRequest(BaseModel):
 class generateDeepQueryReportResponse(BaseModel):
     html_report: Optional[str] = None
     total_execution_time: float
+    translated_title: Optional[str] = None
 
 @router.post(
     "/generateDeepQueryReport",
@@ -112,6 +120,7 @@ async def generate_deep_query_report_post(
         deepquery_metadata=deepquery_metadata,
         executing_llm=executing_llm,
         color_palette=endpoint_request.color_palette,
+        language=endpoint_request.language,
         max_reporting_loops=endpoint_request.max_reporting_loops,
         include_failed_tool_calls_appendix=endpoint_request.include_failed_tool_calls_appendix,
         auth=auth,
@@ -125,6 +134,7 @@ async def generate_deep_query_report_post(
             {
                 "html_report": result.get("html_report"),
                 "total_execution_time": round(total_time, 2),
+                "translated_title": deepquery_metadata.get("analysis_title")
             }
         ),
         media_type="application/json",

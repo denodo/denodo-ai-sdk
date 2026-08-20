@@ -21,7 +21,6 @@ const SourceRow = ({
   currentUsername,
   editingSource,
   editingDescription,
-  onToggleActive,
   onDelete,
   isDeleting,
   onDownload,
@@ -49,19 +48,6 @@ const SourceRow = ({
 
   return (
     <tr style={{ verticalAlign: 'middle' }}>
-      <td className="text-center">
-        <Form.Check
-          type="switch"
-          checked={source.active}
-          onChange={() => onToggleActive(source.source_name, source.active)}
-          disabled={!hasDescription || !canSubscribe}
-          title={
-            !canSubscribe
-              ? 'Private — only the owner can activate'
-              : (hasDescription ? '' : 'Add a description to enable')
-          }
-        />
-      </td>
       <td style={{ maxWidth: '260px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
         <strong>{source.source_name}</strong>
         {source.document_count ? (
@@ -77,8 +63,13 @@ const SourceRow = ({
               <Badge bg="dark"><i className="bi bi-lock-fill me-1" />Private</Badge>
             </OverlayTrigger>
           ) : (
-            <OverlayTrigger placement="top" overlay={<Tooltip>Anyone on this chatbot can use</Tooltip>}>
+            <OverlayTrigger placement="top" overlay={<Tooltip>Any user in this chatbot can have access to this knowledge base</Tooltip>}>
               <Badge bg="success"><i className="bi bi-globe2 me-1" />Public</Badge>
+            </OverlayTrigger>
+          )}
+          {source.agent_managed && (
+            <OverlayTrigger placement="top" overlay={<Tooltip>Declared in the agent's configuration — always active for every user of this agent</Tooltip>}>
+              <Badge bg="primary"><i className="bi bi-robot me-1" />Agent</Badge>
             </OverlayTrigger>
           )}
           {!source.path_valid && (
@@ -222,7 +213,6 @@ SourceRow.propTypes = {
   currentUsername: PropTypes.string,
   editingSource: PropTypes.string,
   editingDescription: PropTypes.string.isRequired,
-  onToggleActive: PropTypes.func.isRequired,
   onDelete: PropTypes.func.isRequired,
   isDeleting: PropTypes.bool,
   onDownload: PropTypes.func.isRequired,

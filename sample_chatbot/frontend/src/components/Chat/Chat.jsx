@@ -46,7 +46,7 @@ const Chat = ({
     setToastConfig((prev) => ({ ...prev, show: false }));
   };
 
-  const handleReportGeneration = async (result, colorPalette = "red") => {
+  const handleReportGeneration = async (result, colorPalette = "red", language = "English") => {
     // Support for deep_query_metadata from toolCalls or top-level
     let metadata = result.deepquery_metadata;
     if (!metadata && result.toolCalls) {
@@ -59,31 +59,37 @@ const Chat = ({
       return;
     }
 
-    if (reportGenerationStatus[result.uuid]) {
-      console.log(
-        "Report generation is already in progress for this result. Ignoring repeated request."
-      );
+    // Allow parallel generations in different languages, but block duplicate
+    // requests for the same result in the same language while one is pending
+    const generationKey = `${result.uuid}:${language.trim().toLowerCase()}`;
+    if (reportGenerationStatus[generationKey]) {
+      setToastConfig({
+        show: true,
+        message: `A ${language} report for this DeepQuery analysis is already being generated.`,
+        variant: "info",
+        title: "Already in progress",
+      });
       return;
     }
 
     setReportGenerationStatus((prevStatus) => ({
       ...prevStatus,
-      [result.uuid]: true,
+      [generationKey]: true,
     }));
 
     setToastConfig({
       show: true,
-      message: "Generating report... please wait.",
+      message: `Generating DeepQuery report (${language})... please wait.`,
       variant: "info",
       title: "Processing",
     });
 
     try {
-      await generateReport(metadata, result.question, colorPalette);
+      await generateReport(metadata, result.question, colorPalette, language);
 
       setToastConfig({
         show: true,
-        message: "Report generation finished successfully.",
+        message: `Report generation (${language}) finished successfully.`,
         variant: "success",
         title: "Completed",
       });
@@ -92,18 +98,16 @@ const Chat = ({
 
       setToastConfig({
         show: true,
-        message: "Error generating report.",
+        message: `Error generating report (${language}).`,
         variant: "danger",
         title: "Error",
       });
     } finally {
-      setTimeout(() => {
-        setReportGenerationStatus((prevStatus) => {
-          const newStatus = { ...prevStatus };
-          delete newStatus[result.uuid];
-          return newStatus;
-        });
-      }, 3000);
+      setReportGenerationStatus((prevStatus) => {
+        const newStatus = { ...prevStatus };
+        delete newStatus[generationKey];
+        return newStatus;
+      });
     }
   };
 
@@ -128,7 +132,6 @@ const Chat = ({
             setCurrentQuestion={setCurrentQuestion}
             setQuestionType={setQuestionType}
             onGenerateReport={handleReportGeneration}
-            isGeneratingReport={!!reportGenerationStatus[result.uuid]}
             resultsContainerRef={resultsContainerRef}
           />
         </div>

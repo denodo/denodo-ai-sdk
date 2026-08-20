@@ -10,6 +10,7 @@ import VectorDBSyncModal from './VectorDBSyncModal';
 import SettingsModal from './SettingsModal';
 import ProfileModal from './ProfileModal';
 import CSVManagerModal from './CSVManagerModal/CSVManagerModal';
+import SkillsManagerModal from './SkillsManagerModal/SkillsManagerModal';
 import { useReport } from '../../contexts/ReportContext';
 import { useConfig } from '../../contexts/ConfigContext';
 import api from "../../api/client";
@@ -33,12 +34,14 @@ const Header = ({
   toggleSidebar,
   isSidebarOpen,
   selectedChatbot,
+  chatbots = [],
   globalEnabled = false,
   onSettingsApplied,
   isSwitchingAgent
 }) => {
   const [showVectorDBSync, setShowVectorDBSync] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const [showSkillsManager, setShowSkillsManager] = useState(false);
+  const [settingsAgent, setSettingsAgent] = useState(null);
   const [showProfile, setShowProfile] = useState(false);
   const [showToolsDropdown, setShowToolsDropdown] = useState(false);
   const [showAdminDropdown, setShowAdminDropdown] = useState(false);
@@ -52,23 +55,30 @@ const Header = ({
   const userTimerRef = useRef(null);
   const HOVER_DELAY_MS = 100;
 
-  const isWelcomeScreen = !selectedChatbot;
-  const isGlobalChat = selectedChatbot && selectedChatbot.isGlobal;
-  const isSpecializedChat = selectedChatbot && !selectedChatbot.isGlobal;
+  // The header is constant: Tools and Administration are always available,
+  // and the Tools entries never change per agent. DeepQuery Reports is
+  // session-wide, the KB and Skills managers are global tools (per-agent
+  // activation lives in each agent's settings). The only remaining gate is a
+  // hard capability: the Vector DB manager needs sync permissions/credentials.
+  const showDeepQuery = true;
+  const showKnowledgeBase = true;
+  const showSkills = true;
 
-  const canShowAdvancedOptions = (globalEnabled && (isWelcomeScreen || isGlobalChat)) || isSpecializedChat;
+  const showVectorDBManager = config.allow_sync && (config.has_ai_sdk_credentials || userSyncPermissions);
 
-  const showDeepQuery = canShowAdvancedOptions && config.enable_deep_query;
-  const showKnowledgeBase = canShowAdvancedOptions && config.unstructured_mode; 
+  const showToolsMenu = true;
+  const showAdminMenu = true;
 
-  const showVectorDBManager = config.allow_sync && (globalEnabled && (isWelcomeScreen || isGlobalChat)) && (config.has_ai_sdk_credentials || userSyncPermissions);
+  // One settings entry per agent the user can access.
+  const settingsAgents = [
+    ...(globalEnabled ? [{ id: 'global', isGlobal: true, name: 'General Chat' }] : []),
+    ...chatbots.filter((bot) => !bot.isGlobal),
+  ];
 
-  const hasToolsItems = showDeepQuery || showKnowledgeBase || showVectorDBManager;
-  const showToolsMenu = hasToolsItems;
-
-  const canEditLLM = canShowAdvancedOptions && config.user_edit_llm;
-  const canEditInstructions = canShowAdvancedOptions && config.can_edit_instructions;
-  const showAdminMenu = !isWelcomeScreen && (canEditLLM || canEditInstructions);
+  const currentAgentKey = selectedChatbot
+    ? (selectedChatbot.isGlobal ? 'global' : selectedChatbot.id)
+    : 'global';
+  const agentKeyOf = (agent) => (agent?.isGlobal ? 'global' : agent?.id);
 
   const clearTimer = (ref) => {
     if (ref.current) {
@@ -161,9 +171,6 @@ const Header = ({
 
   const badgeProps = getBadgeProps();
 
-  const agentName = selectedChatbot ? (selectedChatbot.isGlobal ? 'General Chat' : selectedChatbot.name) : 'General Chat';
-  const settingsTitle = agentName.length > 20 ? 'Custom Agent Settings' : `${agentName} Settings`;
-
   return (
     <>
       <div 
@@ -229,7 +236,7 @@ const Header = ({
                         onMouseLeave={() => handleLeaveWhich('tools')}
                         onToggle={(isOpen) => handleToggleWhich('tools', isOpen)}
                         disabled={isSwitchingAgent}
-                        style={{ opacity: isSwitchingAgent ? 0.5 : 1, pointerEvents: isSwitchingAgent ? 'none' : 'auto' }} // <--- ESTILO VISUAL
+                        style={{ opacity: isSwitchingAgent ? 0.5 : 1, pointerEvents: isSwitchingAgent ? 'none' : 'auto' }}
                       >
                         {showDeepQuery && (
                           <NavDropdown.Item onClick={() => setIsModalOpen(true)}>
@@ -244,6 +251,10 @@ const Header = ({
 
                         {showKnowledgeBase && (
                           <NavDropdown.Item onClick={onOpenCSVManager}>Knowledge Base Manager</NavDropdown.Item>
+                        )}
+
+                        {showSkills && (
+                          <NavDropdown.Item onClick={() => setShowSkillsManager(true)}>Skills Manager</NavDropdown.Item>
                         )}
                         
                         {showVectorDBManager && (
@@ -263,11 +274,13 @@ const Header = ({
                       onMouseLeave={() => handleLeaveWhich('admin')}
                       onToggle={(isOpen) => handleToggleWhich('admin', isOpen)}
                       disabled={isSwitchingAgent}
-                      style={{ opacity: isSwitchingAgent ? 0.5 : 1, pointerEvents: isSwitchingAgent ? 'none' : 'auto' }} // <--- ESTILO VISUAL
+                      style={{ opacity: isSwitchingAgent ? 0.5 : 1, pointerEvents: isSwitchingAgent ? 'none' : 'auto' }}
                     >
-                      <NavDropdown.Item onClick={() => setShowSettings(true)}>
-                        {settingsTitle}
-                      </NavDropdown.Item>
+                      {settingsAgents.map((agent) => (
+                        <NavDropdown.Item key={agentKeyOf(agent)} onClick={() => setSettingsAgent(agent)}>
+                          {agent.name.length > 20 ? `${agent.name} Settings`.slice(0, 40) : `${agent.name} Settings`}
+                        </NavDropdown.Item>
+                      ))}
                     </NavDropdown>
                   )}
 
@@ -281,7 +294,7 @@ const Header = ({
                       onMouseLeave={() => handleLeaveWhich('user')}
                       onToggle={(isOpen) => handleToggleWhich('user', isOpen)}
                       disabled={isSwitchingAgent}
-                      style={{ opacity: isSwitchingAgent ? 0.5 : 1, pointerEvents: isSwitchingAgent ? 'none' : 'auto' }} // <--- ESTILO VISUAL
+                      style={{ opacity: isSwitchingAgent ? 0.5 : 1, pointerEvents: isSwitchingAgent ? 'none' : 'auto' }}
                     >
                       <NavDropdown.Item onClick={() => setShowProfile(true)}>Profile</NavDropdown.Item>
                       <NavDropdown.Divider />
@@ -301,12 +314,12 @@ const Header = ({
         onResourcesUpdate={onResourcesUpdate}
       />
       <SettingsModal
-        show={showSettings}
-        handleClose={() => setShowSettings(false)}
-        handleClearResults={handleClearResults}
-        selectedChatbot={selectedChatbot}
+        show={settingsAgent !== null}
+        handleClose={() => setSettingsAgent(null)}
+        selectedChatbot={settingsAgent}
         onSettingsApplied={onSettingsApplied}
-        title={settingsTitle} 
+        title={settingsAgent ? `${settingsAgent.name} Settings` : ''}
+        isCurrentAgent={settingsAgent ? agentKeyOf(settingsAgent) === currentAgentKey : true}
       />
       <ProfileModal
         show={showProfile}
@@ -321,6 +334,13 @@ const Header = ({
           selectedChatbot={selectedChatbot}
         />
       )}
+      <SkillsManagerModal
+        show={showSkillsManager}
+        handleClose={() => setShowSkillsManager(false)}
+        hasActiveConversation={hasActiveConversation}
+        selectedChatbot={selectedChatbot}
+      />
+
     </>
   );
 };
@@ -329,7 +349,6 @@ Header.propTypes = {
   isAuthenticated: PropTypes.bool.isRequired,
   setIsAuthenticated: PropTypes.func.isRequired,
   handleClearResults: PropTypes.func.isRequired,
-  showClearButton: PropTypes.bool,
   onOpenCSVManager: PropTypes.func,
   showCSVManager: PropTypes.bool,
   setShowCSVManager: PropTypes.func,
@@ -342,6 +361,7 @@ Header.propTypes = {
   toggleSidebar: PropTypes.func,
   isSidebarOpen: PropTypes.bool,
   selectedChatbot: PropTypes.object,
+  chatbots: PropTypes.array,
   globalEnabled: PropTypes.bool,
   onSettingsApplied: PropTypes.func,
   isSwitchingAgent: PropTypes.bool

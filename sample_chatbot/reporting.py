@@ -81,7 +81,6 @@ def get_report_filename(report_max_size_mb, report_max_files, report_folder="rep
 
     return latest_file
 
-
 def write_to_report(
     report_lock,
     report_max_size_mb,

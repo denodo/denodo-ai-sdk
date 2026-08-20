@@ -10,6 +10,15 @@ html, body, #root {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Bootstrap anchors the dismiss button of alerts to the top-right corner with
+   fixed padding, which reads as off-center in compact (py-2) alerts. Extra
+   specificity needed: this sheet is bundled before Bootstrap's. */
+.alert.alert-dismissible .btn-close {
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 0.5rem 1rem;
+}
+
 .app-layout-container {
   display: flex;
   flex-direction: row;
@@ -162,4 +171,21 @@ html, body, #root {
   to {
     background-position: 200% center;
   }
+}
+
+/* Info Icon */
+.info-icon-wrapper {
+  position: absolute;
+  right: 15px; 
+}
+
+.info-icon {
+  font-size: 1rem;
+  color: #006699;
+  cursor: help;
+  transition: color 0.2s ease;
+}
+
+.info-icon:hover {
+  color: #143142;
 }

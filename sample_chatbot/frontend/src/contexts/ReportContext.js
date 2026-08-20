@@ -18,7 +18,7 @@ export const ReportProvider = ({ children }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Generate a report from DeepQuery metadata
-  const generateReport = useCallback(async (deepqueryMetadata, question, colorPalette = 'red') => {
+  const generateReport = useCallback(async (deepqueryMetadata, question, colorPalette = 'red', language = 'English') => {
     const reportId = `report_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     // Extract report title from metadata, fallback to question if not available
@@ -32,6 +32,7 @@ export const ReportProvider = ({ children }) => {
       status: REPORT_STATUS.PENDING,
       createdAt: new Date(),
       colorPalette: colorPalette,
+      language: language,
       metadata: deepqueryMetadata,
       downloadUrl: null,
       error: null
@@ -50,17 +51,23 @@ export const ReportProvider = ({ children }) => {
       // Call the generate report endpoint
       const response = await api.post("generate_report", {
         deepquery_metadata: deepqueryMetadata,
-        color_palette: colorPalette
+        color_palette: colorPalette,
+        language: language
       });
 
       const htmlReport = response.data.html_report;
+      const translatedTitle = response.data.translated_title;
 
       if (htmlReport) {
         const blob = new Blob([htmlReport], { type: 'text/html' });
         const downloadUrl = URL.createObjectURL(blob);
 
-        const safeTitle = reportTitle
-          ? reportTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase()
+        const finalTitle = translatedTitle || reportTitle;
+        const safeTitle = finalTitle
+          ? finalTitle
+              .trim()
+              .replace(/[/\\?%*:|"<>]/g, '')
+              .replace(/\s+/g, '_')
           : reportId;
         const filename = `${safeTitle}_report.html`;
 
@@ -68,6 +75,7 @@ export const ReportProvider = ({ children }) => {
           report.id === reportId 
             ? { 
                 ...report, 
+                reportTitle: finalTitle,
                 status: REPORT_STATUS.COMPLETED,
                 completedAt: new Date(),
                 downloadUrl: downloadUrl,
@@ -152,4 +160,3 @@ export const useReport = () => {
 };
 
 export default ReportContext;
-

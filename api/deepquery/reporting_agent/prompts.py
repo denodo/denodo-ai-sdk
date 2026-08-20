@@ -4,11 +4,13 @@ You are a professional data visualization (Matplotlib) specialist.
 </purpose>
 
 <objectives>
-- You will be given a trace of an analysis made by the analysis agent and the original question.
-- You must complete the data analysis with interesting visualizations (graphs/charts) that will support the final report.
-- You can generate visualizations using the database_agent tool.
+- You will be given a trace of an analysis made by the analysis agent and the original question. This analysis has been completed in English.
+- You must complete the data analysis with interesting visualizations (graphs/charts) that will support the final report. The final report will be in {language}.
+- You can generate visualizations using the database_agent tool. All action_descriptions to the database_agent must be written in English, and must explicitly mention to generate the graph targeted for speakers of {language}.
 - Once you have asked for the visualizations, wait for them to generate successfully.
-- You must generate a minimum of 5 visualizations that the analyst can choose from to complete this final report.
+- You must generate a minimum of 5 visualizations that the analyst can choose from to complete this final report, which will be generated in {language}.
+- All justifications, chart titles, axis labels, and outputs in the visualizations must be generated in {language}.
+- When generating visualizations/charts for RTL languages (like Arabic or Hebrew), instruct the database_agent to generate the graph accordingly.
 </objectives>
 
 <generating_visualizations>
@@ -112,6 +114,7 @@ Remember the guidelines:
 - Be specific about the colors and the arrangement of the graph to keep it consistent throughout all visualizations.
 - Be specific and consistent about using spines and gridlines in all graphs.
 - Make sure to ask for the visualization to include a readable cohort name, for example, if the cohort is <cohort>approved_loans</cohort>, make sure to ask for the visualization to include the cohort name as 'Approved Loans'.
+- All output in the visualizations (including chart titles, axis labels) and action_description instructions to the database_agent must be strictly in {language}, as the final report will be in {language}.
 </guidelines>
 
 Now, analyze the trace and the original question. Think about what visualizations would be key to complement the analysis.
@@ -119,13 +122,14 @@ Then, generate the visualizations using the database_agent tool."""
 
 SEQUENTIAL_REPORT_PROMPT = """<purpose>
 Given the trace of an analysis made by the analysis agent and the original question
-you will generate a report, section by section.
+you will generate a report, section by section. The analysis trace has been completed in English and the report you will now generate
+will be in {language}.
 
 This report will be read by a non-technical audience, without access to the original analysis, visualizations or tool calls.
 The report must clearly explain the conclusions from the analysis and how these conclusions were reached (what steps were taken) in the analysis trace.
 The scope of this report is limited to explaining the analysis performed. This means that if the analysis was short, or not able to reach a conclusion,
 the report should limit itself to describe what was carried out and what was the end result of the analysis, nothing more.
-Your job is not to generate an analysis, it's to explain the analysis performed.
+Your job is not to generate an analysis, it's to explain the analysis performed in natural, plain sounding {language}.
 
 A complete report will have these sections:
 
@@ -156,10 +160,11 @@ Use the information provided appropriately for the section you are writing.
 {current_report}
 </current_report>
 
-Now, generate the next section of the report: <section>{next_section}</section>
-Return ONLY the {next_section} section wrapped in <{section_tag}></{section_tag}> tags.
+Now, generate the next section of the report in {language}: <section>{next_section}</section>
+Return ONLY the {next_section} contents in {language} section wrapped in <{section_tag}></{section_tag}> tags.
 
 <guidelines>
+- The entire "{next_section}" section, including headings, paragraphs, bullet points, and table contents, must be written in natural, plain sounding {language}.
 - Use markdown styling to format the report: bold, italic, lists, headers, tables, etc
 - When writing markdown tables, make sure to include a new line before and after the table, to ensure correct parsing, like this:
 
@@ -275,8 +280,8 @@ Text here...
 </detailed_analysis>
 </references>
 
-Generate ONLY the {next_section} section and nothing else. You must include the heading of the section.
-For example, if the section you have to write is "Key Findings", start with "## Key Findings".
+Generate ONLY the {next_section} section in {language} and nothing else. You must include the heading of the section.
+For example, if the section you have to write is "Key Findings" in English, start with "## Key Findings".
 Remember, that you must not include section summary or recommendations, those are for the Conclusion and Recommendations sections.
 If writing the Introduction section, include the name of the report too, for example:
 
@@ -289,4 +294,15 @@ If writing the Introduction section, include the name of the report too, for exa
 </introduction>
 
 Now, respond with:
-- The heading and contents of the {next_section} section in between <{section_tag}></{section_tag}> tags, following the criteria and the guidelines for this section."""
+- The heading and contents of the {next_section} section in {language} in between <{section_tag}></{section_tag}> tags, following the criteria and the guidelines for this section."""
+
+TRANSLATE_REPORT_HEADERS_PROMPT = """
+You are a professional, natural sounding English to {language} translator.
+You don't translate literally, you translate naturally, in a way that sounds natural, fluent and professional in the context of a data analysis report and not a robotic 1:1 translation.
+Your job is to translate the values of the following JSON object to {language}.
+
+SPECIAL INSTRUCTIONS:
+1. For the key "text_direction", DO NOT translate the value. Instead, output strictly "rtl" if {language} reads from right to left (e.g., Arabic, Hebrew, Persian), or "ltr" if {language} reads from left to right.
+2. Ensure technical terms in the context of a data analysis report sound natural and professional in {language}.
+3. Return ONLY a valid JSON object with the exact same keys. Do NOT wrap the response in markdown blocks (e.g., no ```json) and do not add any conversational text.
+"""

@@ -28,13 +28,11 @@ from utils.version import AI_SDK_VERSION
 
 router = APIRouter()
 
-
 class LLMConfigResponse(BaseModel):
     provider: str = Field(description="The LLM provider name (lowercase).")
     model: str = Field(description="The LLM model identifier.")
     temperature: float = Field(description="The temperature setting for the LLM.")
     max_tokens: int = Field(description="The maximum output tokens for the LLM.")
-
 
 class AISDKInfoResponse(BaseModel):
     base_llm: LLMConfigResponse = Field(description="Configuration for the base LLM used for general tasks.")
@@ -58,7 +56,6 @@ class AISDKInfoResponse(BaseModel):
         description="Current release version of the AI SDK"
     )
     can_use_deepquery: bool = Field(description="Whether the authenticated user is allowed to use DeepQuery features.")
-
 
 @router.get(
     '/getAISDKInfo',

@@ -45,7 +45,12 @@
 .user-avatar { width: 16px; height: 16px; border-radius: 50%; border: 1px solid #adb5bd; background: #fff; }
 
 /* Brand ask text */
-.brand-ask { text-transform: uppercase; font-weight: 700; font-size: 1rem; letter-spacing: 0.02em; }
+.brand-ask { 
+  text-transform: uppercase; 
+  font-weight: 500;
+  font-size: 1.15rem;
+  letter-spacing: 0.02em; 
+}
 
 .brand-spacing {
   padding-bottom: 17px !important;

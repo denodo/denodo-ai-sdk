@@ -4,6 +4,13 @@ import api from '../api/client';
 // Create the context
 const ConfigContext = createContext();
 
+// Returns the input method saved by the user in the User Profile modal, if any
+export const getSavedInputMethod = (username) => {
+  const user = username || localStorage.getItem('current_user');
+  const saved = user && localStorage.getItem(`${user}_input_method`);
+  return ['enter', 'ctrl_enter'].includes(saved) ? saved : null;
+};
+
 // Create a provider component
 export const ConfigProvider = ({ children }) => {
   const [config, setConfig] = useState({
@@ -19,7 +26,10 @@ export const ConfigProvider = ({ children }) => {
     const fetchConfig = async () => {
       try {
         const response = await api.get("config");
-        setConfig(response.data);
+        const savedInputMethod = getSavedInputMethod();
+        setConfig(savedInputMethod
+          ? { ...response.data, input_method: savedInputMethod }
+          : response.data);
       } catch (error) {
         console.error('Error fetching config:', error);
         // Keep empty config if fetch fails

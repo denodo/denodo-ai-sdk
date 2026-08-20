@@ -31,6 +31,11 @@ class UniformLLM:
             'output_tokens': 0,
             'total_tokens': 0
         }
+        self.effort_suffix_profiles = {
+            "openai": ["none", "minimal", "low", "medium", "high", "xhigh"],
+            "google_gemini": ["low", "medium", "high"],
+            "google_anthropic": ["low", "medium", "high", "xhigh", "max"],
+        }
 
         if self.provider_name.lower() == "openai":
             self.setup_openai()
@@ -81,6 +86,44 @@ class UniformLLM:
         )
         return use_responses_api
 
+    def _parse_effort_suffix(self, profile_name):
+        valid_efforts = self.effort_suffix_profiles[profile_name]
+        model = self.model_name
+        effort = None
+        suffixes = [f"-{level}" for level in valid_efforts]
+
+        if any(model.endswith(suffix) for suffix in suffixes):
+            base_model, suffix = model.rsplit("-", 1)
+            if suffix in valid_efforts:
+                effort = suffix
+                model = base_model
+                logging.info(
+                    f"Provider '{self.provider_name}': reasoning effort '{effort}' via model ID suffix; "
+                    f"routing model ID: {model}"
+                )
+
+        return model, effort
+
+    def _parse_openrouter_thinking_suffix(self):
+        model = self.model_name
+        reasoning_enabled = None
+
+        if model.endswith("-no-thinking"):
+            model = model[: -len("-no-thinking")]
+            reasoning_enabled = False
+        elif model.endswith("-thinking"):
+            model = model[: -len("-thinking")]
+            reasoning_enabled = True
+
+        if reasoning_enabled is not None:
+            state = "enabled" if reasoning_enabled else "disabled"
+            logging.info(
+                f"Provider '{self.provider_name}': reasoning {state} via model ID suffix; "
+                f"routing model ID: {model}"
+            )
+
+        return model, reasoning_enabled
+
     def setup_openrouter(self):
         from langchain_openai import ChatOpenAI
 
@@ -91,18 +134,7 @@ class UniformLLM:
         if api_key is None:
             raise ValueError("OPENROUTER_API_KEY environment variable not set.")
 
-        model = self.model_name
-        reasoning_enabled = None
-
-        # Check -no-thinking before -thinking so suffixes are not confused.
-        if model.endswith("-no-thinking"):
-            model = model[: -len("-no-thinking")]
-            reasoning_enabled = False
-            logging.info(f"OpenRouter reasoning disabled via model id suffix; routing model ID: {model}")
-        elif model.endswith("-thinking"):
-            model = model[: -len("-thinking")]
-            reasoning_enabled = True
-            logging.info(f"OpenRouter reasoning enabled via model id suffix; routing model ID: {model}")
+        model, reasoning_enabled = self._parse_openrouter_thinking_suffix()
 
         kwargs = {
             "model": model,
@@ -218,42 +250,70 @@ class UniformLLM:
         )
 
     def setup_google(self):
-        from langchain_google_vertexai import ChatVertexAI
-        from vertexai.generative_models import HarmCategory, HarmBlockThreshold
+        from langchain_google_genai import ChatGoogleGenerativeAI
 
-        google_credentials_file = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-        if google_credentials_file is None:
-            logging.warning("GOOGLE_APPLICATION_CREDENTIALS environment variable not set. Attempting to use Application Default Credentials (ADC).")
+        # Legacy "-enablethinking" suffix from older Google configs. Thinking
+        # is no longer forced on through this suffix (Gemini reasoning is now
+        # driven by the effort suffixes below); strip it so the literal string
+        # is not sent to Vertex AI as a nonexistent model ID.
+        if self.model_name.endswith("-enablethinking"):
+            self.model_name = self.model_name[: -len("-enablethinking")]
+            logging.warning(
+                f"Provider '{self.provider_name}': the '-enablethinking' model suffix is deprecated and was "
+                f"ignored; using model '{self.model_name}'. Use a reasoning effort suffix instead."
+            )
 
-        GOOGLE_THINKING_TOKENS = os.getenv("GOOGLE_THINKING_TOKENS", "2000")
+        google_anthropic_deployment = os.getenv("GOOGLE_ANTHROPIC_DEPLOYMENT", "0") == "1"
 
-        model = self.model_name
-        enable_thinking = False
+        if os.getenv('GOOGLE_APPLICATION_CREDENTIALS') is None:
+            logging.warning(
+                "GOOGLE_APPLICATION_CREDENTIALS environment variable not set. "
+                "Attempting to use Application Default Credentials (ADC)."
+            )
 
-        if model.endswith("-enablethinking"):
-            model = model.replace("-enablethinking", "")
-            enable_thinking = True
-            logging.info(f"Attempting to activate thinking mode on model ID: {model} on provider: {self.provider_name}")
+        google_region = os.getenv("GOOGLE_REGION")
 
-        safety_settings={
-            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_ONLY_HIGH
-        }
+        if google_anthropic_deployment:
+            from langchain_google_vertexai.model_garden import ChatAnthropicVertex
+
+            model, effort = self._parse_effort_suffix("google_anthropic")
+
+            params = {
+                "model_name": model,
+                "max_output_tokens": self.max_tokens,
+            }
+            if google_region:
+                params["location"] = google_region
+            if effort:
+                params["model_kwargs"] = {
+                    "thinking": {"type": "adaptive"},
+                    "output_config": {"effort": effort},
+                }
+
+            self.llm = ChatAnthropicVertex(**params)
+            return
+
+        model, effort = self._parse_effort_suffix("google_gemini")
+
+        if effort and not (model.startswith("gemini-3") or "gemini-3." in model):
+            logging.warning(
+                f"Provider '{self.provider_name}': model '{model}' does not support reasoning effort suffixes. "
+                f"Ignoring '-{effort}' and using model defaults."
+            )
+            effort = None
 
         params = {
-            "model_name": model,
+            "model": model,
+            "vertexai": True,
             "temperature": self.temperature,
             "max_output_tokens": self.max_tokens,
-            "safety_settings": safety_settings,
-            "include_thoughts": enable_thinking,
         }
-        if enable_thinking:
-            params["thinking_budget"] = int(GOOGLE_THINKING_TOKENS)
-        else:
-            params["thinking_budget"] = 0
-        self.llm = ChatVertexAI(**params)
+        if google_region:
+            params["location"] = google_region
+        if effort:
+            params["thinking_level"] = effort
+
+        self.llm = ChatGoogleGenerativeAI(**params)
 
     def setup_openai(self):
         from langchain_openai import ChatOpenAI
@@ -276,17 +336,12 @@ class UniformLLM:
             "api_key": api_key,
         }
 
-        OPENAI_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"]
+        model, effort = self._parse_effort_suffix("openai")
 
-        suffixes = [f"-{effort}" for effort in OPENAI_REASONING_EFFORTS]
-
-        # Allow to set the reasoning effort via model_id, like o1-high, o1-medium, gpt-5-high
-        if any(self.model_name.endswith(suffix) for suffix in suffixes):
+        if effort:
             kwargs["max_completion_tokens"] = self.max_tokens
-            reasoning_strengh = self.model_name.split('-')
-            if len(reasoning_strengh) > 1 and reasoning_strengh[-1] in OPENAI_REASONING_EFFORTS:
-                kwargs["reasoning_effort"] = reasoning_strengh[-1]
-                kwargs["model"] = self.model_name.replace(f'-{reasoning_strengh[-1]}', '')
+            kwargs["reasoning_effort"] = effort
+            kwargs["model"] = model
         else:
             kwargs["max_tokens"] = self.max_tokens
             kwargs["temperature"] = self.temperature
@@ -338,10 +393,18 @@ class UniformLLM:
         kwargs = {
             "azure_endpoint": api_endpoint,
             "openai_api_version": api_version,
-            "azure_deployment": self.model_name,
-            "temperature": self.temperature,
             "openai_api_key": api_key,
         }
+
+        model, effort = self._parse_effort_suffix("openai")
+
+        if effort:
+            kwargs["azure_deployment"] = model
+            kwargs["max_completion_tokens"] = self.max_tokens
+            kwargs["reasoning_effort"] = effort
+        else:
+            kwargs["azure_deployment"] = self.model_name
+            kwargs["temperature"] = self.temperature
 
         if api_proxy is not None or custom_headers:
             client_kwargs = {}
@@ -385,10 +448,18 @@ class UniformLLM:
         kwargs = {
             "azure_endpoint": api_endpoint,
             "openai_api_version": api_version,
-            "azure_deployment": self.model_name,
-            "temperature": self.temperature,
             "openai_api_key": api_key,
         }
+
+        model, effort = self._parse_effort_suffix("openai")
+
+        if effort:
+            kwargs["azure_deployment"] = model
+            kwargs["max_completion_tokens"] = self.max_tokens
+            kwargs["reasoning_effort"] = effort
+        else:
+            kwargs["azure_deployment"] = self.model_name
+            kwargs["temperature"] = self.temperature
 
         if api_proxy is not None or custom_headers:
             client_kwargs = {}
@@ -544,4 +615,21 @@ class UniformLLM:
 
     @staticmethod
     def get_providers():
-        return UniformLLM.VALID_PROVIDERS
+        providers = list(UniformLLM.VALID_PROVIDERS)
+
+        # Dynamically detect custom providers configured via environment variables.
+        # There can be 2 types of custom providers:
+        # 1. OpenAI-compatible (detected via _BASE_URL)
+        # 2. Azure-compatible (detected via _ENDPOINT)
+        for key in os.environ.keys():
+            if key.endswith("_BASE_URL"):
+                provider = key.replace("_BASE_URL", "").lower()
+                # Exclude ollama_api as it is the env suffix for the standard 'ollama' provider
+                if provider and provider not in providers and provider != "ollama_api":
+                    providers.append(provider)
+            elif key.endswith("_ENDPOINT"):
+                provider = key.replace("_ENDPOINT", "").lower()
+                if provider.startswith("azure_") and provider not in providers:
+                    providers.append(provider)
+
+        return providers

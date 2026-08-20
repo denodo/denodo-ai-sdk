@@ -7,8 +7,11 @@ from .helpers import (
     attach_sample_data,
     build_table_name,
     calculate_tokens,
+    flatten_text,
+    format_tag_names,
     normalize_associations,
     normalize_schema_columns,
+    normalize_tag_details,
     remove_none_values,
     split_table_name,
 )
@@ -27,16 +30,7 @@ class SchemaColumn:
         return logical_name
 
     def _normalized_description(self):
-        description = self._column_data.get('description')
-        if description:
-            description = description.replace("\n", " ").strip()
-        else:
-            description = None
-
-        if not description:
-            return None
-
-        return description
+        return flatten_text(self._column_data.get('description')) or None
 
     def _catalog_type_display(self, force_type=None):
         """Denodo type display.
@@ -76,7 +70,7 @@ class SchemaColumn:
             value = raw[key]
             if value is None or value == '':
                 continue
-            value_text = str(value).replace('\n', ' ').strip()
+            value_text = flatten_text(value)
             if not value_text:
                 continue
             brackets.append(f"[{name}: {value_text}]")
@@ -116,6 +110,15 @@ class SchemaColumn:
 
         return " ".join(parts)
 
+    def get_tag_details(self):
+        return normalize_tag_details(self._column_data.get('tags'))
+
+    def _vql_tag_brace(self):
+        tag_names = format_tag_names(self.get_tag_details())
+        if not tag_names:
+            return None
+        return f"{{tag(s): {tag_names}}}"
+
     def render_vql_line(self, sample_values=None, examples_per_table=3):
         name = self._column_data.get('columnName', 'unnamed')
         column_type = self._catalog_type_display()
@@ -140,6 +143,9 @@ class SchemaColumn:
             flags.append("OBLIGATORY")
 
         parts = [f"- {name} ({column_type})"]
+        tag_brace = self._vql_tag_brace()
+        if tag_brace:
+            parts.append(tag_brace)
         if flags:
             parts.extend([f"[{flag}]" for flag in flags])
         parts.extend(self._vql_extra_property_brackets())
@@ -290,6 +296,19 @@ class SchemaTable:
 
         return "\n".join(lines) + "\n\n"
 
+    def get_view_tag_details(self):
+        return normalize_tag_details(self._view_data.get('tagDetails'))
+
+    def collect_tag_details(self):
+        """Collect view-level and column-level tags as {name: description}, first seen wins."""
+        collected_tags = {}
+        for tag in self.get_view_tag_details():
+            collected_tags.setdefault(tag['name'], tag['description'])
+        for column in self._view_data.get('schema', []):
+            for tag in normalize_tag_details(column.get('tags')):
+                collected_tags.setdefault(tag['name'], tag['description'])
+        return collected_tags
+
     def render_embedding_text(self):
         # Embedding grammar:
         # Table: <database>.<view>
@@ -330,21 +349,8 @@ class SchemaTable:
         )
 
     def render_vql_text(self, sample_data=None, present_tables=None, examples_per_table=3):
-        # VQL grammar:
-        # # Table: "<database>"."<view>"
-        # ## Type: Metric
-        # ## Description: <description>
-        # ## Columns:
-        # - <column_name> (<type>) [DIMENSION]
-        # - <column_name> (<type>) [METRIC]
-        # - <column_name> (<type>) [PK] [NOT NULL] [OBLIGATORY] [<extra_key>: <extra_val>] ...
-        # - <column_name> (<type>) → <logical_name>
-        # - <column_name> (<type>) → <logical_name>: <description>.
-        # - <column_name> (<type>) → <logical_name>. sample values: a, b, c
-        # - <column_name> (<type>) sample values: a, b, c
-        # ## JOINs:
-        # → <join_clause>. Description: <association_description>
-        # → <join_clause>
+        # Output follows VQL_SCHEMA_GRAMMAR (catalog.py) minus the tag appendix,
+        # which render_vql_schema appends at catalog level.
         present_tables = present_tables or []
         lines = []
         table_name = self.get_name()
@@ -357,6 +363,9 @@ class SchemaTable:
             lines.append("## Type: Metric")
         if table_description:
             lines.append(f"## Description: {table_description}")
+        view_tag_names = format_tag_names(self.get_view_tag_details())
+        if view_tag_names:
+            lines.append(f"## Tag(s): {view_tag_names}")
         lines.append("## Columns:")
 
         table_id = self.get_id()
