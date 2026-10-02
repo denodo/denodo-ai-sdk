@@ -13,7 +13,7 @@ import logging
 import traceback
 import asyncio
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Dict, List
 
 from fastapi.responses import JSONResponse, Response
@@ -28,19 +28,30 @@ from api.utils.sdk_utils import (
     check_metadata_user_permission
 )
 from api.utils.sdk_utils import get_custom_request_headers
+from api.utils import param_descriptions as desc
 
 router = APIRouter()
 
 class getMetadataRequest(BaseModel):
-    vdp_database_names: str = ''
-    vdp_tag_names: str = Field(
-            default = '',
-            description="NOTE: When both databases and tags are specified, views from both sources are included (union), not their intersection. For example, if you have a database 'db1' and a tag with name 'tag1', the views of 'db1' and the views of 'tag1' will be included, minus duplicates."
-        )
-    tags_to_ignore: str = ''
+    vdp_database_names: List[str] = Field(
+        default_factory=list,
+        description=desc.VDP_DATABASE_NAMES_METADATA
+    )
+    vdp_tag_names: List[str] = Field(
+        default_factory=list,
+        description=desc.VDP_TAG_NAMES_METADATA
+    )
+    tags_to_ignore: List[str] = Field(
+        default_factory=list,
+        description=desc.TAGS_TO_IGNORE
+    )
     embeddings_provider: str = os.getenv('EMBEDDINGS_PROVIDER')
     embeddings_model: str = os.getenv('EMBEDDINGS_MODEL')
-    embeddings_token_limit: int = os.getenv('EMBEDDINGS_TOKEN_LIMIT', 0)
+    embeddings_token_limit: int = Field(
+        default=int(os.getenv('EMBEDDINGS_TOKEN_LIMIT', 0)),
+        ge=0,
+        description=desc.EMBEDDINGS_TOKEN_LIMIT
+    )
     vector_store_provider: str = os.getenv('VECTOR_STORE')
     rate_limit_rpm: int = os.getenv('RATE_LIMIT_RPM', 0)
     examples_per_table: int = Query(
@@ -56,16 +67,23 @@ class getMetadataRequest(BaseModel):
     insert: bool = True
     views_per_request: int = Field(
             default = 50,
-            description="Number of views to ask for per request to the Denodo Platform. This is implemented to avoid handling too many views in a single request that might overload the server."
+            description=desc.VIEWS_PER_REQUEST
         )
     incremental: bool = Field(
             default = False,
-            description="If set to True, only views that have changed since the last execution are updated in the vector store based on a saved timestamp."
+            description=desc.INCREMENTAL
         )
     parallel: bool = Field(
             default = True,
-            description="If set to true, vectorization through the embeddings provider and insertion into the vector store will be done in parallel. Denodo Platform requests will remain sequential."
+            description=desc.PARALLEL
         )
+
+    @field_validator('embeddings_token_limit')
+    @classmethod
+    def validate_token_limit(cls, v):
+        if 0 < v < 1000:
+            raise ValueError("Token limit must be either 0 (disabled) or >= 1000")
+        return v
 
 class getMetadataResponse(BaseModel):
     db_schema_json: Dict
@@ -87,7 +105,8 @@ async def getMetadata(
     custom_headers: dict = Depends(get_custom_request_headers)
 ):
     """
-    This endpoint retrieves the metadata from a list of VDP databases (separated by commas) and returns it in JSON and natural language format.
+    This endpoint retrieves metadata from the Denodo Marketplace from a list of VDP databases/tags and returns it in JSON and natural language formats,
+    suitable for LLM-ingestion and vectorization.
     Optionally, if given access to a Denodo-supported vector store, it can also insert the metadata using the embeddings provider of your choice.
 
     You can use the view_prefix_filter and view_suffix_filter parameters to filter the views that are inserted into the vector store
@@ -97,6 +116,9 @@ async def getMetadata(
     To use incremental, please set incremental to True. On first call, it will return all views associated with the specified databases/tags
     and activate tracking of changes. After that, you calling getMetadata with incremental set to True on the same set of databases/tags will only vectorize views
     that have been modified since the last sync.
+
+    NOTE: When both databases and tags are specified, views from both sources are included (union), not their intersection.
+    For example, if you have a database 'db1' and a tag with name 'tag1', the views of 'db1' and the views of 'tag1' will be included, minus duplicates.
     """
     try:
         permissions_data = await get_user_permissions(auth=auth, custom_headers=custom_headers)
@@ -109,9 +131,9 @@ async def getMetadata(
         logging.warning("[Security] User unauthorized attempt to use getMetadata.")
         raise HTTPException(status_code=403, detail="You do not have authorization to use the vectorization endpoints.")
 
-    vdp_database_names = [db.strip() for db in endpoint_request.vdp_database_names.split(',') if db]
-    vdp_tag_names = [tag.strip() for tag in endpoint_request.vdp_tag_names.split(',') if tag]
-    tags_to_ignore = [tag.strip() for tag in endpoint_request.tags_to_ignore.split(',') if tag]
+    vdp_database_names = [db.strip() for db in endpoint_request.vdp_database_names if db.strip()]
+    vdp_tag_names = [tag.strip() for tag in endpoint_request.vdp_tag_names if tag.strip()]
+    tags_to_ignore = [tag.strip() for tag in endpoint_request.tags_to_ignore if tag.strip()]
     vdp_tag_names = [tag for tag in vdp_tag_names if tag not in tags_to_ignore]
 
     if not vdp_database_names and not vdp_tag_names:
@@ -202,8 +224,9 @@ async def getMetadata(
                     all_data_usage_errors.extend(tag_errors)
 
             except ValueError as ve:
-                logging.error(f"Error processing tag: {ve}")
-                continue
+                error_msg = f"Error processing tag '{tag_name}': {ve}"
+                logging.error(error_msg)
+                raise HTTPException(status_code=400, detail=error_msg) from ve
 
         for db_name in vdp_database_names:
             try:
@@ -227,8 +250,9 @@ async def getMetadata(
                     all_data_usage_errors.extend(db_errors)
 
             except ValueError as ve:
-                logging.error(f"Error processing database: {ve}")
-                continue
+                error_msg = f"Error processing database '{db_name}': {ve}"
+                logging.error(error_msg)
+                raise HTTPException(status_code=400, detail=error_msg) from ve
 
     except asyncio.CancelledError:
         log_message = "The client has disconnected. The request was cancelled before completion."

@@ -17,18 +17,19 @@ import traceback
 from pydantic import BaseModel, Field
 from api.utils import state_manager
 from api.utils import ai_tools
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Literal
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from api.deepquery.main import process_analysis
 from fastapi import APIRouter, Depends, HTTPException
-from utils.data_marketplace.connection import get_user_permissions, DataCatalogAuthError
+from utils.data_marketplace.connection import get_user_permissions_for_vector_store, DataCatalogAuthError
 from api.utils.sdk_utils import (
     handle_endpoint_error,
     authenticate,
     get_custom_request_headers,
-    check_deepquery_user_permission
+    check_deepquery_user_permission,
 )
+from api.utils import param_descriptions as desc
 
 router = APIRouter()
 
@@ -43,45 +44,53 @@ class deepQueryRequest(BaseModel):
     thinking_llm_temperature: float = float(os.getenv('THINKING_LLM_TEMPERATURE', '0.0'))
     thinking_llm_max_tokens: int = Field(
         default = int(os.getenv('THINKING_LLM_MAX_TOKENS', '10240')),
-        description="The maximum OUTPUT tokens for the thinking LLM. Not recommended to decrease this value."
+        description=desc.THINKING_LLM_MAX_TOKENS
     )
     llm_provider: str = os.getenv('LLM_PROVIDER')
     llm_model: str = os.getenv('LLM_MODEL')
     llm_temperature: float = float(os.getenv('LLM_TEMPERATURE', '0.0'))
     llm_max_tokens: int = Field(
         default = int(os.getenv('LLM_MAX_TOKENS', '4096')),
-        description="The maximum OUTPUT tokens for the general LLM. Not recommended to decrease this value."
+        description=desc.LLM_MAX_TOKENS
+    )
+    check_ambiguity: bool = Field(
+        default = bool(int(os.getenv('CHECK_AMBIGUITY', '1'))),
+        description="If false, skip ambiguity detection in nested answerQuestion calls."
     )
     embeddings_provider: str = os.getenv('EMBEDDINGS_PROVIDER')
     embeddings_model: str = os.getenv('EMBEDDINGS_MODEL')
     vector_store_provider: str = os.getenv('VECTOR_STORE')
-    vdp_database_names: str = Field(
-        default = '',
-        description="A comma-separated list of databases to reduce the scope of the question to. If empty, all databases in the vector DB the user has permissions to will be considered."
+    vdp_database_names: List[str] = Field(
+        default_factory=list,
+        description=desc.VDP_DATABASE_NAMES
     )
-    vdp_tag_names: str = Field(
-        default = '',
-        description="A comma-separated list of tags to reduce the scope of the question to. If empty, all tags in the vector DB the user has permissions to will be considered."
+    vdp_tag_names: List[str] = Field(
+        default_factory=list,
+        description=desc.VDP_TAG_NAMES
+    )
+    filter_logic: Literal["AND", "OR"] = Field(
+        default = 'OR',
+        description=desc.FILTER_LOGIC
     )
     allow_external_associations: bool = Field(
         default = False,
-        description="If False, views from associations will NOT be considered if they don't belong to the VDBs/Tags specified in vdp_database_names and vdp_tag_names. If no VDBs/Tags specified, all views from associations will be considered."
+        description=desc.ALLOW_EXTERNAL_ASSOCIATIONS
     )
-    use_views: str = Field(
-            default = '',
-            description="Please specify a view you want the LLM to take into consideration when answering the question. Expected format is views separated by commas: database.view_name, database.view_name2"
-        )
+    use_views: List[str] = Field(
+        default_factory=list,
+        description=desc.USE_VIEWS
+    )
     expand_set_views: bool = Field(
-            default = True,
-            description="If set to true, the LLM will search for relevant views in the vector store. If set to false, the LLM will not search in the vector store and will only access those specified in use_views"
-        )
+        default = True,
+        description=desc.EXPAND_SET_VIEWS
+    )
     vector_search_k: int = Field(
         default = 5,
-        description="Number of results to return from the similarity search in the vector store."
+        description=desc.VECTOR_SEARCH_K
     )
     vector_search_sample_data_k: int = Field(
         default = 3,
-        description="Number of similar sample data rows to return for the given question."
+        description=desc.VECTOR_SEARCH_SAMPLE_DATA_K
     )
 
 class deepQueryResponse(BaseModel):
@@ -106,16 +115,9 @@ async def deep_query_post(
     """
     start_time = time.time()
 
-    try:
-        permissions_data = await get_user_permissions(auth=auth, custom_headers=custom_headers)
-    except DataCatalogAuthError as e:
-        raise HTTPException(status_code=401, detail=f"Authentication failed during deepQuery: {str(e)}") from e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve permissions: {str(e)}") from e
-
-    if not check_deepquery_user_permission(auth, permissions_data):
-        logging.warning("[Security] User unauthorized attempt to use deepQuery.")
-        raise HTTPException(status_code=403, detail="You do not have authorization to use the DeepQuery feature. Contact your administrator.")
+    endpoint_request.vdp_database_names = [db.strip() for db in endpoint_request.vdp_database_names if db.strip()]
+    endpoint_request.vdp_tag_names = [tag.strip() for tag in endpoint_request.vdp_tag_names if tag.strip()]
+    endpoint_request.use_views = [view.strip() for view in endpoint_request.use_views if view.strip()]
 
     try:
         # Planning always uses thinking LLM (from request parameters)
@@ -157,12 +159,26 @@ async def deep_query_post(
         logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error initializing resources: {str(e)}") from e
 
+    try:
+        permissions_data = await get_user_permissions_for_vector_store(
+            auth=auth, vector_store=vector_store, custom_headers=custom_headers
+        )
+    except DataCatalogAuthError as e:
+        raise HTTPException(status_code=401, detail=f"Authentication failed during deepQuery: {str(e)}") from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve permissions: {str(e)}") from e
+
+    if not check_deepquery_user_permission(auth, permissions_data):
+        logging.warning("[Security] User unauthorized attempt to use deepQuery.")
+        raise HTTPException(status_code=403, detail="You do not have authorization to use the DeepQuery feature. Contact your administrator.")
+
     vector_search_tables, sample_data, _, _, _ = await ai_tools.get_relevant_tables(
         query=endpoint_request.question,
         vector_store=vector_store,
         sample_data_vector_store=sample_data_vector_store,
         vdb_list=endpoint_request.vdp_database_names,
         tag_list=endpoint_request.vdp_tag_names,
+        filter_logic=endpoint_request.filter_logic,
         auth=auth,
         custom_headers=custom_headers,
         vector_search_k=endpoint_request.vector_search_k,
@@ -203,12 +219,16 @@ async def deep_query_post(
         auth=auth,
         thinking_llm_temperature=endpoint_request.thinking_llm_temperature,
         thinking_llm_max_tokens=endpoint_request.thinking_llm_max_tokens,
+        llm_provider=endpoint_request.llm_provider,
+        llm_model=endpoint_request.llm_model,
         llm_temperature=endpoint_request.llm_temperature,
         llm_max_tokens=endpoint_request.llm_max_tokens,
+        check_ambiguity=endpoint_request.check_ambiguity,
         execution_model=endpoint_request.execution_model,
         vdp_database_names=endpoint_request.vdp_database_names,
         vdp_tag_names=endpoint_request.vdp_tag_names,
         allow_external_associations=endpoint_request.allow_external_associations,
+        filter_logic=endpoint_request.filter_logic,
         custom_headers=custom_headers
     )
 

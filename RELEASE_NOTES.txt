@@ -1,3 +1,56 @@
+version 1.4 - 20261001
+----------------------
+
+- Added AI Spaces as named combinations of databases and tags, with scoped MCP endpoints (/database/{name}/mcp, /tag/{name}/mcp, and /space/{name}/mcp) and a space setting for specialized agents
+- Added support for VQL column masking, including an is_masked flag on answer and executeVQL responses, so answers and related questions present masked values as-is
+- Updated metric view VQL prompts for newer Denodo Platform behavior, including HAVING filters on metrics and a rule that metric views cannot be joined with other views
+- Added DATA_MARKETPLACE_TIMEOUT to configure the Data Marketplace HTTP request timeout (default 300 seconds)
+- Updated getUserPermissions to accept vector store and embeddings parameters and to limit permission lookups to vectorized databases and tags
+- Updated the Oracle vector store to pool connections and ping them before use so stale connections are replaced
+- Added horizontal scrolling to sample chatbot tables so wide execution results stay readable
+- Updated requirements.txt to pin missing dependencies, remove unused packages, and upgrade anyio, langchain-nvidia-ai-endpoints, and the langgraph checkpoint packages to remediate CVEs, and pinned uuid in the sample chatbot
+- Documented AI SDK requirements in the README (Python 3.11/3.12/3.13, Denodo 9.0.5 or higher with cache enabled, an LLM provider, and an embeddings provider)
+
+version 1.4-beta - 20260925
+----------------------
+
+- Split data_agent tool into execute_vql/generate_vql/generate_graph tools in both chatbot and MCP server
+- Added SQL Server as a supported vector store
+- Added setAISDKConfig endpoint to change the AI SDK and sample chatbot log level at runtime without a restart
+- Added filter_logic parameter (AND/OR) to answerQuestion-style endpoints
+- Added support for an optional correlation ID header (CUSTOM_TRANSACTION_HEADER) so callers can pass their own transaction ID
+- Added ANTHROPIC_BASE_URL for a custom Anthropic-compatible endpoint
+- Added username and generation date to DeepQuery reports
+- Allowed tags and databases containing special characters in the sample chatbot and AI SDK endpoints
+- Allowed setting temperature to -1 to omit the parameter from LLM requests
+- Increased the sample chatbot default max output tokens to 8192
+- Deprecated answerQuestionUsingViews and streamAnswerQuestionUsingViews
+- Upgraded the Langfuse SDK to v4
+- Improved metadata synchronization reliability and clarified EMBEDDINGS_TOKEN_LIMIT (0 disables view chunking; minimum 1000 when enabled)
+- Updated selection prompts to quote table names as "db"."view"
+- Fixed DeepQuery ignoring LLM settings set through the chatbot UI
+- Fixed answer generation to fall back to the raw LLM response when final_answer tags are missing
+- Fixed Basic Auth login failure for passwords with non-ASCII characters
+- Optimized the sample chatbot UI for a large number of specialized agents
+- Formatted AI SDK token counts with a thousands separator in the Additional Information modal
+- Added tool call execution time next to Output in the sample chatbot
+- Removed an extra blank line before closing tags in data agent tool output
+- Added confirmation in stop.py when multiple service instances are found
+- Added multiline configuration support to the --migrate option
+
+version 1.3 - 20260819
+----------------------
+
+- Expanded OpenAI reasoning effort suffixes to Azure providers
+- Exposed custom-configured LLM providers in the sample chatbot UI settings
+- Improved specialized agents observability in logs and Langfuse
+- Fixed stale sync metadata and empty resource buckets returned by getVectorDBInfo
+- Purged orphaned sync metadata left in the vector store after deleteMetadata
+- Fixed Data Marketplace view links in the sample chatbot so they preserve case-sensitive view names
+- Fixed AI SDK installation failure on ARM64 Linux caused by an x86_64-only pysqlite3-binary requirement
+- Updated aiohttp to 3.14.3 to remediate PYSEC-2026-3545/3546/3547
+- Updated the alternative send shortcut in the sample chatbot from Shift+Enter to Ctrl+Enter
+
 version 1.3-beta - 20260803
 ----------------------
 

@@ -6,6 +6,7 @@ from flask import request
 from flask_login import current_user
 from utils.utils import generate_transaction_id
 from utils.logging_utils import transaction_id_var, username_var
+from utils.runtime_config import sync_runtime_config
 
 def register_middleware(blueprint):
     """
@@ -18,6 +19,8 @@ def register_middleware(blueprint):
     @blueprint.before_request
     def set_logging_context():
         """Set transaction ID and username for the request context."""
+        sync_runtime_config()
+
         transaction_id_var.set(generate_transaction_id())
         username = "anonymous"
 

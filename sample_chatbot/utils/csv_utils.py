@@ -298,14 +298,15 @@ def fetch_collection_documents(vector_store, source_name, num_rows):
     Uses exhaustive view_id batching so it works past `search_batched`'s
     similarity top-k cap.
     """
-    BATCH = 25000
+    BATCH = vector_store.search_batch_size
+
     out = []
     for start in range(0, num_rows, BATCH):
         ids = [f"{source_name}_{i}" for i in range(start, min(start + BATCH, num_rows))]
-        out.extend(vector_store.search_by_vector(
-            vector_store.search_vector,
+        out.extend(vector_store.search_batched(
+            vector=vector_store.search_vector,
             k=len(ids),
-            view_ids=ids,
+            view_ids=ids
         ))
     return out
 

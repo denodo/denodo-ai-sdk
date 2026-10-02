@@ -65,8 +65,11 @@ class User(UserMixin):
         self.ai_sdk_thinking_llm_preferences = {}
         self.use_base_llm_for_execution = config.use_base_llm_for_execution
 
-        # General AI SDK preferences
-        self.check_ambiguity = config.check_ambiguity
+        # General AI SDK preferences. An agent YAML value wins; otherwise the
+        # default is copied from /getAISDKInfo at login.
+        self.check_ambiguity = True if config.check_ambiguity is None else bool(config.check_ambiguity)
+        self.auto_fixing = True
+        self.auto_fixing_attempts = 2
 
         # Cached AI SDK configuration (populated at login from /getAISDKInfo)
         self.ai_sdk_info = None
@@ -190,8 +193,8 @@ class User(UserMixin):
         def validate_temperature(temp):
             if temp is not None and temp != '':
                 temp_float = float(temp)
-                if not (0.0 <= temp_float <= 2.0):
-                    raise ValueError("Temperature must be between 0.0 and 2.0")
+                if temp_float != -1.0 and not (0.0 <= temp_float <= 2.0):
+                    raise ValueError("Temperature must be -1 or between 0.0 and 2.0")
                 return temp_float
             return None
 
@@ -229,6 +232,15 @@ class User(UserMixin):
         check_ambiguity = llm_settings.get('check_ambiguity')
         if check_ambiguity is not None:
            self.check_ambiguity = bool(check_ambiguity)
+
+        auto_fixing = llm_settings.get('auto_fixing')
+        if auto_fixing is not None:
+            self.auto_fixing = bool(auto_fixing)
+
+        auto_fixing_attempts = llm_settings.get('auto_fixing_attempts')
+        if auto_fixing_attempts is not None:
+            attempts = int(auto_fixing_attempts)
+            self.auto_fixing_attempts = max(1, min(5, attempts))
 
         use_base_llm_for_execution = llm_settings.get('use_base_llm_for_execution')
         if use_base_llm_for_execution is not None:
@@ -276,11 +288,12 @@ class User(UserMixin):
                 **ai_sdk_llm_params,
                 **thinking_llm_params,
                 'check_ambiguity': self.check_ambiguity,
-                'execution_model': 'base' if self._config.use_base_llm_for_execution else 'thinking'
+                'auto_fixing': self.auto_fixing,
+                'auto_fixing_attempts': self.auto_fixing_attempts,
+                'execution_model': 'base' if self.use_base_llm_for_execution else 'thinking'
             }
 
-            data_agent_limit_max = self.ai_sdk_info['vql_execute_rows_limit'] if self.ai_sdk_info else 10000
-            ai_sdk_params['vql_execute_rows_limit'] = data_agent_limit_max
+            ai_sdk_params['vql_execute_rows_limit'] = self.ai_sdk_info['vql_execute_rows_limit'] if self.ai_sdk_info else 10000
             deep_query_allowed = self.ai_sdk_info.get("can_use_deepquery", True) if self.ai_sdk_info else True
             deepquery_enabled = self._config.deepquery_enabled and deep_query_allowed
 
@@ -321,7 +334,6 @@ class User(UserMixin):
                 chatbot_custom_instructions=self._effective_chatbot_instructions(),
                 verify_ssl=self._config.ai_sdk_verify_ssl,
                 ai_sdk_params=ai_sdk_params,
-                data_agent_limit_max=data_agent_limit_max,
                 auto_graph=self._config.auto_graph,
                 kb_description=self.unstructured_vector_store_description,
                 active_csv_sources=self.active_csv_sources,
@@ -347,6 +359,20 @@ class User(UserMixin):
         else:
             return self._config.llm
 
+    def apply_ai_sdk_defaults(self):
+        """Copy CHECK_AMBIGUITY / AUTO_FIXING defaults into this session.
+
+        A specialized agent's check_ambiguity overrides the AI SDK default.
+        """
+        info = self.ai_sdk_info or {}
+        if self._config.check_ambiguity is None:
+            self.check_ambiguity = bool(info.get('check_ambiguity', True))
+        else:
+            self.check_ambiguity = bool(self._config.check_ambiguity)
+        self.auto_fixing = bool(info.get('auto_fixing', True))
+        attempts = int(info.get('auto_fixing_attempts', 2))
+        self.auto_fixing_attempts = max(1, min(5, attempts))
+
     def set_agent_config(self, config):
         self._config = config
 
@@ -358,5 +384,5 @@ class User(UserMixin):
         self.ai_sdk_base_llm_preferences = {}
         self.ai_sdk_thinking_llm_preferences = {}
 
-        self.check_ambiguity = config.check_ambiguity
         self.use_base_llm_for_execution = config.use_base_llm_for_execution
+        self.apply_ai_sdk_defaults()

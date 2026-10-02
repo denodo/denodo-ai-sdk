@@ -71,7 +71,7 @@ def get_oracle_pool():
         # Return CLOB/NCLOB as str (and BLOB as bytes) so callers can treat
         # Oracle text columns like SQLite/Postgres TEXT without LOB handling.
         oracledb.defaults.fetch_lobs = False
-        _oracle_pool = oracledb.create_pool(user=user, password=password, dsn=dsn, min=2, max=10, increment=1)
+        _oracle_pool = oracledb.create_pool(user=user, password=password, dsn=dsn, min=2, max=10, increment=1, ping_interval=0)
     return _oracle_pool
 
 class UniformCheckpointer:

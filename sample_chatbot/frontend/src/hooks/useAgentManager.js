@@ -59,6 +59,8 @@ export const useAgentManager = (updateConfig) => {
       payload.llm_settings.use_base_llm_for_execution =
         aiSdkSettings.use_base_llm_for_execution;
       payload.llm_settings.check_ambiguity = aiSdkSettings.check_ambiguity;
+      payload.llm_settings.auto_fixing = aiSdkSettings.auto_fixing;
+      payload.llm_settings.auto_fixing_attempts = aiSdkSettings.auto_fixing_attempts;
     }
 
     const response = await api.post("change_agent", payload);

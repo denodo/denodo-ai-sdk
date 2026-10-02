@@ -10,7 +10,7 @@ from utils import denodo_tools
 from langchain.tools import ToolRuntime, tool
 from sample_chatbot.engine import skills
 from sample_chatbot.engine.context import UserContext
-from utils.denodo_tools import create_basic_auth_header, format_data_agent_output, format_metadata_search_output
+from utils.denodo_tools import create_basic_auth_header, format_generate_vql_output, format_execute_vql_output, format_generate_graph_output, format_metadata_search_output
 
 # =============================================================================
 # Knowledge Query Implementation
@@ -48,24 +48,24 @@ def _knowledge_query_impl(search_query, vector_store, collection, k=5, document_
 # =============================================================================
 
 @tool(response_format="content_and_artifact")
-def data_agent(
+def generate_vql(
     runtime: ToolRuntime[UserContext],
     request: str,
     limit: int = 0,
-    plot: int = 0,
-    plot_details: str = "",
+    view_names: list[str] | None = None,
 ):
-    """Communicates with the data agent to generate and execute a single VQL query.
-    The data agent does not have memory of previous requests or conversations. Every individual request to the data_agent must be self-contained, meaning it must not rely on the agent having recollection of previous requests.
+    """Takes a precise natural language request, generates a single valid VQL query from it and executes it, returning the query execution result.
+
+    Limitations:
+    - This tool cannot handle multi-step workflows. (i.e. do this first, then do that. if this fails, then do that, etc)
+    - This tool does not have memory of previous requests or conversations. Every individual request to this tool must be self-contained, meaning it must not rely on recollection of previous requests.
 
     Args:
-        request: Request to generate a single VQL query from and return the VQL query, its explanation and the execution result. For example, 'count the number of unique customers in the organization.customers view'.
-        limit: Maximum number of rows to return. If omitted, it defaults to the data_agent's limit configured for this session.
-        plot: Whether to generate and also return a plot of the data. 1 for yes, 0 for no.
-        plot_details: Any extra details of the graph to generate. For example, 'bar chart of the number of customers by country in organization.customers view'.
+        request: The natural language request to generate a single VQL query from. For example, "Generate a VQL query to count the number of loan_id in the view org.loan_status where loan_status is 'active' and date_created is after or equal to 2026-01-01".
+        limit: Maximum number of rows to return. If omitted, it defaults to the generate_vql limit configured for this session.
+        view_names: Optional list of views (format: database.view_name) to be used in the VQL query, for example ['organization.loans', 'database.loan1']. If you're certain about the views you want the VQL to use, setting this value will speed up the VQL generation process because it won't have to look for relevant views in the database.
     """
 
-    # UI-level filters coming from the QuestionForm (set in ai_sdk_params)
     if runtime.context.vdp_database_names:
         logging.info(f"Received UI filters: vdp_database_names={runtime.context.vdp_database_names}")
     if runtime.context.vdp_tag_names:
@@ -75,30 +75,114 @@ def data_agent(
     default_limit = (runtime.context.ai_sdk_params or {}).get("vql_execute_rows_limit")
     effective_limit = default_limit if limit in (None, 0) else limit
 
-    response = denodo_tools.data_agent(
+    extra_params = dict(runtime.context.ai_sdk_params or {})
+    extra_params.pop("request", None)
+    extra_params.pop("view_names", None)
+    extra_params.pop("filter_logic", None)
+
+    response = denodo_tools.generate_vql(
         natural_language_query=request,
         api_host=runtime.context.api_host,
         auth=auth,
         vdp_database_names=runtime.context.vdp_database_names,
         vdp_tag_names=runtime.context.vdp_tag_names,
-        plot=plot,
-        plot_details=plot_details,
         limit=effective_limit,
         custom_instructions=runtime.context.ai_sdk_custom_instructions,
+        view_names=view_names or [],
         verify_ssl=runtime.context.verify_ssl,
         timeout=runtime.context.timeout,
         cancel_event=runtime.context.cancel_event,
-        **(runtime.context.ai_sdk_params or {}),
+        **extra_params,
     )
 
-    return format_data_agent_output(response)
+    return format_generate_vql_output(response)
+
+@tool(response_format="content_and_artifact")
+def execute_vql(
+    runtime: ToolRuntime[UserContext],
+    vql: str,
+    limit: int = 0,
+):
+    """Tool to execute a VQL query. Execute only:
+    - A previously generated VQL query by the generate_vql tool
+    - A small edit to a previously generated VQL by the generate_vql tool (for example changing a filter, ORDER BY or LIMIT)
+    - A exploratory query to explore the data model and understand the views available in Denodo and their schema. For example, 'SELECT DISTINCT example_field FROM "database"."view_name"'.
+
+    Args:
+        vql: The VQL query to execute.
+        limit: Maximum number of rows to return. If omitted, it defaults to the session limit.
+    """
+
+    auth = create_basic_auth_header(runtime.context.username, runtime.context.password)
+    default_limit = (runtime.context.ai_sdk_params or {}).get("vql_execute_rows_limit")
+    effective_limit = default_limit if limit in (None, 0) else limit
+
+    response = denodo_tools.execute_vql(
+        vql=vql,
+        api_host=runtime.context.api_host,
+        auth=auth,
+        limit=effective_limit,
+        verify_ssl=runtime.context.verify_ssl,
+        timeout=runtime.context.timeout,
+        cancel_event=runtime.context.cancel_event,
+    )
+
+    return format_execute_vql_output(response)
+
+@tool(response_format="content_and_artifact")
+def generate_graph(
+    runtime: ToolRuntime[UserContext],
+    vql: str,
+    plot_details: str,
+    limit: int = 0,
+):
+    """Tool to generate a graph from a VQL query. The VQL query used as input must have been previously validated to work. Do not submit unverified VQL queries to this tool.
+    Use plot_details to own the graph generation process. Be detailed in your requirements, for example:
+
+    Chart requirements:
+        Graph type: Bar chart
+        X-axis: Loan
+        Y-axis: Loan Amount
+        Bars colored green (#2ca02c)
+        Include horizontal gridlines on the y-axis
+        Remove top and right spines
+        Title: 'Top 5 Loans by Loan Amount (2024)'
+
+    Args:
+        vql: The VQL query whose result should be plotted. Must have been previously validated to work.
+        plot_details: Very detailed description of the graph to generate. For example, 'bar chart of the number of customers by country, with x-axis as country and y-axis as number of customers, and title as "Number of customers by country"'.
+        limit: Maximum number of rows to execute and plot. If omitted, it defaults to the session limit.
+    """
+
+    auth = create_basic_auth_header(runtime.context.username, runtime.context.password)
+    default_limit = (runtime.context.ai_sdk_params or {}).get("vql_execute_rows_limit")
+    effective_limit = default_limit if limit in (None, 0) else limit
+
+    extra_params = dict(runtime.context.ai_sdk_params or {})
+    extra_params.pop("vql", None)
+    extra_params.pop("plot_details", None)
+    extra_params.pop("limit", None)
+
+    response = denodo_tools.generate_graph(
+        vql=vql,
+        api_host=runtime.context.api_host,
+        auth=auth,
+        plot_details=plot_details,
+        limit=effective_limit,
+        verify_ssl=runtime.context.verify_ssl,
+        timeout=runtime.context.timeout,
+        cancel_event=runtime.context.cancel_event,
+        **extra_params,
+    )
+
+    return format_generate_graph_output(response)
 
 @tool(response_format="content_and_artifact")
 def deep_query(
     runtime: ToolRuntime[UserContext],
     analysis_request: str,
 ):
-    """Request an advanced analysis request over the user's data to the DeepQuery agent.
+    """Request an advanced analysis to the DeepQuery agent, who has access to the user's data in Denodo.
 
     Args:
         analysis_request: Detailed analysis request to perform.
@@ -130,11 +214,8 @@ def metadata_search(
     search_query: str,
     n_results: int = 5,
 ):
-    """This tool can perform a similarity search in the database and return the schema of the n_results (stick to the default of 5 if not specified) most similar views.
-        For example, it can be helpful to answer questions like:
-        - What views do we have related to X topic.
-        - What is the primary key of this table.
-        - What associations does this view have.
+    """This tool runs a similarity search in the database and returns the schema of the n_results (stick to the default of 5 if not specified) most similar views.
+        For example, it can be helpful to answer questions like what views do we have related to X topic.
 
     Args:
         search_query: Natural language query to search for the metadata of the views in the user's Denodo instance. For example, 'views related to loans'.

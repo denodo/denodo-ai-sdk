@@ -3,6 +3,7 @@ from .response_builders import (
     process_ambiguity_category,
     process_metadata_category,
     process_unknown_category,
+    prepare_generate_vql_response,
 )
 
 __all__ = [
@@ -10,4 +11,5 @@ __all__ = [
     "process_ambiguity_category",
     "process_metadata_category",
     "process_unknown_category",
+    "prepare_generate_vql_response",
 ]

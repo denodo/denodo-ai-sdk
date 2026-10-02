@@ -435,15 +435,21 @@ const CSVManagerModal = ({ show, handleClose, hasActiveConversation = false, sel
           )}
 
           {!isLoading && !hasNoData && (
+            <div
+              className="table-responsive"
+              tabIndex={0}
+              role="region"
+              aria-label="Scrollable knowledge base table"
+            >
             <Table striped bordered hover size="sm" variant="light">
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th style={{ width: '130px' }}>Status</th>
-                  <th>Description</th>
-                  <th style={{ width: '120px' }}>Owner</th>
-                  <th style={{ width: '140px' }}>Uploaded</th>
-                  <th style={{ width: '200px' }}>Actions</th>
+                  <th style={{ minWidth: '10rem' }}>Name</th>
+                  <th style={{ minWidth: '8rem' }}>Status</th>
+                  <th style={{ minWidth: '12rem' }}>Description</th>
+                  <th style={{ minWidth: '7rem' }}>Owner</th>
+                  <th style={{ minWidth: '11rem' }}>Uploaded</th>
+                  <th style={{ minWidth: '11rem' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -475,6 +481,7 @@ const CSVManagerModal = ({ show, handleClose, hasActiveConversation = false, sel
                 ))}
               </tbody>
             </Table>
+            </div>
           )}
 
           <Alert variant="info" className="mb-3 py-2">

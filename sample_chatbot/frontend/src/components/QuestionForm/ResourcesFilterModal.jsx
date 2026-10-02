@@ -90,8 +90,8 @@ const ResourcesFilterModal = ({
   const handleClear = () => {
     setSelectedDatabases([]);
     setSelectedTags([]);
-    setAllowExternalAssociations(true);
-    onSave({ databases: [], tags: [], allowExternalAssociations: true });
+    setAllowExternalAssociations(false);
+    onSave({ databases: [], tags: [], allowExternalAssociations: false });
     handleClose();
   };
 

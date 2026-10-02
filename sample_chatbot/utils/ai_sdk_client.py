@@ -84,7 +84,7 @@ def get_user_access_info(api_host, username, password, verify_ssl=False):
 def connect_to_ai_sdk(api_host, username, password, insert=True, examples_per_table=100,
                       parallel=True, vdp_database_names=None, incremental=False,
                       vdp_tag_names=None, tags_to_ignore=None, verify_ssl=False,
-                      timeout_seconds=300):
+                      timeout_seconds=300, embeddings_token_limit=0):
     """
     Connect to AI SDK and fetch/sync metadata.
 
@@ -101,6 +101,7 @@ def connect_to_ai_sdk(api_host, username, password, insert=True, examples_per_ta
         tags_to_ignore: List of tags to ignore
         verify_ssl: Whether to verify SSL certificates
         timeout_seconds: Request timeout in seconds
+        embeddings_token_limit: Maximum tokens for the embedding model.
 
     Returns:
         Tuple of (status_code, result or error_message)
@@ -110,17 +111,18 @@ def connect_to_ai_sdk(api_host, username, password, insert=True, examples_per_ta
             'insert': insert,
             'examples_per_table': examples_per_table,
             'parallel': parallel,
-            'incremental': incremental
+            'incremental': incremental,
+            'embeddings_token_limit': embeddings_token_limit
         }
 
-        if vdp_database_names is not None:
-            request_params['vdp_database_names'] = ",".join(vdp_database_names)
+        if vdp_database_names:
+            request_params['vdp_database_names'] = vdp_database_names
 
-        if vdp_tag_names is not None:
-            request_params['vdp_tag_names'] = ",".join(vdp_tag_names)
+        if vdp_tag_names:
+            request_params['vdp_tag_names'] = vdp_tag_names
 
-        if tags_to_ignore is not None:
-            request_params['tags_to_ignore'] = ",".join(tags_to_ignore)
+        if tags_to_ignore:
+            request_params['tags_to_ignore'] = tags_to_ignore
 
         response = requests.get(
             f'{api_host}/getMetadata',
@@ -134,6 +136,15 @@ def connect_to_ai_sdk(api_host, username, password, insert=True, examples_per_ta
             return 204, "No Content"
 
         if not (200 <= response.status_code < 300):
+            try:
+                error_data = response.json()
+                specific_message = error_data.get('detail') or error_data.get('message')
+            except Exception:
+                specific_message = None
+
+            if specific_message:
+                return response.status_code, specific_message
+
             if 400 <= response.status_code < 500:
                 error_type = "Client Error"
             elif response.status_code >= 500:

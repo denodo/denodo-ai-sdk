@@ -289,15 +289,14 @@ class Agent:
 
         self.logger.info(f"Sending request to LLM with temperature={temperature}")
         try:
-            config = langfuse.build_config(
+            with langfuse.trace_context(
                 run_name=self.agent_name,
                 session_id=self.session_id
-            )
-
-            response = await chain_to_use.ainvoke(
-                {"input": input_text, "chat_history": self.conversation_manager.memory},
-                config=config
-            )
+            ) as config:
+                response = await chain_to_use.ainvoke(
+                    {"input": input_text, "chat_history": self.conversation_manager.memory},
+                    config=config
+                )
 
             # Some LLMs will return their thinking in between <think> tags, which can fill up the context window quickly
             response = remove_think_tags(response)

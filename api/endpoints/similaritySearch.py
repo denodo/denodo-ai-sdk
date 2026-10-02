@@ -9,28 +9,32 @@
  of the license agreement you entered into with DENODO.
 """
 import os
-import json
 import logging
 import traceback
 
-from pydantic import BaseModel
-from typing import List, Dict, Any
+from pydantic import BaseModel, Field, Field
+from typing import List, Dict, Any, Literal
 
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.utils import state_manager
-from utils.data_marketplace.connection import get_user_permissions, DataCatalogAuthError
+from utils.data_marketplace.connection import get_user_permissions_for_vector_store, DataCatalogAuthError
 from api.utils.sdk_utils import parse_view_document, handle_endpoint_error, authenticate
 from api.utils.sdk_utils import get_custom_request_headers
+from api.utils import param_descriptions as desc
 
 router = APIRouter()
 
 class similaritySearchRequest(BaseModel):
     query: str
-    vdp_database_names: str = ''
-    vdp_tag_names: str = ''
+    vdp_database_names: List[str] = Field(default_factory=list)
+    vdp_tag_names: List[str] = Field(default_factory=list)
+    filter_logic: Literal["AND", "OR"] = Field(
+        default = 'OR',
+        description=desc.FILTER_LOGIC
+    )
     embeddings_provider: str = os.getenv('EMBEDDINGS_PROVIDER')
     embeddings_model: str = os.getenv('EMBEDDINGS_MODEL')
     vector_store_provider: str = os.getenv('VECTOR_STORE')
@@ -50,7 +54,7 @@ class similaritySearchResponse(BaseModel):
         tags = ['Vector Store'])
 @handle_endpoint_error("similaritySearch")
 async def similaritySearch(
-    endpoint_request: similaritySearchRequest = Depends(),
+    endpoint_request: similaritySearchRequest = Query(),
     auth: str = Depends(authenticate),
     custom_headers: dict = Depends(get_custom_request_headers)
 ):
@@ -59,8 +63,8 @@ async def similaritySearch(
     The vector store MUST have been previously populated with the metadata of the views in the vector database
     using getMetadata endpoint.
     """
-    vdp_database_names = [db.strip() for db in endpoint_request.vdp_database_names.split(',')] if endpoint_request.vdp_database_names else []
-    vdp_tag_names = [tag.strip() for tag in endpoint_request.vdp_tag_names.split(',')] if endpoint_request.vdp_tag_names else []
+    vdp_database_names = [db.strip() for db in endpoint_request.vdp_database_names if db.strip()]
+    vdp_tag_names = [tag.strip() for tag in endpoint_request.vdp_tag_names if tag.strip()]
 
     try:
         vector_store = state_manager.get_vector_store(
@@ -74,7 +78,9 @@ async def similaritySearch(
         raise HTTPException(status_code=500, detail=f"Failed to get vector store from state manager: {e}") from e
 
     try:
-        permissions_data = await get_user_permissions(auth=auth, custom_headers=custom_headers)
+        permissions_data = await get_user_permissions_for_vector_store(
+            auth=auth, vector_store=vector_store, custom_headers=custom_headers
+        )
         views_details = permissions_data.get("viewsPermissions", [])
 
         valid_view_ids = [str(view["viewId"]) for view in views_details]
@@ -94,7 +100,8 @@ async def similaritySearch(
         "scores": endpoint_request.scores,
         "database_names": vdp_database_names,
         "tag_names": vdp_tag_names,
-        "view_ids": valid_view_ids
+        "view_ids": valid_view_ids,
+        "filter_logic": endpoint_request.filter_logic
     }
 
     search_results = vector_store.search_batched(**search_params)

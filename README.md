@@ -17,6 +17,15 @@ To showcase the AI SDK’s capabilities, a sample chatbot application is include
 
 The complete user manual for the Denodo AI SDK is available [here](https://community.denodo.com/docs/html/document/denodoconnects/latest/en/Denodo%20AI%20SDK%20-%20User%20Manual).
 
+### Requirements
+
+The AI SDK requires:
+
+- Python 3.11/3.12/3.13
+- A Denodo 9.0.5 or higher (either Express or Enterprise Plus license is required) instance, with cache enabled.
+- An LLM provider
+- An embeddings model provider
+
 ### Installation
 
 To get started with the AI SDK:
@@ -28,7 +37,7 @@ To get started with the AI SDK:
 5. Rename the configuration templates for both AI SDK (`api/utils/sdk_config.env.example` => `api/utils/sdk_config.env`) and the sample chatbot (`sample_chatbot/chatbot_config.env.example` => `sample_chatbot/chatbot_config.env`)
 5. Review the configuration files for both the AI SDK and the sample chatbot and configure your own LLM/embeddings providers
 
-## AI SDK Benchmarks
+## Benchmarks
 
 We test our text-to-VQL pipeline on our propietary benchmark across the whole range of LLMs that we support.
 The benchmark dataset consists of 50+ questions in the finance sector.

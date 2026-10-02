@@ -55,6 +55,11 @@ def get_frontend_config():
     }
     frontend_config["can_edit_instructions"] = config.user_edit_instructions
 
+    if current_user.is_authenticated and getattr(current_user, 'ai_sdk_info', None):
+        frontend_config["embeddings_token_limit"] = current_user.ai_sdk_info.get("embeddings_token_limit", 0)
+    else:
+        frontend_config["embeddings_token_limit"] = 0
+
     return jsonify(frontend_config)
 
 @settings_bp.route('/api/update_custom_instructions', methods=['POST'])
@@ -117,6 +122,12 @@ def get_llm_settings():
             "max_tokens": config.ai_sdk_thinking_llm_max_tokens,
         }
 
+    sdk_info = current_user.ai_sdk_info or {}
+    agent_check_ambiguity = config.check_ambiguity
+    check_ambiguity_default = (
+        agent_check_ambiguity if agent_check_ambiguity is not None
+        else sdk_info.get("check_ambiguity", True)
+    )
     return jsonify({
         "chatbot_llm_defaults": {
             "provider": config.llm_provider.lower(),
@@ -127,7 +138,9 @@ def get_llm_settings():
         "ai_sdk_base_llm_defaults": ai_sdk_base_llm_defaults,
         "ai_sdk_thinking_llm_defaults": ai_sdk_thinking_llm_defaults,
         "use_base_llm_for_execution_default": config.use_base_llm_for_execution,
-        "check_ambiguity_default": config.check_ambiguity,
+        "check_ambiguity_default": check_ambiguity_default,
+        "auto_fixing_default": sdk_info.get("auto_fixing", True),
+        "auto_fixing_attempts_default": sdk_info.get("auto_fixing_attempts", 2),
         # Session preferences belong to the CURRENT agent only; when asked
         # about another agent, return None/empty so the frontend uses its own
         # stored per-agent settings instead.
@@ -136,6 +149,8 @@ def get_llm_settings():
         "ai_sdk_base_llm_preferences": current_user.ai_sdk_base_llm_preferences if is_current_agent else {},
         "ai_sdk_thinking_llm_preferences": current_user.ai_sdk_thinking_llm_preferences if is_current_agent else {},
         "check_ambiguity": current_user.check_ambiguity if is_current_agent else None,
+        "auto_fixing": current_user.auto_fixing if is_current_agent else None,
+        "auto_fixing_attempts": current_user.auto_fixing_attempts if is_current_agent else None,
         "user_edit_llm": config.user_edit_llm,
         "user_edit_instructions": config.user_edit_instructions,
         "ai_sdk_info": current_user.ai_sdk_info,
@@ -183,7 +198,7 @@ def reset_llm_settings():
                 'max_tokens': config.ai_sdk_thinking_llm_max_tokens
             }
 
-        current_user.check_ambiguity = config.check_ambiguity
+        current_user.apply_ai_sdk_defaults()
 
     # Reset chatbot to force recreation with default settings
     current_user.chatbot = None
@@ -215,3 +230,4 @@ def update_llm_settings():
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": f"Invalid input: {str(e)}"}), 400
+

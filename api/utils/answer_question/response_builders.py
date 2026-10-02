@@ -109,7 +109,7 @@ def process_unknown_category(timings):
         'total_execution_time': round(sum(timings.values()), 2) if timings else 0
     }
 
-def prepare_response(vql_query, query_explanation, tokens, execution_result, vector_search_tables, raw_graph, timings):
+def prepare_response(vql_query, query_explanation, tokens, execution_result, vector_search_tables, raw_graph, timings, is_masked=False):
     llm_response_rows_limit = int(os.getenv('LLM_RESPONSE_ROWS_LIMIT', '100'))
     execution_result_bundle = {}
     if execution_result:
@@ -131,5 +131,26 @@ def prepare_response(vql_query, query_explanation, tokens, execution_result, vec
         "sql_execution_time": timings.get("vql_execution_time", 0),
         "vector_store_search_time": timings.get("vector_store_search_time", 0),
         "llm_time": timings.get("llm_time", 0),
-        "total_execution_time": round(sum(timings.values()), 2)
+        "total_execution_time": round(sum(timings.values()), 2),
+        "is_masked": is_masked
+    }
+
+def prepare_generate_vql_response(vql_query, query_explanation, tokens, execution_result, vector_search_tables, timings, answer="", is_masked=False):
+    llm_response_rows_limit = int(os.getenv('LLM_RESPONSE_ROWS_LIMIT', '100'))
+    execution_result_bundle = {}
+    if execution_result:
+        execution_result_bundle = build_execution_result_bundle(execution_result, llm_response_rows_limit)
+
+    return {
+        "vql": vql_query,
+        "query_explanation": query_explanation,
+        "tokens": _normalize_tokens(tokens),
+        "execution_result": execution_result_bundle,
+        "tables_used": [table['view_name'] for table in vector_search_tables],
+        "answer": answer,
+        "sql_execution_time": timings.get("vql_execution_time", 0),
+        "vector_store_search_time": timings.get("vector_store_search_time", 0),
+        "llm_time": timings.get("llm_time", 0),
+        "total_execution_time": round(sum(timings.values()), 2) if timings else 0,
+        "is_masked": is_masked
     }

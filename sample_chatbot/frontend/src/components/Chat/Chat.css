@@ -60,6 +60,7 @@
 .w-60 {
   width: 60% !important;
   max-width: 60% !important;
+  min-width: 0;
 }
 .w-70 {
   width: 70% !important;
@@ -109,20 +110,48 @@ tr:nth-child(even) {
 .w-100 {
   width: 100% !important;
 }
+/* Scroll the wrapper, not the table. table-layout:fixed + width:100%
+   was squeezing many columns into unreadably thin cells. */
 .table-responsive {
   overflow-x: auto;
   max-width: 100%;
+  min-width: 0;
 }
-.custom-table {
+.table-responsive > .custom-table {
+  width: max-content;
+  min-width: 100%;
+  table-layout: auto;
+}
+/* Skills, knowledge base, and DeepQuery reports. Column min-widths live on the
+   headers. When the modal is wide the table fills it and text wraps.
+   When zoom shrinks the modal, the wrapper scrolls instead of
+   table-layout:fixed crushing the flexible columns. */
+.table-responsive > table {
   width: 100%;
-  min-width: 300px;
+  min-width: 0;
+  table-layout: auto;
 }
 .custom-table th,
 .custom-table td {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 200px;
+  min-width: 8rem;
+  max-width: 20rem;
+}
+.table-responsive::-webkit-scrollbar {
+  height: 8px;
+}
+.table-responsive::-webkit-scrollbar-track {
+  background: #e9ecef;
+  border-radius: 4px;
+}
+.table-responsive::-webkit-scrollbar-thumb {
+  background: #adb5bd;
+  border-radius: 4px;
+}
+.table-responsive::-webkit-scrollbar-thumb:hover {
+  background: #6c757d;
 }
 .mt-2 {
   margin-top: 0.5rem;
@@ -151,42 +180,61 @@ tr:nth-child(even) {
 .card-text h2 {
   font-size: 1.25rem !important;
 }
-.card-body .card-text pre,
-.card-body .card-text table {
-  max-width: 100%; 
-  overflow-x: auto; 
-}
-
-.card-body .card-text table {
-  border-collapse: collapse;
-  margin-bottom: 1rem;
+.card-body .card-text pre {
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .card-body .card-text pre::-webkit-scrollbar,
-.card-body .card-text table::-webkit-scrollbar {
+.markdown-table-scroll::-webkit-scrollbar {
   height: 8px;
 }
 
 .card-body .card-text pre::-webkit-scrollbar-track,
-.card-body .card-text table::-webkit-scrollbar-track {
-  background: #444; 
+.markdown-table-scroll::-webkit-scrollbar-track {
+  background: #444;
   border-radius: 4px;
 }
 
 .card-body .card-text pre::-webkit-scrollbar-thumb,
-.card-body .card-text table::-webkit-scrollbar-thumb {
-  background: #888; 
+.markdown-table-scroll::-webkit-scrollbar-thumb {
+  background: #888;
   border-radius: 4px;
 }
 
 .card-body .card-text pre::-webkit-scrollbar-thumb:hover,
-.card-body .card-text table::-webkit-scrollbar-thumb:hover {
+.markdown-table-scroll::-webkit-scrollbar-thumb:hover {
   background: #aaa;
 }
 
 .markdown-container {
   width: 100%;
   overflow-x: auto;
+}
+
+.markdown-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  margin-bottom: 1rem;
+}
+
+.markdown-table-scroll table {
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  table-layout: auto;
+  margin-bottom: 0;
+}
+
+.markdown-table-scroll th,
+.markdown-table-scroll td {
+  min-width: 8rem;
+  max-width: 20rem;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
 }
 
 .card-content-area .markdown-container img {
@@ -205,9 +253,8 @@ tr:nth-child(even) {
 }
 
 .markdown-container table {
-  max-width: none; 
+  max-width: none;
   border-collapse: collapse;
-  margin-bottom: 1rem;
 }
 
 .markdown-container::-webkit-scrollbar {

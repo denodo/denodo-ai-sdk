@@ -1,5 +1,6 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import api from '../api/client';
+import { getNumberFormat, formatNumber } from '../utils/numberFormat';
 
 // Create the context
 const ConfigContext = createContext();
@@ -27,9 +28,11 @@ export const ConfigProvider = ({ children }) => {
       try {
         const response = await api.get("config");
         const savedInputMethod = getSavedInputMethod();
-        setConfig(savedInputMethod
-          ? { ...response.data, input_method: savedInputMethod }
-          : response.data);
+        setConfig({
+          ...response.data,
+          ...(savedInputMethod ? { input_method: savedInputMethod } : {}),
+          number_format: getNumberFormat(),
+        });
       } catch (error) {
         console.error('Error fetching config:', error);
         // Keep empty config if fetch fails
@@ -57,4 +60,10 @@ export const useConfig = () => {
   return context;
 };
 
-export default ConfigContext; 
+// Returns a formatter that uses the number format chosen in the User Profile modal
+export const useNumberFormat = () => {
+  const { config } = useConfig();
+  return (value, decimals = 0) => formatNumber(value, config.number_format, decimals);
+};
+
+export default ConfigContext;

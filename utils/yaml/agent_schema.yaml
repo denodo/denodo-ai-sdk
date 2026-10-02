@@ -73,7 +73,7 @@ properties:
         description: "LLM model"
       llm_temperature:
         type: number
-        description: "Defines the temperature setting for the chatbot LLM (0.0 to 2.0 for OpenAI, 0.0 to 1.0 for others)"
+        description: "Defines the temperature setting for the chatbot LLM (-1 to omit, 0.0 to 2.0 for OpenAI, 0.0 to 1.0 for others)"
       llm_max_tokens:
         type: integer
         description: "Defines the maximum output tokens for the chatbot LLM"
@@ -95,7 +95,7 @@ properties:
                 description: "AI SDK base LLM model"
               llm_temperature:
                 type: number
-                description: "Defines the temperature setting for the AI SDK base LLM (0.0 to 2.0 for OpenAI, 0.0 to 1.0 for others)"
+                description: "Defines the temperature setting for the AI SDK base LLM (-1 to omit, 0.0 to 2.0 for OpenAI, 0.0 to 1.0 for others)"
               llm_max_tokens:
                 type: integer
                 description: "Defines the maximum output tokens for the AI SDK base LLM"
@@ -110,7 +110,7 @@ properties:
                 description: "AI SDK thinking LLM model"
               llm_temperature:
                 type: number
-                description: "Defines the temperature setting for the AI SDK thinking LLM (0.0 to 2.0 for OpenAI, 0.0 to 1.0 for others)"
+                description: "Defines the temperature setting for the AI SDK thinking LLM (-1 to omit, 0.0 to 2.0 for OpenAI, 0.0 to 1.0 for others)"
               llm_max_tokens:
                 type: integer
                 description: "Defines the maximum output tokens for the AI SDK thinking LLM"
@@ -143,6 +143,10 @@ properties:
           description: "Collection name in the shared unstructured vector store."
           pattern: "^[A-Za-z0-9_.\\-]{1,80}$"
 
+      space:
+        type: string
+        minLength: 1
+        description: "Select a target AI Space (combination of databases and tags). Unioned with databases and tags."
       databases:
         type: array
         items:

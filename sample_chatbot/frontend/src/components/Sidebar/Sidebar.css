@@ -6,6 +6,8 @@
   display: flex;
   flex-direction: column;
   font-size: 0.95rem;
+  position: relative;
+  z-index: 1020;
 }
 
 .sidebar-container.closed {
@@ -22,6 +24,8 @@
   min-height: 76px;
   background-color: #143142;
   border-right: 2px solid #143b5c;
+  position: relative;
+  z-index: 1090;
 }
 
 .sidebar-header-logo {
@@ -129,11 +133,18 @@
   color: #006699;
   text-align: left; 
   display: flex;
-  justify-content: flex-start; 
+  justify-content: space-between; 
   align-items: center;
   position: relative; 
   margin-top: 0.5rem; 
   margin-bottom: 0.5rem;
+  user-select: none;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.sidebar-section-header:hover {
+  color: #143142;
 }
 
 .sidebar-divider {
@@ -142,19 +153,23 @@
   background-color: #e4e9ee;
 }
 
-/* Upload Icon */
-.upload-icon-wrapper {
-  position: absolute;
-  right: 15px; 
+/* Upload & Info Icons wrapper */
+.upload-icon-wrapper,
+.info-icon-wrapper {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
 }
 
-.upload-icon {
+.upload-icon,
+.info-icon {
   font-size: 1rem; 
   color: #006699;
   transition: color 0.2s ease;
 }
 
-.upload-icon:hover {
+.upload-icon:hover,
+.info-icon:hover {
   color: #143142;
 }
 
@@ -187,7 +202,7 @@
   margin-top: 10px;
 }
 
-/* --- CHAT ITEM ACTIONS (Hover & Pin Logic) --- */
+/* --- CHAT & AGENT ITEM ACTIONS --- */
 .sidebar-item-actions {
   position: absolute;
   right: 10px;
@@ -209,7 +224,7 @@
   color: #006699;
 }
 
-/* When hovering over the chat item, hide the pin and show the dots */
+/* When hovering over the item, hide the pin and show the dots */
 .sidebar-item:hover .sidebar-pin-icon {
   display: none;
 }
@@ -242,7 +257,7 @@
   min-width: 150px;
   border-color: #dcdfe3;
   border-radius: 8px;
-  z-index: 9999;
+  z-index: 1030;
   color: #006699;
 }
 

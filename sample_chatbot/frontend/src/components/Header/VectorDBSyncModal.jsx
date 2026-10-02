@@ -13,6 +13,8 @@ import OverlayTrigger from 'react-bootstrap/OverlayTrigger';
 import Tooltip from 'react-bootstrap/Tooltip';
 import NotificationToast from "../NotificationToast/NotificationToast";
 import CustomTooltip from "../CustomTooltip/CustomTooltip";
+import ChipInput from '../ChipInput/ChipInput';
+import { useNumberFormat } from "../../contexts/ConfigContext";
 
 const formatTimestamp = (timestamp) => {
   if (!timestamp) return 'N/A';
@@ -29,7 +31,9 @@ const formatTimestamp = (timestamp) => {
   }
 };
 
-const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpdate }) => {
+const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpdate, defaultTokenLimit = 0 }) => {
+  const formatNumber = useNumberFormat();
+
   // Common state
   const [activeTab, setActiveTab] = useState('status');
   const [isLoading, setIsLoading] = useState(false);
@@ -45,13 +49,17 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
   });
 
   // Sync state
-  const [syncVdbs, setSyncVdbs] = useState('');
-  const [syncTags, setSyncTags] = useState('');
-  const [ignoreTags, setIgnoreTags] = useState('');
+  const [syncVdbs, setSyncVdbs] = useState([]);
+  const [syncTags, setSyncTags] = useState([]);
+  const [ignoreTags, setIgnoreTags] = useState([]);
+  const SYNC_INPUT_HELP_TEXT = "Type an item and press Enter, or paste a list separated by line breaks (e.g., from Excel or a text file).";
   const [examplesPerTable, setExamplesPerTable] = useState(100);
   const [timeoutSeconds, setTimeoutSeconds] = useState(300);
   const [incremental, setIncremental] = useState(false);
   const [parallel, setParallel] = useState(true);
+  const numericLimit = Number(defaultTokenLimit) || 0;
+  const [isChunkingEnabled, setIsChunkingEnabled] = useState(numericLimit > 0);
+  const [maxTokens, setMaxTokens] = useState(numericLimit > 0 ? numericLimit : 1000);
 
   // Delete state
   const [selectedDatabases, setSelectedDatabases] = useState([]);
@@ -63,6 +71,12 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
       setStatusData(syncedResources || {});
     }
   }, [show, syncedResources]);
+
+  useEffect(() => {
+    const limit = Number(defaultTokenLimit) || 0;
+    setIsChunkingEnabled(limit > 0);
+    setMaxTokens(limit > 0 ? limit : 1000);
+  }, [defaultTokenLimit]);
 
   const showToast = (message, variant, title, duration = 5000) => {
     setToastConfig({ show: true, message, variant, title, duration });
@@ -82,34 +96,32 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
 
   const isTimeoutValid = timeoutSeconds !== '' && Number(timeoutSeconds) > 0;
   const isExamplesValid = examplesPerTable !== '' && Number(examplesPerTable) >= 0 && Number(examplesPerTable) <= 500;
+  const isMaxTokensValid = !isChunkingEnabled || (maxTokens !== '' && Number(maxTokens) >= 1000);
 
   const handleSyncSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
-
-    const processedVdbs = syncVdbs.split(',').map(vdb => vdb.trim()).filter(vdb => vdb);
-    const processedTags = syncTags.split(',').map(tag => tag.trim()).filter(tag => tag);
-    const processedIgnoreTags = ignoreTags.split(',').map(tag => tag.trim()).filter(tag => tag);
 
     const finalTimeoutSeconds = parseInt(timeoutSeconds, 10) || 300;
     const axiosTimeoutMs = finalTimeoutSeconds * 1000;
 
     try {
       const response = await api.post("sync_vdbs", {
-        vdbs: processedVdbs,
-        tags: processedTags,
-        tags_to_ignore: processedIgnoreTags,
+        vdbs: syncVdbs,
+        tags: syncTags,
+        tags_to_ignore: ignoreTags,
         examples_per_table: examplesPerTable,
         timeout_seconds: finalTimeoutSeconds,
         incremental,
-        parallel
+        parallel,
+        embeddings_token_limit: isChunkingEnabled ? parseInt(maxTokens, 10) : 0
       }, {
         timeout: axiosTimeoutMs
       });
 
       if (response.status === 204) {
         if (incremental) {
-            const existsLocally = checkResourcesAlreadyExist(processedVdbs, processedTags);
+            const existsLocally = checkResourcesAlreadyExist(syncVdbs, syncTags);
             if (existsLocally) {
                 showToast(
                     "You made an incremental request, but no updates have been made to the desired data since the last sync.",
@@ -134,7 +146,7 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
       } else {
         const errors = response.data.dataUsageErrors || [];
 
-        // extract timings
+        // Extract timings
         let timingsMsg = "";
 
         if (Array.isArray(response.data.timings) && response.data.timings.length > 0) {
@@ -171,14 +183,14 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
 
             sortedKeys.forEach(key => {
               const formattedKey = key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-              timingsMsg += `\n• ${formattedKey}: ${Number(aggregatedTimings[key]).toFixed(2)}s`;
+              timingsMsg += `\n• ${formattedKey}: ${formatNumber(aggregatedTimings[key], 2)}s`;
             });
           }
         } else if (response.data.timings && typeof response.data.timings === 'object' && !Array.isArray(response.data.timings)) {
           timingsMsg += "\n\nTiming Breakdown:";
           Object.entries(response.data.timings).forEach(([key, value]) => {
             const formattedKey = key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-            timingsMsg += `\n• ${formattedKey}: ${Number(value).toFixed(2)}s`;
+            timingsMsg += `\n• ${formattedKey}: ${formatNumber(value, 2)}s`;
           });
         }
 
@@ -192,12 +204,13 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
           }
         }
 
-        setSyncVdbs('');
-        setSyncTags('');
-        setIgnoreTags('');
+        // Reset inputs
+        setSyncVdbs([]);
+        setSyncTags([]);
+        setIgnoreTags([]);
         setActiveTab('status'); 
 
-        // append timings to toast
+        // Append timings to toast
         if (errors.length > 0) {
           const formatError = (errObj) => {
             const msg = errObj.cause || 'Unknown error';
@@ -231,7 +244,7 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
       if (isAxiosError(error) && error.code === 'ECONNABORTED') {
         errorMsg = `The synchronization timeout has been exceeded (${finalTimeoutSeconds} seconds). The request was cancelled before completion. It is recommended to synchronize again to ensure no metadata is missing.`;
       } else {
-        errorMsg = error.response?.data?.message || errorMsg;
+        errorMsg = error.response?.data?.detail || error.response?.data?.message || errorMsg;
       }
       const toastTitle = isAxiosError(error) && error.code === 'ECONNABORTED' ? 'Sync Timeout' : 'Sync Error';
       showToast(errorMsg, 'danger', toastTitle, 10000);
@@ -278,8 +291,8 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
     try {
       const response = await api.delete("delete_metadata", {
         data: {
-          vdp_database_names: selectedDatabases.join(','),
-          vdp_tag_names: selectedTags.join(','),
+          vdp_database_names: selectedDatabases,
+          vdp_tag_names: selectedTags,
           delete_conflicting: deleteConflicting
         }
       });
@@ -399,12 +412,15 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
 
   const resetState = () => {
     setActiveTab('status');
-    setSyncVdbs('');
-    setSyncTags('');
-    setIgnoreTags('');
+    setSyncVdbs([]);
+    setSyncTags([]);
+    setIgnoreTags([]);
     setSelectedDatabases([]);
     setSelectedTags([]);
     setDeleteConflicting(false);
+    const limit = Number(defaultTokenLimit) || 0;
+    setIsChunkingEnabled(limit > 0);
+    setMaxTokens(limit > 0 ? limit : 1000);
   };
 
   const handleOnExited = () => {
@@ -446,7 +462,7 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
           <Button
               variant="dark"
               type="submit"
-              disabled={isLoading || !isTimeoutValid || !isExamplesValid}
+              disabled={isLoading || !isTimeoutValid || !isExamplesValid || !isMaxTokensValid}
               form="sync-form"
           >
             {isLoading ? (
@@ -554,30 +570,51 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
               <Tab eventKey="sync" title="Sync" disabled={isLoading}>
                 <Form id="sync-form" onSubmit={handleSyncSubmit}>
                   <Form.Group className="mb-3">
-                    <Form.Label>VDBs to sync (comma-separated)</Form.Label>
-                    <Form.Control
-                      type="text"
-                      placeholder="Specify a comma-separated list of VDBs to sync"
-                      value={syncVdbs}
-                      onChange={(e) => setSyncVdbs(e.target.value)}
+                    <Form.Label>
+                      <span className="d-flex align-items-center">
+                        VDBs to sync
+                        <CustomTooltip id="tooltip-vdbs" content={SYNC_INPUT_HELP_TEXT} delay={{ show: 200, hide: 300 }}>
+                          <i className="bi bi-info-circle info-icon ms-2"></i>
+                        </CustomTooltip>
+                      </span>
+                    </Form.Label>
+                    <ChipInput 
+                      items={syncVdbs} 
+                      setItems={setSyncVdbs} 
+                      placeholder="Type a VDB name and press Enter..." 
+                      id="vdbs-input" 
                     />
                   </Form.Group>
                   <Form.Group className="mb-3">
-                    <Form.Label>Tags to sync (comma-separated)</Form.Label>
-                    <Form.Control
-                      type="text"
-                      placeholder="Specify a comma-separated list of tags to sync"
-                      value={syncTags}
-                      onChange={(e) => setSyncTags(e.target.value)}
+                    <Form.Label>
+                      <span className="d-flex align-items-center">
+                        Tags to sync
+                        <CustomTooltip id="tooltip-tags" content={SYNC_INPUT_HELP_TEXT} delay={{ show: 200, hide: 300 }}>
+                          <i className="bi bi-info-circle info-icon ms-2"></i>
+                        </CustomTooltip>
+                      </span>
+                    </Form.Label>
+                    <ChipInput 
+                      items={syncTags} 
+                      setItems={setSyncTags} 
+                      placeholder="Type a tag and press Enter..." 
+                      id="tags-input" 
                     />
                   </Form.Group>
                   <Form.Group className="mb-3">
-                    <Form.Label>Tags to ignore (comma-separated)</Form.Label>
-                    <Form.Control
-                      type="text"
-                      placeholder="Specify a comma-separated list of tags to ignore"
-                      value={ignoreTags}
-                      onChange={(e) => setIgnoreTags(e.target.value)}
+                    <Form.Label>
+                      <span className="d-flex align-items-center">
+                        Tags to ignore
+                        <CustomTooltip id="tooltip-ignore-tags" content={SYNC_INPUT_HELP_TEXT} delay={{ show: 200, hide: 300 }}>
+                          <i className="bi bi-info-circle info-icon ms-2"></i>
+                        </CustomTooltip>
+                      </span>
+                    </Form.Label>
+                    <ChipInput 
+                      items={ignoreTags} 
+                      setItems={setIgnoreTags} 
+                      placeholder="Type a tag to ignore and press Enter..." 
+                      id="ignore-tags-input" 
                     />
                   </Form.Group>
                   <div className="row">
@@ -613,6 +650,41 @@ const VectorDBSyncModal = ({ show, handleClose, syncedResources, onResourcesUpda
                       </Form.Group>
                     </div>
                   </div>
+                  
+                  <Form.Group className="mb-3">
+                    <Form.Check 
+                      type="switch"
+                      id="chunking-toggle"
+                      label={
+                        <span className="d-flex align-items-center">
+                          Enable view chunking
+                          <CustomTooltip id="tooltip-chunking" content="If any of the views in your data model don't fit entirely into your embedding model's input token window, vectorization will fail. To avoid this, you can split the view into smaller chunks that will be re-joined after performing similarity search on them. If enabled, you must specify a limit of at least 1000 tokens." delay={{ show: 200, hide: 300 }}>
+                            <i className="bi bi-info-circle info-icon ms-2"></i>
+                          </CustomTooltip>
+                        </span>
+                      }
+                      checked={isChunkingEnabled}
+                      onChange={(e) => setIsChunkingEnabled(e.target.checked)}
+                    />
+                  </Form.Group>
+
+                  {isChunkingEnabled && (
+                    <Form.Group className="mb-3">
+                      <Form.Label>Max input tokens</Form.Label>
+                      <Form.Control
+                          type="number"
+                          min="1000"
+                          value={maxTokens}
+                          isInvalid={!isMaxTokensValid}
+                          onChange={(e) => setMaxTokens(e.target.value === '' ? '' : parseInt(e.target.value))}
+                          placeholder="e.g., 1000"
+                      />
+                      <Form.Control.Feedback type="invalid">
+                          Must be at least 1000.
+                      </Form.Control.Feedback>
+                  </Form.Group>
+                  )}
+
                   <Form.Group className="mb-3">
                     <Form.Check
                       type="checkbox"

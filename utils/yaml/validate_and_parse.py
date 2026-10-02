@@ -15,7 +15,47 @@ import yaml
 from jsonschema import validate, ValidationError
 import json
 
+from api.mcp.spaces import load_spaces
+
 logger = logging.getLogger(__name__)
+
+def _union_names(*groups):
+    seen = set()
+    names = []
+    for group in groups:
+        if isinstance(group, str):
+            group = [group] if group.strip() else []
+        for name in group or []:
+            name = str(name).strip()
+            if name and name not in seen:
+                seen.add(name)
+                names.append(name)
+    return names
+
+def _apply_space_scope(data, spaces, source_name):
+    settings = data.get("settings")
+    if not isinstance(settings, dict):
+        return True
+
+    space_name = str(settings.get("space") or "").strip()
+    if not space_name:
+        return True
+
+    if space_name not in spaces:
+        logger.error(
+            f"Validation error in {source_name}: unknown AI Space '{space_name}'. "
+            f"Add api/agents/spaces/{space_name}.yaml"
+        )
+        return False
+
+    space_databases, space_tags = spaces[space_name]
+    settings["databases"] = _union_names(space_databases, settings.get("databases"))
+    settings["tags"] = _union_names(space_tags, settings.get("tags"))
+    logger.info(
+        f"Agent '{data.get('id')}' using AI Space '{space_name}' "
+        f"(databases={settings['databases']}, tags={settings['tags']})"
+    )
+    return True
 
 def load_and_validate_agents() -> list:
     """
@@ -53,6 +93,8 @@ def load_and_validate_agents() -> list:
         logger.info(f"No YAML files found in the agents {agents_dir} directory.")
         return parsed_agents
 
+    spaces = None
+
     # 4. Process each file
     for file_path in yaml_files:
         try:
@@ -71,6 +113,13 @@ def load_and_validate_agents() -> list:
             if agent_id in seen_ids:
                 logger.error(f"Validation error in {file_path.name}: Duplicate 'id' slug '{agent_id}' already exists.")
                 continue
+
+            settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
+            if str(settings.get("space") or "").strip():
+                if spaces is None:
+                    spaces = load_spaces()
+                if not _apply_space_scope(data, spaces, file_path.name):
+                    continue
 
             seen_ids.add(agent_id)
             parsed_agents.append(data)

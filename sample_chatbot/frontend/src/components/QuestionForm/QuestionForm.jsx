@@ -11,7 +11,9 @@ import "./QuestionForm.css";
 const baseToolOptions = [
   { id: 'auto', label: 'Auto (Default)', bg: '#6c757d', icon: 'bi-stars', iconColor: '#6c757d' }, 
   { id: 'deep_query', label: 'Deep Query', bg: 'linear-gradient(135deg, #ED342A 0%, #413581 100%)', icon: 'bi-magic', iconColor: '#7953aa' },
-  { id: 'data_agent', label: 'Data Agent', bg: '#0d6efd', icon: 'bi-database', iconColor: '#0d6efd' }, 
+  { id: 'generate_vql', label: 'Generate VQL', bg: '#0d6efd', icon: 'bi-database', iconColor: '#0d6efd' },
+  { id: 'execute_vql', label: 'Execute VQL', bg: '#0dcaf0', icon: 'bi-play-circle', iconColor: '#0dcaf0' },
+  { id: 'generate_graph', label: 'Generate Graph', bg: '#6f42c1', icon: 'bi-bar-chart', iconColor: '#6f42c1' },
   { id: 'metadata_search', label: 'Metadata Search', bg: '#20c997', icon: 'bi-code-slash', iconColor: '#20c997' }, 
   { id: 'knowledge_query', label: 'Knowledge Base Query', bg: '#fd7e14', icon: 'bi-book', iconColor: '#fd7e14' }
 ];
@@ -124,7 +126,7 @@ const QuestionForm = ({
   const getPlaceholder = () => {
     if (!isAuthenticated) return "Please sign in to ask questions";
 
-    let options = ['@data', '@metadata'];
+    let options = ['@data', '@vql', '@graph', '@metadata'];
     if (config.unstructured_mode) options.push('@kb');
     if (config.enable_deep_query) options.push('@deepquery');
 

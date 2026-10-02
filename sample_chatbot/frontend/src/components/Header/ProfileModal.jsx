@@ -7,6 +7,7 @@ import api from '../../api/client';
 import CustomTooltip from '../CustomTooltip/CustomTooltip';
 import NotificationToast from '../NotificationToast/NotificationToast';
 import { useConfig, getSavedInputMethod } from '../../contexts/ConfigContext';
+import { NUMBER_FORMATS, DEFAULT_NUMBER_FORMAT, getNumberFormat } from '../../utils/numberFormat';
 
 const ProfileModal = ({ 
   show, 
@@ -17,6 +18,7 @@ const ProfileModal = ({
   const [userDetails, setUserDetails] = useState('');
   const [username, setUsername] = useState('');
   const [inputMethod, setInputMethod] = useState('enter');
+  const [numberFormat, setNumberFormat] = useState(DEFAULT_NUMBER_FORMAT);
   const [isLoading, setIsLoading] = useState(false);
 
   const [toastConfig, setToastConfig] = useState({
@@ -39,6 +41,7 @@ const ProfileModal = ({
       setUserDetails(savedUserDetails);
 
       setInputMethod(getSavedInputMethod(currentUser) || config.input_method || 'enter');
+      setNumberFormat(getNumberFormat(currentUser));
     }
   }, [show, config.input_method]);
 
@@ -70,7 +73,8 @@ const ProfileModal = ({
       if (response.status === 200) {
         localStorage.setItem(`${username}_user_details`, userDetails);
         localStorage.setItem(`${username}_input_method`, inputMethod);
-        updateConfig({ input_method: inputMethod });
+        localStorage.setItem(`${username}_number_format`, numberFormat);
+        updateConfig({ input_method: inputMethod, number_format: numberFormat });
         showToast('Your user profile has been successfully updated.', 'success', 'Profile Saved');
         handleClose();
       }
@@ -144,6 +148,31 @@ const ProfileModal = ({
               >
                 <option value="enter">Enter to send</option>
                 <option value="ctrl_enter">Ctrl+Enter to send</option>
+              </Form.Select>
+            </Form.Group>
+
+            <Form.Group controlId="formNumberFormat" className="mb-3">
+              <Form.Label className="d-flex align-items-center">
+                Number format
+                <CustomTooltip
+                  id="tooltip-number-format"
+                  content="Thousands and decimal separators used when showing numbers such as token counts and execution times. Defaults to your browser locale until you pick one."
+                >
+                  <i
+                    className="bi bi-info-circle ms-2"
+                    style={{ cursor: 'help', fontSize: '0.85rem', color: '#adb5bd', transition: 'color 0.2s' }}
+                    onMouseEnter={(e) => e.target.style.color = '#112533'}
+                    onMouseLeave={(e) => e.target.style.color = '#adb5bd'}
+                  ></i>
+                </CustomTooltip>
+              </Form.Label>
+              <Form.Select
+                value={numberFormat}
+                onChange={(e) => setNumberFormat(e.target.value)}
+              >
+                {Object.keys(NUMBER_FORMATS).map((format) => (
+                  <option key={format} value={format}>{format}</option>
+                ))}
               </Form.Select>
             </Form.Group>
           </Form>

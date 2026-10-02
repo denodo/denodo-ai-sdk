@@ -207,8 +207,8 @@ class ChatService:
             user: User instance
             query: User's query string
             tool_name: Optional tool name to use
-            vdp_databases: Database filter string
-            vdp_tags: Tag filter string
+            vdp_databases: Database filter list
+            vdp_tags: Tag filter list
             allow_external_associations: Whether to allow external associations
             thread_id: ID of the conversation thread for persistent memory
             is_new_thread: Boolean indicating if this is the first message of the chat
@@ -233,8 +233,8 @@ class ChatService:
         if thread_id and not is_new_thread:
             self._sanitize_dangling_tool_calls(chatbot, thread_id)
 
-        vdp_databases = vdp_databases or ",".join(self._config.databases)
-        vdp_tags = vdp_tags or ",".join(self._config.tags)
+        vdp_databases = vdp_databases or list(self._config.databases or [])
+        vdp_tags = vdp_tags or list(self._config.tags or [])
 
         stream = chatbot.process_query(
             query=query,

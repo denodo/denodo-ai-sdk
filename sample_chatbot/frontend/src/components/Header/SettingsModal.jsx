@@ -54,6 +54,36 @@ const canonicalProviderForSelect = (provider, validProviders) => {
   return match;
 };
 
+const OMIT_TEMPERATURE_VALUE = -1;
+const OMIT_TEMPERATURE_TOOLTIP =
+  "Certain LLMs/providers might not accept a temperature parameter. To work with those models/providers in the AI SDK, check this box.";
+
+const isOmittedTemperature = (temp) => {
+  if (temp === "" || temp === null || temp === undefined) return false;
+  const parsed = parseFloat(temp);
+  return !Number.isNaN(parsed) && parsed === OMIT_TEMPERATURE_VALUE;
+};
+
+const toFormLLM = (settings = {}) => {
+  const omitTemperature = isOmittedTemperature(settings.temperature);
+  return {
+    provider: settings.provider || "",
+    model: settings.model || "",
+    temperature: omitTemperature ? "" : (settings.temperature ?? ""),
+    max_tokens: settings.max_tokens || "",
+    omitTemperature,
+  };
+};
+
+const toPayloadLLM = (llmState = {}) => ({
+  provider: llmState.provider,
+  model: llmState.model,
+  temperature: llmState.omitTemperature
+    ? OMIT_TEMPERATURE_VALUE
+    : llmState.temperature,
+  max_tokens: llmState.max_tokens,
+});
+
 const SettingsModal = ({
   show,
   handleClose,
@@ -85,15 +115,19 @@ const SettingsModal = ({
     model: "",
     temperature: "",
     max_tokens: "",
+    omitTemperature: false,
   });
   const [aiSDKThinkingLLM, setAISDKThinkingLLM] = useState({
     provider: "",
     model: "",
     temperature: "",
     max_tokens: "",
+    omitTemperature: false,
   });
   const [useBaseLLMForExecution, setUseBaseLLMForExecution] = useState(false);
   const [checkAmbiguity, setCheckAmbiguity] = useState(true);
+  const [autoFixing, setAutoFixing] = useState(true);
+  const [autoFixingAttempts, setAutoFixingAttempts] = useState(2);
   const [sdkDefaults, setSdkDefaults] = useState({ base: {}, thinking: {} });
   const [sdkDeepQueryEnabled, setSdkDeepQueryEnabled] = useState(false);
 
@@ -102,6 +136,7 @@ const SettingsModal = ({
     model: "",
     temperature: "",
     max_tokens: "",
+    omitTemperature: false,
   });
   const [chatbotDefaults, setChatbotDefaults] = useState({});
   const [chatbotDeepQueryEnabled, setChatbotDeepQueryEnabled] = useState(false);
@@ -118,12 +153,8 @@ const SettingsModal = ({
   const [togglesLoading, setTogglesLoading] = useState(false);
   const [togglesError, setTogglesError] = useState(null);
 
-  const agentKey = selectedChatbot
-    ? selectedChatbot.isGlobal
-      ? "global"
-      : selectedChatbot.id
-    : "global";
-  const isGlobalChat = selectedChatbot && selectedChatbot.isGlobal;
+  const isGlobalChat = !selectedChatbot || selectedChatbot.isGlobal === true;
+  const agentKey = isGlobalChat ? "global" : selectedChatbot.id || "global";
 
   // Permissions evaluated for the agent being configured (fetched with its
   // settings); fall back to the current agent's config until loaded.
@@ -242,6 +273,8 @@ const SettingsModal = ({
           data.ai_sdk_thinking_llm_preferences = storedAiSdk.ai_sdk_thinking_llm || {};
           data.chatbot_llm_preferences = storedChatbot;
           data.check_ambiguity = storedAiSdk.check_ambiguity ?? data.check_ambiguity_default;
+          data.auto_fixing = storedAiSdk.auto_fixing ?? data.auto_fixing_default;
+          data.auto_fixing_attempts = storedAiSdk.auto_fixing_attempts ?? data.auto_fixing_attempts_default;
           data.use_base_llm_for_execution = storedAiSdk.use_base_llm_for_execution ?? data.use_base_llm_for_execution_default;
         }
 
@@ -278,28 +311,30 @@ const SettingsModal = ({
           basePrefs.provider || baseDefaults.provider || "",
           providers,
         );
-        const effectiveBaseSettings = {
+        const effectiveBaseSettings = toFormLLM({
           provider: effectiveBaseProvider,
           model: basePrefs.model || baseDefaults.model || "",
           temperature: basePrefs.temperature ?? baseDefaults.temperature ?? "",
           max_tokens: basePrefs.max_tokens || baseDefaults.max_tokens || "",
-        };
+        });
 
         const effectiveThinkingProvider = canonicalProviderForSelect(
           thinkingPrefs.provider || thinkingDefaults.provider || "",
           providers,
         );
-        const effectiveThinkingSettings = {
+        const effectiveThinkingSettings = toFormLLM({
           provider: effectiveThinkingProvider,
           model: thinkingPrefs.model || thinkingDefaults.model || "",
           temperature:
             thinkingPrefs.temperature ?? thinkingDefaults.temperature ?? "",
           max_tokens:
             thinkingPrefs.max_tokens || thinkingDefaults.max_tokens || "",
-        };
+        });
 
         const checkAmbVal =
           data.check_ambiguity ?? sdkInfo.check_ambiguity ?? true;
+        const autoFixingVal = data.auto_fixing ?? sdkInfo.auto_fixing ?? true;
+        const autoFixingAttemptsVal = data.auto_fixing_attempts ?? sdkInfo.auto_fixing_attempts ?? 2;
 
         const execModelFromData = data.use_base_llm_for_execution;
         const useBaseExecVal =
@@ -311,14 +346,14 @@ const SettingsModal = ({
           chatbotPrefs.provider || chatbotServerDefaults.provider || "",
           providers,
         );
-        const effectiveChatbotSettings = {
+        const effectiveChatbotSettings = toFormLLM({
           provider: effectiveChatbotProvider,
           model: chatbotPrefs.model || chatbotServerDefaults.model || "",
           temperature:
             chatbotPrefs.temperature ?? chatbotServerDefaults.temperature ?? "",
           max_tokens:
             chatbotPrefs.max_tokens || chatbotServerDefaults.max_tokens || "",
-        };
+        });
 
         const defs = data.default_custom_instructions || {};
         setDefaultCustomInstructions({
@@ -345,11 +380,13 @@ const SettingsModal = ({
           if (canEditLLM) {
             const aiSdkLlmDict = getDict(username, "ai_sdk_llm_settings_dict");
             aiSdkLlmDict[agentKey] = {
-              ai_sdk_base_llm: effectiveBaseSettings,
+              ai_sdk_base_llm: toPayloadLLM(effectiveBaseSettings),
               check_ambiguity: checkAmbVal,
+              auto_fixing: autoFixingVal,
+              auto_fixing_attempts: autoFixingAttemptsVal,
               ...(hasThinkingModel &&
                 data.chatbot_deepquery && {
-                  ai_sdk_thinking_llm: effectiveThinkingSettings,
+                  ai_sdk_thinking_llm: toPayloadLLM(effectiveThinkingSettings),
                   use_base_llm_for_execution: useBaseExecVal,
                 }),
             };
@@ -359,7 +396,7 @@ const SettingsModal = ({
               username,
               "chatbot_llm_settings_dict",
             );
-            chatbotLlmDict[agentKey] = effectiveChatbotSettings;
+            chatbotLlmDict[agentKey] = toPayloadLLM(effectiveChatbotSettings);
             saveDict(username, "chatbot_llm_settings_dict", chatbotLlmDict);
           }
         }
@@ -368,6 +405,8 @@ const SettingsModal = ({
         setAISDKThinkingLLM(effectiveThinkingSettings);
         setChatbotLLM(effectiveChatbotSettings);
         setCheckAmbiguity(checkAmbVal);
+        setAutoFixing(autoFixingVal);
+        setAutoFixingAttempts(autoFixingAttemptsVal);
         setUseBaseLLMForExecution(useBaseExecVal);
 
       } catch (error) {
@@ -398,8 +437,10 @@ const SettingsModal = ({
     if (!canEditLLM) return true;
 
     if (
-      !validateTemperature(aiSDKBaseLLM.temperature) ||
-      !validateTemperature(chatbotLLM.temperature)
+      (!aiSDKBaseLLM.omitTemperature &&
+        !validateTemperature(aiSDKBaseLLM.temperature)) ||
+      (!chatbotLLM.omitTemperature &&
+        !validateTemperature(chatbotLLM.temperature))
     ) {
       showToast(
         "Temperature must be between 0.0 and 2.0",
@@ -419,8 +460,20 @@ const SettingsModal = ({
       );
       return false;
     }
+    const attemptsInt = parseInt(autoFixingAttempts, 10);
+    if (isNaN(attemptsInt) || attemptsInt < 1 || attemptsInt > 5) {
+      showToast(
+        "Automatic VQL fixing attempts must be between 1 and 5",
+        "warning",
+        "Validation Error",
+      );
+      return false;
+    }
     if (deepQueryActive) {
-      if (!validateTemperature(aiSDKThinkingLLM.temperature)) {
+      if (
+        !aiSDKThinkingLLM.omitTemperature &&
+        !validateTemperature(aiSDKThinkingLLM.temperature)
+      ) {
         showToast(
           "AI SDK Thinking LLM Temperature must be between 0.0 and 2.0",
           "warning",
@@ -470,13 +523,15 @@ const SettingsModal = ({
         // pushed automatically the next time the user switches to it.
         if (isCurrentAgent) {
           const payload = {
-            ai_sdk_base_llm: aiSDKBaseLLM,
+            ai_sdk_base_llm: toPayloadLLM(aiSDKBaseLLM),
             check_ambiguity: checkAmbiguity,
+            auto_fixing: autoFixing,
+            auto_fixing_attempts: Number(autoFixingAttempts),
             ...(deepQueryActive && {
-              ai_sdk_thinking_llm: aiSDKThinkingLLM,
+              ai_sdk_thinking_llm: toPayloadLLM(aiSDKThinkingLLM),
               use_base_llm_for_execution: useBaseLLMForExecution,
             }),
-            chatbot_llm: chatbotLLM,
+            chatbot_llm: toPayloadLLM(chatbotLLM),
           };
 
           await api.post("update_llm_settings", payload);
@@ -484,17 +539,19 @@ const SettingsModal = ({
 
         const aiSdkLlmDict = getDict(username, "ai_sdk_llm_settings_dict");
         aiSdkLlmDict[agentKey] = {
-          ai_sdk_base_llm: aiSDKBaseLLM,
+          ai_sdk_base_llm: toPayloadLLM(aiSDKBaseLLM),
           check_ambiguity: checkAmbiguity,
+          auto_fixing: autoFixing,
+          auto_fixing_attempts: Number(autoFixingAttempts),
           ...(deepQueryActive && {
-            ai_sdk_thinking_llm: aiSDKThinkingLLM,
+            ai_sdk_thinking_llm: toPayloadLLM(aiSDKThinkingLLM),
             use_base_llm_for_execution: useBaseLLMForExecution,
           }),
         };
         saveDict(username, "ai_sdk_llm_settings_dict", aiSdkLlmDict);
 
         const chatbotLlmDict = getDict(username, "chatbot_llm_settings_dict");
-        chatbotLlmDict[agentKey] = chatbotLLM;
+        chatbotLlmDict[agentKey] = toPayloadLLM(chatbotLLM);
         saveDict(username, "chatbot_llm_settings_dict", chatbotLlmDict);
       }
 
@@ -547,23 +604,27 @@ const SettingsModal = ({
           chatbotServerDefaults.provider || "",
           validProviders,
         );
-        setChatbotLLM({
-          provider: p,
-          model: chatbotServerDefaults.model || "",
-          temperature: chatbotServerDefaults.temperature ?? "",
-          max_tokens: chatbotServerDefaults.max_tokens || "",
-        });
+        setChatbotLLM(
+          toFormLLM({
+            provider: p,
+            model: chatbotServerDefaults.model || "",
+            temperature: chatbotServerDefaults.temperature ?? "",
+            max_tokens: chatbotServerDefaults.max_tokens || "",
+          }),
+        );
       } else if (activeTab === "ai_sdk") {
         const baseP = canonicalProviderForSelect(
           baseDefaults.provider || "",
           validProviders,
         );
-        setAISDKBaseLLM({
-          provider: baseP,
-          model: baseDefaults.model || "",
-          temperature: baseDefaults.temperature ?? "",
-          max_tokens: baseDefaults.max_tokens || "",
-        });
+        setAISDKBaseLLM(
+          toFormLLM({
+            provider: baseP,
+            model: baseDefaults.model || "",
+            temperature: baseDefaults.temperature ?? "",
+            max_tokens: baseDefaults.max_tokens || "",
+          }),
+        );
 
         const hasThinkingModel =
           sdkInfo.thinking_llm != null ||
@@ -575,12 +636,14 @@ const SettingsModal = ({
             thinkingDefaults.provider || "",
             validProviders,
           );
-          setAISDKThinkingLLM({
-            provider: thP,
-            model: thinkingDefaults.model || "",
-            temperature: thinkingDefaults.temperature ?? "",
-            max_tokens: thinkingDefaults.max_tokens || "",
-          });
+          setAISDKThinkingLLM(
+            toFormLLM({
+              provider: thP,
+              model: thinkingDefaults.model || "",
+              temperature: thinkingDefaults.temperature ?? "",
+              max_tokens: thinkingDefaults.max_tokens || "",
+            }),
+          );
           
           const defExec = data.use_base_llm_for_execution_default;
           setUseBaseLLMForExecution(
@@ -593,6 +656,14 @@ const SettingsModal = ({
         const defAmb = data.check_ambiguity_default;
         setCheckAmbiguity(
           defAmb !== null && defAmb !== undefined ? defAmb : true,
+        );
+        const defAutoFixing = data.auto_fixing_default;
+        setAutoFixing(
+          defAutoFixing !== null && defAutoFixing !== undefined ? defAutoFixing : true,
+        );
+        const defAttempts = data.auto_fixing_attempts_default;
+        setAutoFixingAttempts(
+          defAttempts !== null && defAttempts !== undefined ? defAttempts : 2,
         );
 
         const defs = data.default_custom_instructions || {};
@@ -632,82 +703,125 @@ const SettingsModal = ({
     );
   };
 
-  const renderLLMSection = (sectionTitle, llmState, setLLMState) => (
-    <div className="mb-3">
-      {sectionTitle && <h6 className="mb-2 small fw-bold">{sectionTitle}</h6>}
-      <div className="row g-2">
-        <div className="col-md-6">
-          <Form.Group className="mb-2">
-            <Form.Label className="small">Provider</Form.Label>
-            <Form.Select
-              size="sm"
-              value={llmState.provider}
-              onChange={(e) =>
-                setLLMState((prev) => ({ ...prev, provider: e.target.value }))
-              }
-            >
-              <option value="">Select provider...</option>
-              {validProviders.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </Form.Select>
-          </Form.Group>
-        </div>
-        <div className="col-md-6">
-          <Form.Group className="mb-2">
-            <Form.Label className="small">Model</Form.Label>
-            <Form.Control
-              size="sm"
-              type="text"
-              placeholder="e.g., gpt-5.2-none, gemini-2.5-flash"
-              value={llmState.model}
-              onChange={(e) =>
-                setLLMState((prev) => ({ ...prev, model: e.target.value }))
-              }
-            />
-          </Form.Group>
-        </div>
-        <div className="col-md-6">
-          <Form.Group className="mb-2">
-            <Form.Label className="small">Temperature (0.0 - 2.0)</Form.Label>
-            <Form.Control
-              size="sm"
-              type="number"
-              step="0.1"
-              min="0.0"
-              max="2.0"
-              placeholder="e.g., 0.7"
-              value={llmState.temperature}
-              onChange={(e) =>
-                setLLMState((prev) => ({
-                  ...prev,
-                  temperature: e.target.value,
-                }))
-              }
-            />
-          </Form.Group>
-        </div>
-        <div className="col-md-6">
-          <Form.Group className="mb-2">
-            <Form.Label className="small">Max Output Tokens</Form.Label>
-            <Form.Control
-              size="sm"
-              type="number"
-              min="1024"
-              max="20000"
-              placeholder="e.g., 4096"
-              value={llmState.max_tokens}
-              onChange={(e) =>
-                setLLMState((prev) => ({ ...prev, max_tokens: e.target.value }))
-              }
-            />
-          </Form.Group>
+  const renderLLMSection = (sectionTitle, llmState, setLLMState) => {
+    const checkboxId = `omit-temperature-${(sectionTitle || "chatbot").replace(/\s+/g, "-").toLowerCase()}`;
+    return (
+      <div className="mb-3">
+        {sectionTitle && <h6 className="mb-2 small fw-bold">{sectionTitle}</h6>}
+        <div className="row g-2">
+          <div className="col-md-6">
+            <Form.Group className="mb-2">
+              <Form.Label className="small">Provider</Form.Label>
+              <Form.Select
+                size="sm"
+                value={llmState.provider}
+                onChange={(e) =>
+                  setLLMState((prev) => ({ ...prev, provider: e.target.value }))
+                }
+              >
+                <option value="">Select provider...</option>
+                {validProviders.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </Form.Select>
+            </Form.Group>
+          </div>
+          <div className="col-md-6">
+            <Form.Group className="mb-2">
+              <Form.Label className="small">Model</Form.Label>
+              <Form.Control
+                size="sm"
+                type="text"
+                placeholder="e.g., gpt-5.2-none, gemini-2.5-flash"
+                value={llmState.model}
+                onChange={(e) =>
+                  setLLMState((prev) => ({ ...prev, model: e.target.value }))
+                }
+              />
+            </Form.Group>
+          </div>
+          <div className="col-md-6">
+            <Form.Group className="mb-2">
+              <Form.Label className="small">Temperature (0.0 - 2.0)</Form.Label>
+              <Form.Control
+                size="sm"
+                type="number"
+                step="0.1"
+                min="0.0"
+                max="2.0"
+                placeholder="e.g., 0.7"
+                value={llmState.omitTemperature ? "" : llmState.temperature}
+                disabled={llmState.omitTemperature}
+                onChange={(e) =>
+                  setLLMState((prev) => ({
+                    ...prev,
+                    temperature: e.target.value,
+                  }))
+                }
+              />
+            </Form.Group>
+            <Form.Group className="mb-2">
+              <Form.Check
+                type="checkbox"
+                className="small"
+                id={checkboxId}
+                checked={!!llmState.omitTemperature}
+                onChange={(e) =>
+                  setLLMState((prev) => ({
+                    ...prev,
+                    omitTemperature: e.target.checked,
+                  }))
+                }
+                label={
+                  <span className="d-inline-flex align-items-center">
+                    Don't send temperature parameter
+                    <CustomTooltip
+                      id={`tooltip-${checkboxId}`}
+                      content={OMIT_TEMPERATURE_TOOLTIP}
+                    >
+                      <i
+                        className="bi bi-info-circle ms-1"
+                        style={{
+                          cursor: "help",
+                          fontSize: "0.85rem",
+                          color: "#adb5bd",
+                          transition: "color 0.2s",
+                        }}
+                        onMouseEnter={(e) =>
+                          (e.target.style.color = "#112533")
+                        }
+                        onMouseLeave={(e) =>
+                          (e.target.style.color = "#adb5bd")
+                        }
+                      ></i>
+                    </CustomTooltip>
+                  </span>
+                }
+              />
+            </Form.Group>
+          </div>
+          <div className="col-md-6">
+            <Form.Group className="mb-2">
+              <Form.Label className="small">Max Output Tokens</Form.Label>
+              <Form.Control
+                size="sm"
+                type="number"
+                min="1024"
+                max="20000"
+                placeholder="e.g., 4096"
+                value={llmState.max_tokens}
+                onChange={(e) =>
+                  setLLMState((prev) => ({ ...prev, max_tokens: e.target.value }))
+                }
+              />
+            </Form.Group>
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const tooltipAiSdkInstructionsContent =
     "Only the data query path (e.g. data_search tool) uses this text as request custom_instructions. The AI SDK server appends it after CUSTOM_INSTRUCTIONS from sdk_config.env. The metadata search path does not use an LLM the same way.";
@@ -1010,10 +1124,8 @@ const SettingsModal = ({
                           style={{ listStyleType: "disc" }}
                         >
                           <li className="mb-1">
-                            <code>data_agent</code> is a specialized subagent
-                            that turns natural language into VQL and executes
-                            it, so the agent can focus on orchestration and
-                            leave VQL generation to the subagent.
+                            <code>generate_vql</code> turns natural language into a single VQL query and executes
+                            it. <code>execute_vql</code> executes a VQL query. <code>generate_graph</code> plots the result of a VQL query.
                           </li>
                           <li className="mb-1">
                             <code>metadata_search</code> is a vector search tool
@@ -1169,13 +1281,36 @@ const SettingsModal = ({
                             />
                           </Form.Group>
                         )}
-                        <Form.Group className="mb-0">
+                        <Form.Group className="mb-2">
                           <Form.Check
                             type="checkbox"
                             className="small"
                             label="Enable ambiguity detection in the AI SDK (ask for clarification on ambiguous questions)"
                             checked={checkAmbiguity}
                             onChange={(e) => setCheckAmbiguity(e.target.checked)}
+                          />
+                        </Form.Group>
+                        <Form.Group className="mb-2">
+                          <Form.Check
+                            type="checkbox"
+                            className="small"
+                            label="Enable automatic VQL fixing when the first generated query fails"
+                            checked={autoFixing}
+                            onChange={(e) => setAutoFixing(e.target.checked)}
+                          />
+                        </Form.Group>
+                        <Form.Group className="mb-0">
+                          <Form.Label className="small mb-1">
+                            Automatic VQL fixing attempts (1-5)
+                          </Form.Label>
+                          <Form.Control
+                            type="number"
+                            size="sm"
+                            min={1}
+                            max={5}
+                            value={autoFixingAttempts}
+                            disabled={!autoFixing}
+                            onChange={(e) => setAutoFixingAttempts(e.target.value)}
                           />
                         </Form.Group>
                       </div>

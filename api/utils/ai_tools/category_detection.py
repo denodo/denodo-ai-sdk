@@ -20,6 +20,8 @@ from api.utils.ai_tools.prompts import (
     DIRECT_METADATA_CATEGORY_PROMPT,
     DIRECT_SQL_CATEGORY_PROMPT,
     DIRECT_SQL_CATEGORY_NO_AMBIGUITY_PROMPT,
+    DIRECT_SQL_PARTS_PROMPT,
+    DIRECT_SQL_PARTS_NO_AMBIGUITY_PROMPT,
     METADATA_CATEGORY_PROMPT,
     SQL_CATEGORY_PROMPT,
     SQL_CATEGORY_NO_AMBIGUITY_PROMPT,
@@ -34,6 +36,15 @@ def _metadata_response_instructions(markdown_response, layout):
 
 def _decision_tuple(decision):
     return decision.category, decision.category_response, decision.related_questions, decision.tokens
+
+def inject_selected_tables(category_response, view_names_list):
+    """Prepend <table> tags for already-selected views so query_to_vql can filter schema."""
+    table_xml = "\n".join(f"<table>{name}</table>" for name in view_names_list)
+    if not category_response:
+        return f"<query>\n{table_xml}\n</query>"
+    if "<query>" in category_response:
+        return category_response.replace("<query>", f"<query>\n{table_xml}", 1)
+    return f"<query>\n{table_xml}\n{category_response}\n</query>"
 
 def _parse_sql_category_response(response, tokens, check_ambiguity):
     category = utils.custom_tag_parser(response, 'cat', default="OTHER")[0].strip()
@@ -57,7 +68,11 @@ async def metadata_category(query, vector_search_tables, llm, custom_instruction
     prompt = PromptTemplate.from_template(METADATA_CATEGORY_PROMPT)
     chain = prompt | llm.llm | StrOutputParser()
 
-    with get_usage_metadata_callback() as cb:
+    with get_usage_metadata_callback() as cb, langfuse.trace_context(
+        model_id=f"{llm.provider_name}.{llm.model_name}",
+        session_id=session_id,
+        run_name=inspect.currentframe().f_code.co_name
+    ) as config:
         response = await chain.ainvoke(
             {
                 "instruction": query,
@@ -67,11 +82,7 @@ async def metadata_category(query, vector_search_tables, llm, custom_instruction
                     markdown_response, layout="category"
                 ),
             },
-            config=langfuse.build_config(
-                model_id=f"{llm.provider_name}.{llm.model_name}",
-                session_id=session_id,
-                run_name=inspect.currentframe().f_code.co_name
-            )
+            config=config
         )
 
     decision = CategoryDecision(
@@ -88,7 +99,11 @@ async def direct_metadata_category(query, vector_search_tables, llm, custom_inst
     prompt = PromptTemplate.from_template(DIRECT_METADATA_CATEGORY_PROMPT)
     chain = prompt | llm.llm | StrOutputParser()
 
-    with get_usage_metadata_callback() as cb:
+    with get_usage_metadata_callback() as cb, langfuse.trace_context(
+        model_id=f"{llm.provider_name}.{llm.model_name}",
+        session_id=session_id,
+        run_name=inspect.currentframe().f_code.co_name
+    ) as config:
         response = await chain.ainvoke(
             {
                 "instruction": query,
@@ -98,11 +113,7 @@ async def direct_metadata_category(query, vector_search_tables, llm, custom_inst
                     markdown_response, layout="direct"
                 ),
             },
-            config=langfuse.build_config(
-                model_id=f"{llm.provider_name}.{llm.model_name}",
-                session_id=session_id,
-                run_name=inspect.currentframe().f_code.co_name
-            )
+            config=config
         )
 
     decision = CategoryDecision(
@@ -124,6 +135,38 @@ async def direct_sql_category(
     check_ambiguity=True
 ):
     prompt_text = DIRECT_SQL_CATEGORY_PROMPT if check_ambiguity else DIRECT_SQL_CATEGORY_NO_AMBIGUITY_PROMPT
+    prompt = PromptTemplate.from_template(prompt_text)
+    chain = prompt | llm.llm | StrOutputParser()
+
+    with get_usage_metadata_callback() as cb, langfuse.trace_context(
+        model_id=f"{llm.provider_name}.{llm.model_name}",
+        session_id=session_id,
+        run_name=inspect.currentframe().f_code.co_name
+    ) as config:
+        response = await chain.ainvoke(
+            {
+                "instruction": query,
+                "schema": selector_schema_for_prompt(vector_search_tables, column_description_char_limit, table_description_char_limit),
+                "custom_instructions": custom_instructions
+            },
+            config=config
+        )
+
+    decision = _parse_sql_category_response(response, usage_tokens(cb), check_ambiguity)
+    decision.category = "SQL"
+    return _decision_tuple(decision)
+
+@utils.log_params
+@utils.timed
+async def direct_sql_parts(
+    query, vector_search_tables, llm,
+    custom_instructions='',
+    session_id=None,
+    column_description_char_limit=None,
+    table_description_char_limit=None,
+    check_ambiguity=True
+):
+    prompt_text = DIRECT_SQL_PARTS_PROMPT if check_ambiguity else DIRECT_SQL_PARTS_NO_AMBIGUITY_PROMPT
     prompt = PromptTemplate.from_template(prompt_text)
     chain = prompt | llm.llm | StrOutputParser()
 
@@ -194,7 +237,11 @@ async def sql_category(
         )
     )
 
-    with get_usage_metadata_callback() as cb:
+    with get_usage_metadata_callback() as cb, langfuse.trace_context(
+        model_id=f"{llm.provider_name}.{llm.model_name}",
+        session_id=session_id,
+        run_name=inspect.currentframe().f_code.co_name
+    ) as config:
         sql_task = asyncio.create_task(
             chain.ainvoke(
                 {
@@ -202,11 +249,7 @@ async def sql_category(
                     "schema": selector_schema_for_prompt(vector_search_tables, column_description_char_limit, table_description_char_limit),
                     "custom_instructions": custom_instructions
                 },
-                config=langfuse.build_config(
-                    model_id=f"{llm.provider_name}.{llm.model_name}",
-                    session_id=session_id,
-                    run_name=inspect.currentframe().f_code.co_name
-                )
+                config=config
             )
         )
 

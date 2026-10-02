@@ -9,7 +9,7 @@ BASE_DIRECT_SQL_CATEGORY = """
     <denodo>
     Denodo Platform has specific terminology:
 
-    - tables = views. Views are always referred to them by the database and view name, like 'database_name.view_name'. i.e, 'company'.'clients' references the view 'clients', which belongs to the database 'company'.
+    - tables = views. Views are always referred to them by the database and view name, like "database_name"."view_name". i.e, "company"."clients" references the view 'clients', which belongs to the database 'company'.
     - relationships = associations. i.e, if the user mentions the associations of a view he's referring to the relationships of a table.
     - columns = fields.
     - A set of views in Denodo may be referred to as a dataset.
@@ -26,12 +26,12 @@ BASE_DIRECT_SQL_CATEGORY = """
 {ambiguity_block}
 
     <guideline_preparation>
-    The tables in the schema come in the format: <database>.<table_name>. You have to respect this format always.
+    The tables in the schema come in the format: "<database>"."<table_name>". You have to respect this format always.
 
     Your job is to analyze the user input, analyze the schema and return the candidate tables that may be useful in generating a query.
     Do not filter out any candidates, we want to see all possible candidates.
 
-    Return each candidate table in between <table></table> tags. For example, <table>company.clients</table> for the table 'clients' in the database 'company'.
+    Return each candidate table in between <table></table> tags. For example, <table>"company"."clients"</table> for the table 'clients' in the database 'company'.
 
     Once you have the tables ready, you must specify what SQL knowledge the user will need to
     generate an SQL query for the given input. For each applicable item below, include the corresponding tag with value 1.

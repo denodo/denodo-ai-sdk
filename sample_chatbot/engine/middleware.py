@@ -3,9 +3,11 @@ Contains middleware classes for request logging and conversation history managem
 """
 
 import logging
+import time
 
 from dataclasses import replace
 from langchain.agents.middleware import AgentMiddleware
+from langchain_core.messages import ToolMessage
 
 class TrimConversationHistoryMiddleware(AgentMiddleware):
     """
@@ -71,3 +73,37 @@ class TrimConversationHistoryMiddleware(AgentMiddleware):
     async def awrap_model_call(self, request, handler):
         trimmed_request = self._trim_request(request)
         return await handler(trimmed_request)
+
+
+class ToolDurationMiddleware(AgentMiddleware):
+    """
+    Records wall-clock time for each tool call and stores it on the ToolMessage
+    artifact as tool_duration so the chatbot UI and reloaded history can show it.
+    """
+
+    name = "tool_duration_middleware"
+
+    def wrap_tool_call(self, request, handler):
+        start = time.perf_counter()
+        result = handler(request)
+        return self._attach_duration(result, start)
+
+    async def awrap_tool_call(self, request, handler):
+        start = time.perf_counter()
+        result = await handler(request)
+        return self._attach_duration(result, start)
+
+    def _attach_duration(self, result, start):
+        duration = round(time.perf_counter() - start, 2)
+        if not isinstance(result, ToolMessage):
+            return result
+
+        artifact = result.artifact
+        if artifact is None:
+            new_artifact = {"tool_duration": duration}
+        elif isinstance(artifact, dict):
+            new_artifact = {**artifact, "tool_duration": duration}
+        else:
+            return result
+
+        return result.model_copy(update={"artifact": new_artifact})

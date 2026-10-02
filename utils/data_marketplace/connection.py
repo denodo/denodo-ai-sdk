@@ -23,6 +23,8 @@ from utils.data_marketplace.vql_execution_outcomes import ExecutionStatus, Execu
 DATA_MARKETPLACE_URL = (os.getenv("AI_SDK_DATA_MARKETPLACE_URL") or 'http://localhost:9090/denodo-data-catalog').rstrip('/') + '/'
 DATA_MARKETPLACE_VERIFY_SSL = os.getenv('DATA_MARKETPLACE_VERIFY_SSL', '0') == '1'
 DATA_MARKETPLACE_SERVER_ID = int(os.getenv('DATA_MARKETPLACE_SERVER_ID', 1))
+DATA_MARKETPLACE_TIMEOUT = int(os.getenv('DATA_MARKETPLACE_TIMEOUT', 300))
+DM_CLIENT_TIMEOUT = aiohttp.ClientTimeout(total=DATA_MARKETPLACE_TIMEOUT, sock_connect=30)
 DATA_MARKETPLACE_METADATA_URL = f"{DATA_MARKETPLACE_URL}public/api/askaquestion/data"
 DATA_MARKETPLACE_EXECUTION_URL = f"{DATA_MARKETPLACE_URL}public/api/askaquestion/execute"
 DATA_MARKETPLACE_ALLOWED_VIEWS_URL = f"{DATA_MARKETPLACE_URL}public/api/views/allowed-identifiers"
@@ -185,7 +187,7 @@ async def get_views_metadata_documents(
 
     try:
         # Initial request without pagination to detect DC API version
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=DM_CLIENT_TIMEOUT) as session:
             initial_response = await make_request(prepare_request_data(limit=views_per_request, offset=0), session)
 
             # If it's a list, it's the old DC API (<9.1.0)
@@ -275,8 +277,10 @@ async def get_views_metadata_documents(
     except aiohttp.ClientResponseError as e:
         logging.error(f"Data Marketplace views metadata request failed: {e.message}")
         raise
-
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+    except asyncio.TimeoutError:
+        logging.error(f"Data Marketplace views metadata request timed out after {DATA_MARKETPLACE_TIMEOUT} seconds. Consider increasing DATA_MARKETPLACE_TIMEOUT.")
+        raise
+    except aiohttp.ClientError as e:
         logging.error(f"Failed to connect to the server: {str(e)}")
         raise
 
@@ -291,6 +295,9 @@ def classify_execution(http_status, body):
     - VALIDATION_ERROR: 400 Bad Request with message
     - CONNECTION_ERROR: Connection error/timeout. Already set by execute_vql.
     """
+    is_masked = False
+    if isinstance(body, dict):
+        is_masked = body.get('masked', False)
 
     # SUCCESS|EMPTY|EXECUTION_ERROR: HTTP 200 with 'executionErrors' field
     if http_status == 200:
@@ -300,27 +307,27 @@ def classify_execution(http_status, body):
             error = "\n".join(
                 e.get('message', '') for e in execution_errors if isinstance(e, dict)
             ).strip()
-            return ExecutionOutcome(ExecutionStatus.EXECUTION_ERROR, http_status, error=error, raw=body)
+            return ExecutionOutcome(ExecutionStatus.EXECUTION_ERROR, http_status, error=error, raw=body, is_masked=is_masked)
 
         # EMPTY: HTTP 200 with no rows and empty 'executionErrors' list
         if not body.get('rows'):
-            return ExecutionOutcome(ExecutionStatus.EMPTY, http_status, raw=body)
+            return ExecutionOutcome(ExecutionStatus.EMPTY, http_status, raw=body, is_masked=is_masked)
 
         # SUCCESS: HTTP 200 with rows and empty 'executionErrors' list
         return ExecutionOutcome(
-            ExecutionStatus.SUCCESS, http_status, data=parse_execution_json(body), raw=body
+            ExecutionStatus.SUCCESS, http_status, data=parse_execution_json(body), raw=body, is_masked=is_masked
         )
     # VALIDATION_ERROR: HTTP 400-500 with 'message' field
     elif 400 <= http_status <= 500:
         try:
             error = body.get('message')
-            return ExecutionOutcome(ExecutionStatus.VALIDATION_ERROR, http_status, error=error, raw=body)
+            return ExecutionOutcome(ExecutionStatus.VALIDATION_ERROR, http_status, error=error, raw=body, is_masked=is_masked)
         except Exception as e:
             error = str(body)
-            return ExecutionOutcome(ExecutionStatus.VALIDATION_ERROR, http_status, error=error, raw=body)
+            return ExecutionOutcome(ExecutionStatus.VALIDATION_ERROR, http_status, error=error, raw=body, is_masked=is_masked)
     else:
         error = str(body)
-        return ExecutionOutcome(ExecutionStatus.VALIDATION_ERROR, http_status, error=error, raw=body)
+        return ExecutionOutcome(ExecutionStatus.VALIDATION_ERROR, http_status, error=error, raw=body, is_masked=is_masked)
 
 @log_params(truncate_input_chars=None, truncate_output_chars=None)
 @timed
@@ -359,7 +366,7 @@ async def execute_vql(vql, auth, limit, truncate_vectors=True, execution_url=DAT
     }
 
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=DM_CLIENT_TIMEOUT) as session:
             async with session.post(
                 f"{execution_url}?serverId={server_id}",
                 json=data,
@@ -371,8 +378,14 @@ async def execute_vql(vql, auth, limit, truncate_vectors=True, execution_url=DAT
                 except (aiohttp.ContentTypeError, json.JSONDecodeError):
                     body = await response.text()
                 return classify_execution(response.status, body)
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+
+    except asyncio.TimeoutError:
+        error_message = f"The query execution timed out after {DATA_MARKETPLACE_TIMEOUT} seconds. Consider increasing DATA_MARKETPLACE_TIMEOUT."
+        logging.error(error_message)
+        return ExecutionOutcome(ExecutionStatus.CONNECTION_ERROR, http_status=0, error=error_message)
+    except aiohttp.ClientError as e:
         error_message = f"Failed to connect to the server: {str(e)}"
+        logging.error(error_message)
         return ExecutionOutcome(ExecutionStatus.CONNECTION_ERROR, http_status=0, error=error_message)
 
 @log_params
@@ -382,10 +395,12 @@ async def get_allowed_view_ids(
     server_id=DATA_MARKETPLACE_SERVER_ID,
     permissions_url=DATA_MARKETPLACE_ALLOWED_VIEWS_URL,
     verify_ssl=DATA_MARKETPLACE_VERIFY_SSL,
-    custom_headers=None
+    custom_headers=None,
+    database_names=None,
+    tag_names=None,
 ):
     """
-    Retrieve allowed view IDs for all views accessible to the user.
+    Retrieve allowed view IDs for views accessible to the user.
     This is the legacy permissions method.
 
     Args:
@@ -394,9 +409,11 @@ async def get_allowed_view_ids(
         permissions_url: The Data Marketplace legacy permissions URL
         verify_ssl: Whether to verify SSL certificates
         custom_headers: Optional custom headers to include in the request
+        database_names: Database names to request when scoping by database
+        tag_names: Tag names to request when scoping by tag
 
     Returns:
-        List of unique allowed view IDs across all accessible views
+        List of unique allowed view IDs. All accessible views when no scope is given.
     """
     # Prepare headers based on auth type
     headers = {
@@ -412,11 +429,16 @@ async def get_allowed_view_ids(
     if custom_headers:
         headers.update(custom_headers)
 
-    # Use "ALL" data mode to fetch all accessible view IDs in a single request
     data = {"dataMode": "ALL"}
+    if database_names:
+        data["dataMode"] = "DATABASE"
+        data["databaseNames"] = list(database_names)
+    elif tag_names:
+        data["dataMode"] = "TAG"
+        data["tagNames"] = list(tag_names)
 
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=DM_CLIENT_TIMEOUT) as session:
             async with session.post(
                 f"{permissions_url}?serverId={server_id}",
                 json=data,
@@ -430,8 +452,7 @@ async def get_allowed_view_ids(
                     raise ValueError("Unexpected get_allowed_view_ids response format: not a list of integers")
 
                 # Ensure unique values
-                unique_view_ids = list(set(view_ids))
-                return unique_view_ids
+                return list(set(view_ids))
 
     except aiohttp.ClientResponseError as e:
         if e.status == 401:
@@ -442,15 +463,40 @@ async def get_allowed_view_ids(
             msg = f"Get allowed view IDs from Data Marketplace failed: HTTP Error {e.status} - {e.message}"
             logging.error(msg)
             raise
+    except asyncio.TimeoutError:
+        logging.error(f"Get allowed view IDs from Data Marketplace timed out after {DATA_MARKETPLACE_TIMEOUT} seconds. Consider increasing DATA_MARKETPLACE_TIMEOUT.")
+        raise
     except (aiohttp.ClientError, ValueError) as e:
         logging.error(f"Get allowed view IDs from Data Marketplace failed: {str(e)}")
         raise
 
+def _normalize_names(names):
+    if not names:
+        return None
+    if isinstance(names, str):
+        names = [names]
+    normalized = tuple(sorted({name for name in names if name}))
+    return normalized or None
+
+def get_vectorized_database_names(vector_store):
+    last_update_dict, partial_resources_dict = vector_store.get_sync_metadata()
+    database_names = set()
+
+    if last_update_dict:
+        database_names.update((last_update_dict.get("DATABASE") or {}).keys())
+
+    if partial_resources_dict:
+        for dbs in (partial_resources_dict.get("partial_dbs_by_tag") or {}).values():
+            if dbs:
+                database_names.update(dbs)
+
+    return sorted(name for name in database_names if name)
+
 async def _fetch_user_permissions_from_dm(
     auth,
     data_mode,
-    database_name,
-    tag_name,
+    database_names,
+    tag_names,
     server_id,
     permissions_url,
     verify_ssl,
@@ -470,13 +516,13 @@ async def _fetch_user_permissions_from_dm(
         headers.update(custom_headers)
 
     data = {"dataMode": data_mode}
-    if data_mode == "DATABASE" and database_name:
-        data["databaseName"] = database_name
-    elif data_mode == "TAG" and tag_name:
-        data["tagName"] = tag_name
+    if data_mode == "DATABASE" and database_names:
+        data["databaseNames"] = list(database_names)
+    elif data_mode == "TAG" and tag_names:
+        data["tagNames"] = list(tag_names)
 
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=DM_CLIENT_TIMEOUT) as session:
             async with session.post(
                 f"{permissions_url}?serverId={server_id}",
                 json=data,
@@ -506,7 +552,9 @@ async def _fetch_user_permissions_from_dm(
                 server_id=server_id,
                 permissions_url=DATA_MARKETPLACE_ALLOWED_VIEWS_URL,
                 verify_ssl=verify_ssl,
-                custom_headers=custom_headers
+                custom_headers=custom_headers,
+                database_names=database_names if data_mode == "DATABASE" else None,
+                tag_names=tag_names if data_mode == "TAG" else None,
             )
 
             fallback_username = auth[0] if isinstance(auth, tuple) else "unknown"
@@ -529,18 +577,21 @@ async def _fetch_user_permissions_from_dm(
             msg = f"Get user permissions from Data Marketplace failed: HTTP Error {e.status} - {e.message}"
             logging.error(msg)
             raise
+    except asyncio.TimeoutError:
+        logging.error(f"Get user permissions from Data Marketplace timed out after {DATA_MARKETPLACE_TIMEOUT} seconds. Consider increasing DATA_MARKETPLACE_TIMEOUT.")
+        raise
     except (aiohttp.ClientError, ValueError) as e:
         logging.error(f"Get user permissions from Data Marketplace failed: {str(e)}")
         raise
 
 @alru_cache(maxsize=CACHE_MAX_SIZE, ttl=CACHE_TTL)
 async def _get_cached_user_permissions(
-    auth, data_mode, database_name, tag_name, server_id, permissions_url, verify_ssl, custom_headers_frozen
+    auth, data_mode, database_names, tag_names, server_id, permissions_url, verify_ssl, custom_headers_frozen
 ):
     logging.info("Permissions not found in cache. Fetching permissions from Data Marketplace.")
     custom_headers = dict(custom_headers_frozen) if custom_headers_frozen else None
     return await _fetch_user_permissions_from_dm(
-        auth, data_mode, database_name, tag_name, server_id, permissions_url, verify_ssl, custom_headers
+        auth, data_mode, database_names, tag_names, server_id, permissions_url, verify_ssl, custom_headers
     )
 
 @log_params
@@ -548,8 +599,8 @@ async def _get_cached_user_permissions(
 async def get_user_permissions(
     auth,
     data_mode="ALL",
-    database_name=None,
-    tag_name=None,
+    database_names=None,
+    tag_names=None,
     server_id=DATA_MARKETPLACE_SERVER_ID,
     permissions_url=DATA_MARKETPLACE_USER_PERMISSIONS_URL,
     verify_ssl=DATA_MARKETPLACE_VERIFY_SSL,
@@ -563,8 +614,8 @@ async def get_user_permissions(
     Args:
         auth: Either (username, password) tuple for basic auth or OAuth token string
         data_mode: The scope of the request ('ALL', 'DATABASE', or 'TAG')
-        database_name: The database name if data_mode is 'DATABASE'
-        tag_name: The tag name if data_mode is 'TAG'
+        database_names: Database names if data_mode is 'DATABASE'
+        tag_names: The tag names if data_mode is 'TAG'
         server_id: The server ID (default is DATA_MARKETPLACE_SERVER_ID)
         permissions_url: The Data Marketplace user permissions URL
         verify_ssl: Whether to verify SSL certificates
@@ -578,24 +629,73 @@ async def get_user_permissions(
         - roles (list)
         - viewsPermissions (list of dicts with viewId, hasRowRestrictions, restrictedColumns)
     """
+    database_names = _normalize_names(database_names)
+    tag_names = _normalize_names(tag_names)
+    if data_mode == "DATABASE" and not database_names:
+        data_mode = "ALL"
+    elif data_mode == "TAG" and not tag_names:
+        data_mode = "ALL"
+
     if not ENABLE_PERMISSIONS_CACHE:
         logging.info("Permissions cache is disabled. Fetching permissions from Data Marketplace.")
         return await _fetch_user_permissions_from_dm(
-            auth, data_mode, database_name, tag_name, server_id, permissions_url, verify_ssl, custom_headers
+            auth, data_mode, database_names, tag_names, server_id, permissions_url, verify_ssl, custom_headers
         )
 
     logging.info("Checking permissions cache...")
     custom_headers_frozen = frozenset(custom_headers.items()) if custom_headers else frozenset()
 
     return await _get_cached_user_permissions(
-        auth, data_mode, database_name, tag_name, server_id, permissions_url, verify_ssl, custom_headers_frozen
+        auth, data_mode, database_names, tag_names, server_id, permissions_url, verify_ssl, custom_headers_frozen
+    )
+
+async def get_user_permissions_for_vector_store(
+    auth,
+    vector_store,
+    custom_headers=None,
+    server_id=DATA_MARKETPLACE_SERVER_ID,
+    permissions_url=DATA_MARKETPLACE_USER_PERMISSIONS_URL,
+    verify_ssl=DATA_MARKETPLACE_VERIFY_SSL,
+):
+    """
+    Retrieve user permissions scoped to databases already present in the vector store.
+    Falls back to dataMode ALL when no vectorized databases are recorded yet.
+    """
+    try:
+        database_names = get_vectorized_database_names(vector_store)
+    except Exception as e:
+        logging.warning(
+            f"Could not read vectorized databases from sync metadata: {e}. Falling back to fetching permissions for ALL databases."
+        )
+        database_names = None
+
+    if database_names:
+        logging.info(
+            f"Fetching user permissions for {len(database_names)} vectorized database(s): {database_names}"
+        )
+        return await get_user_permissions(
+            auth=auth,
+            data_mode="DATABASE",
+            database_names=database_names,
+            server_id=server_id,
+            permissions_url=permissions_url,
+            verify_ssl=verify_ssl,
+            custom_headers=custom_headers,
+        )
+
+    logging.info("No vectorized databases found in sync metadata. Fetching user permissions with dataMode ALL.")
+    return await get_user_permissions(
+        auth=auth,
+        server_id=server_id,
+        permissions_url=permissions_url,
+        verify_ssl=verify_ssl,
+        custom_headers=custom_headers,
     )
 
 # This method calculates the authorization header for the Data Catalog REST API
 def calculate_basic_auth_authorization_header(user, password):
     user_pass = user + ':' + password
-    ascii_bytes = user_pass.encode('ascii')
-    return 'Basic' + ' ' + base64.b64encode(ascii_bytes).decode('utf-8')
+    return 'Basic' + ' ' + base64.b64encode(user_pass.encode('utf-8')).decode('utf-8')
 
 # Remove None Values from Metadata Views
 def remove_none_values(json_dict):
@@ -682,7 +782,7 @@ async def activate_incremental(
     }
 
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=DM_CLIENT_TIMEOUT) as session:
             async with session.post(
                 f"{DATA_MARKETPLACE_INCREMENTAL_UPDATE_URL}?serverId={server_id}",
                 json=data,
@@ -703,7 +803,11 @@ async def activate_incremental(
                 logging.info(f"Incremental metadata updates {'enabled' if enabled else 'disabled'} successfully")
                 return response.status, f"Incremental metadata updates {'enabled' if enabled else 'disabled'} successfully"
 
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+    except asyncio.TimeoutError:
+        error_message = f"Incremental metadata update configuration timed out after {DATA_MARKETPLACE_TIMEOUT} seconds. Consider increasing DATA_MARKETPLACE_TIMEOUT."
+        logging.error(error_message)
+        return 504, error_message
+    except aiohttp.ClientError as e:
         error_message = f"Failed to connect to the server: {str(e)}"
         logging.error(error_message)
         return 500, error_message

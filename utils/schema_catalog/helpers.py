@@ -1,3 +1,4 @@
+import re
 import tiktoken
 
 def remove_none_values(data):
@@ -19,6 +20,32 @@ def split_table_name(table_name):
         return '', table_name
 
     return table_name.split('.', 1)
+
+def normalize_table_name(table_name):
+    """Strip whitespace and double quotes so '"db"."view"' matches 'db.view'."""
+    if table_name is None:
+        return ''
+    return str(table_name).strip().replace('"', '')
+
+def quote_table_name(table_name):
+    """Render a table name in VQL form: '"db"."view"' (or '"view"' if no database)."""
+    database_name, view_name = split_table_name(normalize_table_name(table_name))
+    if database_name:
+        return f'"{database_name}"."{view_name}"'
+    if view_name:
+        return f'"{view_name}"'
+    return ''
+
+def quote_table_name_from_parts(database_name, view_name):
+    """Render a table name in VQL form from separate db and view names."""
+    db = str(database_name).strip().replace('"', '') if database_name else ''
+    view = str(view_name).strip().replace('"', '') if view_name else ''
+
+    if db and view:
+        return f'"{db}"."{view}"'
+    if view:
+        return f'"{view}"'
+    return ''
 
 def build_table_name(table_database, table_name):
     return f"{table_database}.{table_name}".replace('"', '')
@@ -63,6 +90,14 @@ def normalize_tag_details(raw_tags):
         normalized_tags.append({'name': name, 'description': flatten_text(tag.get('description'))})
 
     return normalized_tags
+
+def encode_tag(tag_name):
+    """
+    Escapes any character that is not a letter or a number (INCLUDING underscores)
+    using its hexadecimal value. This makes hash collisions mathematically impossible
+    and bypasses Langchain's strict isidentifier() rules for SQL Server.
+    """
+    return re.sub(r'[^a-zA-Z0-9]', lambda m: f"_{ord(m.group(0)):x}_", str(tag_name))
 
 def format_tag_names(tag_details):
     """Join tag names with ', ', quoting any name that contains the delimiter itself."""

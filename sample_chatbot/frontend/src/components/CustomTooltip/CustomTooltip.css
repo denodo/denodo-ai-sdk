@@ -1,5 +1,6 @@
 .custom-light-tooltip {
   pointer-events: auto !important;
+  z-index: 1120 !important;
 }
 
 .custom-light-tooltip .tooltip-inner {

@@ -11,11 +11,16 @@ from langchain_core.messages import HumanMessage
 from langchain_core.messages.ai import AIMessageChunk
 from langchain_core.messages.tool import ToolMessage
 
-from sample_chatbot.engine.middleware import TrimConversationHistoryMiddleware
+from sample_chatbot.engine.middleware import (
+    ToolDurationMiddleware,
+    TrimConversationHistoryMiddleware,
+)
 from sample_chatbot.engine.context import UserContext
 from sample_chatbot.engine.skills import build_skills_prompt_section
 from sample_chatbot.engine.tools import (
-    data_agent,
+    generate_vql,
+    execute_vql,
+    generate_graph,
     deep_query,
     knowledge_query,
     metadata_search,
@@ -63,7 +68,6 @@ class ChatbotEngine:
         agent_id="global",
         allowed_system_skills=None,
         disabled_skills=None,
-        data_agent_limit_max=None,
         verify_ssl=False,
         ai_sdk_params=None,
         auto_graph=True,
@@ -89,7 +93,6 @@ class ChatbotEngine:
         self.agent_id = agent_id
         self.allowed_system_skills = allowed_system_skills
         self.disabled_skills = disabled_skills
-        self.data_agent_limit_max = data_agent_limit_max
         self.verify_ssl = verify_ssl
         self.ai_sdk_params = ai_sdk_params or {}
         self.auto_graph = auto_graph
@@ -106,8 +109,8 @@ class ChatbotEngine:
             verify_ssl=self.verify_ssl,
             ai_sdk_params=self.ai_sdk_params,
             timeout=self.timeout,
-            vdp_database_names="",
-            vdp_tag_names="",
+            vdp_database_names=[],
+            vdp_tag_names=[],
             vector_store=self.vector_store,
             active_csv_sources=self.active_csv_sources,
             kb_collections=self.kb_collections,
@@ -120,10 +123,10 @@ class ChatbotEngine:
         self.system_prompt = system_prompt
 
         if self.enable_deepquery:
-            self.tool_count_string = "three"
+            self.tool_count_string = "five"
             self.deepquery_system_prompt_chunk = (
-                "- deep_query tool. The DeepQuery tool is a powerful analyst agent, that is capable of in-depth reasoning\n"
-                "and generating and executing multiple SQL queries to generate a complete report regarding an analysis question.\n"
+                "- You also have access to the deep_query tool, which gives you access to the DeepQuery agent. DeepQuery is a powerful, autonomous analyst agent, that is capable of in-depth reasoning\n"
+                "and generating complete HTML reports regarding an analysis question.\n"
                 "You can only execute the DeepQuery tool if explicitly requested by the user.\n"
                 "Before proposing or running any DeepQuery analysis, you MUST read the 'deepquery' skill with read_skill(\"deepquery\") and follow its process. If the skill is not available, you cannot use the DeepQuery tool."
             )
@@ -140,21 +143,14 @@ class ChatbotEngine:
                 "<related_question_analysis>Are there statistically significant differences in approval rates across demographics?</related_question_analysis>\n"
             )
         else:
-            self.tool_count_string = "two"
+            self.tool_count_string = "four"
             self.deepquery_system_prompt_chunk = ""
             self.deepquery_related_question_chunk = ""
 
-        if self.auto_graph:
-            graph_guidance_chunk = (
-                "- When deciding whether to request plots from the data_agent, you may request a plot when the data would "
-                "clearly benefit from a chart, but generating a plot takes a few seconds, so only do it when it will materially "
-                "help the user understand the data better."
-            )
+        if not self.auto_graph:
+            graph_guidance_chunk = "- You can only request a plot of the data using the generate_graph tool if it has been explicitly requested by the user."
         else:
-            graph_guidance_chunk = (
-                "- When deciding whether to request plots from the data_agent tool, you can only request a plot of the data "
-                "if it has been explicitly requested by the user."
-            )
+            graph_guidance_chunk = ""
 
         if self.vector_store and self.kb_description:
             self.extra_tools_guidance += f"""You also have access to a knowledge_query tool to search the user's knowledge base, stored in a vectorDB.
@@ -176,13 +172,12 @@ class ChatbotEngine:
             skills_guidance=skills_guidance,
             deepquery_system_prompt_chunk=self.deepquery_system_prompt_chunk,
             deepquery_related_question_chunk=self.deepquery_related_question_chunk,
-            data_agent_limit_max=self.data_agent_limit_max,
             graph_guidance_chunk=graph_guidance_chunk,
             extra_tools_guidance=f"<extra_tools_guidance>\n{self.extra_tools_guidance}\n</extra_tools_guidance>",
         )
 
         # Build agent tools set dynamically
-        self.tools = [data_agent, metadata_search]
+        self.tools = [generate_vql, execute_vql, generate_graph, metadata_search]
         if self.enable_deepquery:
             self.tools.append(deep_query)
         # Only when the user actually has active collections: with none, the
@@ -209,7 +204,8 @@ class ChatbotEngine:
             middleware=[
                 TrimConversationHistoryMiddleware(
                     conversation_history_limit=self.message_history_limit,
-                )
+                ),
+                ToolDurationMiddleware(),
             ],
             system_prompt=self.system_prompt,
             checkpointer=self.checkpointer,
@@ -309,7 +305,7 @@ class ChatbotEngine:
 
         return aggregated_answer, related_questions, related_questions_deepquery
 
-    def process_query(self, query, tool, vdp_database_names=None, vdp_tag_names=None, allow_external_associations=True, thread_id=None, cancel_event=None):
+    def process_query(self, query, tool, vdp_database_names=None, vdp_tag_names=None, allow_external_associations=False, thread_id=None, cancel_event=None):
         """
         Process a user query and yield streaming response chunks.
 
@@ -337,13 +333,15 @@ class ChatbotEngine:
             if tool:
                 query = f"{query}\n\nI want you to use the {tool} tool for this task."
 
-            db_text = (vdp_database_names or "").strip()
-            tag_text = (vdp_tag_names or "").strip()
+            vdp_database_names = vdp_database_names or []
+            vdp_tag_names = vdp_tag_names or []
+
             scope_parts = []
-            if db_text:
-                scope_parts.append(f"databases {db_text}")
-            if tag_text:
-                scope_parts.append(f"tags {tag_text}")
+            if vdp_database_names:
+                scope_parts.append(f"databases {', '.join(vdp_database_names)}")
+            if vdp_tag_names:
+                scope_parts.append(f"tags {', '.join(vdp_tag_names)}")
+
             if scope_parts:
                 scope_description = " and ".join(scope_parts)
                 control_instructions = (
@@ -389,8 +387,8 @@ class ChatbotEngine:
                 verify_ssl=self.verify_ssl,
                 ai_sdk_params=effective_ai_sdk_params,
                 timeout=self.timeout,
-                vdp_database_names=vdp_database_names or "",
-                vdp_tag_names=vdp_tag_names or "",
+                vdp_database_names=vdp_database_names,
+                vdp_tag_names=vdp_tag_names,
                 vector_store=self.vector_store,
                 active_csv_sources=self.active_csv_sources,
                 kb_collections=self.kb_collections,

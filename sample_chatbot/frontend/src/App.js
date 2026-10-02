@@ -10,9 +10,11 @@ import Sidebar from "./components/Sidebar/Sidebar";
 import LoginPage from "./components/LoginPage/LoginPage";
 import { Spinner } from "react-bootstrap";
 import NotificationToast from "./components/NotificationToast/NotificationToast";
+import SettingsModal from "./components/Header/SettingsModal";
 
 import { chatReducer, actionTypes } from "./reducers/chatReducer";
 import { useConfig, getSavedInputMethod } from "./contexts/ConfigContext";
+import { getNumberFormat } from "./utils/numberFormat";
 import api from "./api/client";
 import useSDK from "./hooks/useSDK";
 
@@ -37,6 +39,7 @@ const App = () => {
   const [customLogoState, setCustomLogoState] = useState("checking");
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [username, setUsername] = useState("");
+  const [settingsAgent, setSettingsAgent] = useState(null);
 
   const { updateConfig } = useConfig();
 
@@ -133,9 +136,10 @@ const App = () => {
 
         if (response.data.config) updateConfig(response.data.config);
 
-        // Re-apply the input method saved by this user in the User Profile modal
+        // Re-apply User Profile preferences for this user
         const savedInputMethod = getSavedInputMethod(userInformation.username);
         if (savedInputMethod) updateConfig({ input_method: savedInputMethod });
+        updateConfig({ number_format: getNumberFormat(userInformation.username) });
 
         const dictString = localStorage.getItem(
           `${userInformation.username}_custom_instructions_dict`,
@@ -244,6 +248,14 @@ const App = () => {
     }
   };
 
+  const currentAgentKey = agentManager.selectedChatbot
+    ? agentManager.selectedChatbot.isGlobal
+      ? "global"
+      : agentManager.selectedChatbot.id
+    : "global";
+
+  const agentKeyOf = (agent) => (agent?.isGlobal ? "global" : agent?.id);
+
   if (!isAuthenticated) {
     return (
       <LoginPage
@@ -285,6 +297,7 @@ const App = () => {
         onPinChat={history.handlePinChat}
         searchQuery={history.searchQuery}
         onSearchChange={history.setSearchQuery}
+        onOpenSettings={(bot) => setSettingsAgent(bot)}
       />
 
       <div className="main-content-area">
@@ -311,10 +324,13 @@ const App = () => {
           toggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
           isSidebarOpen={isSidebarOpen}
           selectedChatbot={agentManager.selectedChatbot}
-          chatbots={agentManager.chatbots}
-          globalEnabled={agentManager.globalEnabled}
-          onSettingsApplied={handleSettingsApplied}
           isSwitchingAgent={agentManager.isSwitchingAgent}
+          onOpenGeneralSettings={() => {
+            const globalBot = agentManager.chatbots.find((bot) => bot.isGlobal || bot.id === "global");
+            if (globalBot) {
+              setSettingsAgent(globalBot);
+            }
+          }}
         />
 
         {agentManager.isSwitchingAgent || history.isLoadingHistory ? (
@@ -424,6 +440,16 @@ const App = () => {
         modalState={limits.limitModal}
         onClose={limits.closeLimitModal}
         onAccept={handleAcceptLimit}
+      />
+      <SettingsModal
+        show={settingsAgent !== null}
+        handleClose={() => setSettingsAgent(null)}
+        selectedChatbot={settingsAgent}
+        onSettingsApplied={handleSettingsApplied}
+        title={settingsAgent ? `${settingsAgent.name} Settings` : ""}
+        isCurrentAgent={
+          settingsAgent ? agentKeyOf(settingsAgent) === currentAgentKey : true
+        }
       />
       <NotificationToast 
         show={history.toastConfig.show}

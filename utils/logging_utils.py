@@ -182,3 +182,35 @@ def get_logging_config():
             logger['handlers'].append('rotating_file')
 
     return LOGGING_CONFIG
+
+VALID_LOG_LEVELS = ("DEBUG", "INFO")
+MANAGED_LOGGER_NAMES = ("", "werkzeug", "uvicorn.error", "uvicorn.access")
+
+def get_log_level():
+    """Return the current application log level name, e.g. 'INFO'."""
+    return logging.getLevelName(logging.getLogger().getEffectiveLevel())
+
+def set_log_level(level_name):
+    """Change the application log level at runtime."""
+    level_name = str(level_name).strip().upper()
+    if not level_name:
+        raise ValueError("log_level is required")
+    if level_name not in VALID_LOG_LEVELS:
+        valid = ", ".join(VALID_LOG_LEVELS)
+        raise ValueError(f"Invalid log level '{level_name}'. Valid levels: {valid}")
+
+    if get_log_level() == level_name:
+        os.environ["LOG_LEVEL"] = level_name
+        return level_name
+
+    level = getattr(logging, level_name)
+    for name in MANAGED_LOGGER_NAMES:
+        logging.getLogger(name).setLevel(level)
+
+    os.environ["LOG_LEVEL"] = level_name
+    # INFO is hidden once the level is WARNING or higher, so announce at a
+    # level the new setting will still emit.
+    announce_level = logging.INFO if level < logging.WARNING else level
+    logging.log(announce_level, f"Log level changed to {level_name}")
+    logging.debug(f"Runtime log level is now {level_name}")
+    return level_name

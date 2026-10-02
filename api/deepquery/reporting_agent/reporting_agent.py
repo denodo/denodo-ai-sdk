@@ -31,6 +31,11 @@ class ReportingAgent(Agent, ReportingToolsMixin):
         auth: str = None,
         custom_headers: dict = None,
         language: str = "English",
+        vdp_database_names: list = None,
+        vdp_tag_names: list = None,
+        allow_external_associations: bool = False,
+        filter_logic: str = "OR",
+        **kwargs
     ):
         """
         Initialize the ReportingAgent.
@@ -45,11 +50,31 @@ class ReportingAgent(Agent, ReportingToolsMixin):
             auth: Authentication token for database access
             custom_headers: Custom HTTP headers to be forwarded to the Data Marketplace
             language: The target language for the report and visualizations
+            vdp_database_names: List of databases the report queries are scoped to
+            vdp_tag_names: List of tags the report queries are scoped to
+            allow_external_associations: Whether associations outside the databases/tags are allowed
+            filter_logic: How databases and tags are combined ("AND" or "OR")
         """
+        vdp_database_names = vdp_database_names or []
+        vdp_tag_names = vdp_tag_names or []
+
         # Store auth and headers for tool calls
         self.auth = auth
         self.custom_headers = custom_headers
         self.language = language
+
+        # Save LLM parameter details from the endpoint request
+        self.llm_provider = kwargs.get('llm_provider')
+        self.llm_model = kwargs.get('llm_model')
+        self.llm_temperature = kwargs.get('llm_temperature')
+        self.llm_max_tokens = kwargs.get('llm_max_tokens')
+        self.check_ambiguity = kwargs.get('check_ambiguity')
+
+        # Save filters
+        self.vdp_database_names = vdp_database_names
+        self.vdp_tag_names = vdp_tag_names
+        self.allow_external_associations = allow_external_associations
+        self.filter_logic = filter_logic
 
         super().__init__(
             agent_name="ReportingAgent",

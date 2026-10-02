@@ -1,0 +1,11 @@
+# Copy this file to banking.yaml to create the "banking" space. The filename without the extension is the space name,
+# so this file exposes /space/banking/mcp.
+# A view is accessible via this space when its database is samples_bank or samples_orders,
+# or when it has the ai_ready tag. A view with that tag is included even if it
+# lives in another database.
+
+databases:
+  - samples_bank
+  - samples_orders
+tags:
+  - ai_ready

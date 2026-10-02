@@ -26,6 +26,7 @@ from api.utils.data_category.pipeline import process_sql_category
 from api.utils import state_manager
 from api.utils.sdk_utils import timing_context, handle_endpoint_error, generate_session_id, authenticate
 from api.utils.sdk_utils import get_custom_request_headers
+from api.utils import param_descriptions as desc
 
 router = APIRouter()
 
@@ -42,56 +43,63 @@ class streamAnswerQuestionUsingViewsRequest(BaseModel):
     llm_temperature: float = float(os.getenv('LLM_TEMPERATURE', '0.0'))
     llm_max_tokens: int = Field(
         default = int(os.getenv('LLM_MAX_TOKENS', '4096')),
-        description="The maximum OUTPUT tokens for the general LLM. Not recommended to decrease this value."
+        description=desc.LLM_MAX_TOKENS
     )
     custom_instructions: str = ''
     markdown_response: bool = True
     vector_search_k: int = Field(
         default = 5,
-        description="Number of results to return from the similarity search in the vector store."
+        description=desc.VECTOR_SEARCH_K
     )
     vector_search_sample_data_k: int = Field(
         default = 3,
-        description="Number of similar sample data rows to return for the given question."
+        description=desc.VECTOR_SEARCH_SAMPLE_DATA_K
     )
     vector_search_total_limit: int = Field(
         default = 20,
-        description="Maximum number of views to consider in total, including associations of the initial vector_search_k results."
+        description=desc.VECTOR_SEARCH_TOTAL_LIMIT
     )
     vector_search_column_description_char_limit: int = Field(
         default=200,
-        description="Maximum characters of column descriptions used when filtering how many views to keep. Not applied during vector search or VQL generation (those use full descriptions). Refer to the docs for when this trimming is applied."
+        description=desc.VECTOR_SEARCH_COLUMN_DESCRIPTION_CHAR_LIMIT
     )
     vector_search_table_description_char_limit: int = Field(
         default=1000,
-        description="Maximum characters of table descriptions used when filtering how many views to keep. Not applied during vector search or VQL generation (those use full descriptions). Refer to the docs for when this trimming is applied."
+        description=desc.VECTOR_SEARCH_TABLE_DESCRIPTION_CHAR_LIMIT
     )
     mode: Literal["default", "data", "metadata"] = Field(default = "default")
     disclaimer: bool = True
     verbose: bool = True
     check_ambiguity: bool = Field(
         default = bool(int(os.getenv('CHECK_AMBIGUITY', '1'))),
-        description="If false, skip ambiguity detection."
+        description=desc.CHECK_AMBIGUITY
     )
     vql_execute_rows_limit: int = Field(
         default=100,
         ge=1,
         le=int(os.getenv('VQL_EXECUTE_ROWS_LIMIT', '10000')),
-        description="Maximum number of rows to return from the VQL execution result."
+        description=desc.VQL_EXECUTE_ROWS_LIMIT
     )
     enable_query_fixer: bool = Field(
-        default=True,
-        description="If enabled, the LLM will try to automatically fix the VQL query if the first VQL query generated fails."
+        default=bool(int(os.getenv('AUTO_FIXING', '1'))),
+        description=desc.ENABLE_QUERY_FIXER
+    )
+    auto_fixing_attempts: int = Field(
+        default=max(1, min(5, int(os.getenv('AUTO_FIXING_ATTEMPTS', '2')))),
+        ge=1,
+        le=5,
+        description="Maximum number of automatic VQL fixing attempts when enable_query_fixer is enabled."
     )
     enable_query_reviewer: bool = Field(
         default=False,
-        description="If enabled, the LLM will review the VQL query if the first VQL query generated returns no rows."
+        description=desc.ENABLE_QUERY_REVIEWER
     )
 
 @router.post(
         '/streamAnswerQuestionUsingViews',
         response_class = StreamingResponse,
-        tags = ['Ask a Question - Streaming - Custom Vector Store'])
+        tags = ['Ask a Question - Streaming - Custom Vector Store'],
+        deprecated = True)
 @handle_endpoint_error("streamAnswerQuestionUsingViews")
 async def streamAnswerQuestionUsingViews(
     endpoint_request: streamAnswerQuestionUsingViewsRequest,
@@ -99,6 +107,10 @@ async def streamAnswerQuestionUsingViews(
     custom_headers: dict = Depends(get_custom_request_headers)
 ):
     """
+    Deprecated. This endpoint will be removed in a future version. If you still depend on it, or need a specific vector store supported, please get in touch via Github https://github.com/denodo/denodo-ai-sdk/
+
+    Use `streamAnswerQuestion` instead. To limit or force the LLM to use a specific set of views, pass `use_views`.
+
     The only difference between this endpoint and `streamAnswerQuestion` is that this endpoint
     expects the result of the vector search to be passed in as a parameter.
 

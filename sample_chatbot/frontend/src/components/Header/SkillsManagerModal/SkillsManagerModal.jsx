@@ -548,13 +548,19 @@ const SkillsManagerModal = ({ show, handleClose, hasActiveConversation = false, 
           )}
 
           {!isLoading && skills.length > 0 && (
+            <div
+              className="table-responsive"
+              tabIndex={0}
+              role="region"
+              aria-label="Scrollable skills table"
+            >
             <Table striped bordered hover size="sm" variant="light">
               <thead>
                 <tr>
-                  <th style={{ width: '220px' }}>Name</th>
-                  <th style={{ width: '100px' }}>Type</th>
-                  <th>Description</th>
-                  <th style={{ width: '160px' }}>Actions</th>
+                  <th style={{ minWidth: '14rem' }}>Name</th>
+                  <th style={{ minWidth: '6.5rem' }}>Type</th>
+                  <th style={{ minWidth: '16rem' }}>Description</th>
+                  <th style={{ minWidth: '10rem' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -674,6 +680,7 @@ const SkillsManagerModal = ({ show, handleClose, hasActiveConversation = false, 
                 ))}
               </tbody>
             </Table>
+            </div>
           )}
 
           <Alert variant="info" className="mb-3 py-2">

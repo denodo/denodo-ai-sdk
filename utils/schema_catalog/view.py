@@ -12,6 +12,9 @@ from .helpers import (
     normalize_associations,
     normalize_schema_columns,
     normalize_tag_details,
+    encode_tag,
+    quote_table_name,
+    quote_table_name_from_parts,
     remove_none_values,
     split_table_name,
 )
@@ -193,10 +196,17 @@ class SchemaTable:
     ):
         json_table = remove_none_values(table)
         table_database = json_table.get('databaseName', '')
-        table_name = build_table_name(table_database, json_table.get('name', ''))
+        raw_table_name = json_table.get('name', '')
+
+        clean_db_name = table_database.replace('"', '').strip() if table_database else ''
+        clean_view_name = raw_table_name.replace('"', '').strip() if raw_table_name else ''
+
+        table_name = build_table_name(clean_db_name, clean_view_name)
 
         output_table = {
             'tableName': table_name,
+            'databaseName': clean_db_name,
+            'viewName': clean_view_name,
             'description': json_table.get('description', ""),
         }
 
@@ -234,7 +244,19 @@ class SchemaTable:
     def get_name(self):
         return self._view_data['tableName']
 
+    def get_quoted_name(self):
+        if 'databaseName' in self._view_data and 'viewName' in self._view_data:
+            return quote_table_name_from_parts(
+                self._view_data['databaseName'],
+                self._view_data['viewName']
+            )
+
+        return quote_table_name(self.get_name())
+
     def get_database_name(self):
+        if 'databaseName' in self._view_data:
+            return self._view_data['databaseName']
+
         database_name, _ = split_table_name(self.get_name())
         return database_name
 
@@ -260,10 +282,12 @@ class SchemaTable:
         column_description_limit=None,
         table_description_limit=None,
         present_tables=None,
-        include_table_type=False
+        include_table_type=False,
+        quote_names=False
     ):
         present_tables = present_tables or []
-        lines = [f"Table: {self.get_name()}"]
+        table_name = self.get_quoted_name() if quote_names else self.get_name()
+        lines = [f"Table: {table_name}"]
         if include_table_type and self.is_metric_view():
             lines.append("Type: METRIC")
 
@@ -327,7 +351,7 @@ class SchemaTable:
 
     def render_selector_text(self, column_description_char_limit=None, table_description_char_limit=None, present_tables=None):
         # Selector grammar:
-        # Table: <database>.<view>
+        # Table: "<database>"."<view>"
         # Type: METRIC
         # Description: <description>
         # Columns:
@@ -345,7 +369,8 @@ class SchemaTable:
             column_description_limit=column_description_char_limit,
             table_description_limit=table_description_char_limit,
             present_tables=present_tables,
-            include_table_type=True
+            include_table_type=True,
+            quote_names=True
         )
 
     def render_vql_text(self, sample_data=None, present_tables=None, examples_per_table=3):
@@ -353,12 +378,9 @@ class SchemaTable:
         # which render_vql_schema appends at catalog level.
         present_tables = present_tables or []
         lines = []
-        table_name = self.get_name()
         table_description = self._view_data.get('description', '')
-        database_name, view_name = split_table_name(table_name)
-        quoted_table_name = f'"{database_name}"."{view_name}"' if database_name else f'"{view_name}"'
 
-        lines.append(f"# Table: {quoted_table_name}")
+        lines.append(f"# Table: {self.get_quoted_name()}")
         if self.is_metric_view():
             lines.append("## Type: Metric")
         if table_description:
@@ -408,7 +430,7 @@ class SchemaTable:
         }
 
         for tag in self._view_data.get('tagDetails', []):
-            metadata[f"tag_{tag['name']}"] = "1"
+            metadata[f"tag_{encode_tag(tag['name'])}"] = "1"
 
         return Document(
             id=self.get_id(),
@@ -433,6 +455,17 @@ class SchemaTable:
 
         association_footer = "\n" + "\n".join(association_lines) if association_lines else ""
         base_tokens = calculate_tokens(header + association_footer)
+
+        minimum_required_limit = base_tokens + 500 + 50
+
+        if embeddings_token_limit < minimum_required_limit:
+            raise ValueError(
+                f"Cannot chunk table '{self.get_name()}'. The configured 'embeddings_token_limit' ({embeddings_token_limit}) "
+                f"is insufficient. The base schema definition alone requires {base_tokens} tokens. "
+                f"Please increase 'embeddings_token_limit' to at least {minimum_required_limit}. "
+                f"IMPORTANT: Make sure this value does not exceed the actual maximum input token limit of your chosen embedding model."
+            )
+
         available_tokens = (embeddings_token_limit - 500) - base_tokens
 
         column_content = "\n".join(column_lines)
@@ -454,7 +487,7 @@ class SchemaTable:
             }
 
             for tag in self._view_data.get('tagDetails', []):
-                metadata[f"tag_{tag['name']}"] = "1"
+                metadata[f"tag_{encode_tag(tag['name'])}"] = "1"
 
             chunks.append(Document(
                 id=document_id,

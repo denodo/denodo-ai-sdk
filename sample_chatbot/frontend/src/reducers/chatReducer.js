@@ -87,12 +87,14 @@ export const chatReducer = (state, action) => {
           : [];
 
         let combined = new Set(r.combinedTablesUsed || []);
-        if (toolName === 'data_agent' && artifact && artifact.tables_used) {
+        // data_agent: backwards compatibility for chats saved before it was split into generate_vql / execute_vql / generate_graph
+        const isVqlTool = ['generate_vql', 'execute_vql', 'generate_graph', 'data_agent'].includes(toolName);
+        if (isVqlTool && artifact && artifact.tables_used) {
           for (const t of artifact.tables_used) combined.add(t);
         }
 
         let combinedVqls = Array.isArray(r.combinedVqls) ? [...r.combinedVqls] : [];
-        if (toolName === 'data_agent' && artifact && artifact.vql) {
+        if (isVqlTool && artifact && artifact.vql) {
           combinedVqls.push(String(artifact.vql));
         }
 

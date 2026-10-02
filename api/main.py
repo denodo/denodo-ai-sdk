@@ -8,6 +8,7 @@
  Confidential Information and shall use it only in accordance with the terms
  of the license agreement you entered into with DENODO.
 """
+
 import os
 import asyncio
 import logging
@@ -24,6 +25,7 @@ from api import config
 from api.middleware import logging_context_middleware, RequestCancelledMiddleware
 from api.utils import state_manager
 from utils.logging_utils import get_logging_config
+from utils.runtime_config import reconcile_runtime_config_with_cli
 from utils.version import AI_SDK_VERSION
 
 from api.endpoints import (
@@ -41,11 +43,15 @@ from api.endpoints import (
     answerQuestionUsingViews,
     generateDeepQueryReport,
     getUserPermissions,
-    executeVQL
+    executeVQL,
+    setAISDKConfig,
+    generateVQL,
+    generateGraph,
 )
 
 log_config = get_logging_config()
 logging.config.dictConfig(log_config)
+reconcile_runtime_config_with_cli()
 
 # Ignore warnings
 warnings.filterwarnings("ignore")
@@ -74,9 +80,11 @@ tags = [
     {"name": "Vector Store"},
     {"name": "Ask a Question"},
     {"name": "Ask a Question - Streaming"},
-    {"name": "Ask a Question - Custom Vector Store"},
-    {"name": "Ask a Question - Streaming - Custom Vector Store"},
+    {"name": "Ask a Question - Custom Vector Store", "description": "Deprecated. Use Ask a Question endpoints instead. If you still depend on these endpoints, please get in touch via Github https://github.com/denodo/denodo-ai-sdk/."},
+    {"name": "Ask a Question - Streaming - Custom Vector Store", "description": "Deprecated. Use Ask a Question - Streaming endpoints instead. If you still depend on these endpoints, please get in touch via Github https://github.com/denodo/denodo-ai-sdk/."},
+    {"name": "Agent Tools"},
     {"name": "Utilities"},
+    {"name": "Configuration"},
 ]
 
 base_app = FastAPI(
@@ -128,6 +136,9 @@ base_app.include_router(answerMetadataQuestion.router)
 base_app.include_router(answerQuestionUsingViews.router)
 base_app.include_router(getUserPermissions.router)
 base_app.include_router(executeVQL.router)
+base_app.include_router(setAISDKConfig.router)
+base_app.include_router(generateVQL.router)
+base_app.include_router(generateGraph.router)
 
 if config.THINKING_MODEL_AVAILABLE:
     base_app.include_router(deepQuery.router)
@@ -173,7 +184,7 @@ if config.AI_SDK_MCP_MODE == "remote":
         lifespan=combined_lifespan,
         middleware=mcp_app.user_middleware + base_app.user_middleware,
     )
-    logging.info("MCP endpoints available at /mcp")
+    logging.info("MCP endpoints available at /mcp, /database/{database_name}/mcp, /tag/{tag_name}/mcp, /space/{space_name}/mcp")
 else:
     app = base_app
     logging.info("Running in standard mode without MCP")

@@ -1,5 +1,7 @@
+import io
 import os
 import re
+import sys
 import shutil
 import time
 from datetime import date
@@ -8,6 +10,7 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.table import Table
 from rich.prompt import Confirm
+from dotenv import parser as dotenv_parser
 from utils.version import AI_SDK_VERSION
 
 console = Console()
@@ -27,12 +30,14 @@ CHATBOT_EXAMPLE_PATH = CHATBOT_ENV_PATH + ".example"
 # ---------------------------------------------------------------------------
 
 SDK_RENAME_RULES = [
+    ("LANGFUSE_HOST", "LANGFUSE_BASE_URL"),
     ("AI_SDK_DATA_CATALOG_URL", "AI_SDK_DATA_MARKETPLACE_URL"),
     ("DATA_CATALOG_URL", "AI_SDK_DATA_MARKETPLACE_URL"),
     ("DATA_CATALOG", "DATA_MARKETPLACE"),
 ]
 
 CHATBOT_RENAME_RULES = [
+    ("LANGFUSE_HOST", "LANGFUSE_BASE_URL"),
     ("CHATBOT_DATA_CATALOG_URL", "CHATBOT_DATA_MARKETPLACE_URL"),
     ("DATA_CATALOG_URL", "CHATBOT_DATA_MARKETPLACE_URL"),
     ("DATA_CATALOG", "DATA_MARKETPLACE"),
@@ -51,8 +56,6 @@ CUSTOM_AZURE_SUFFIXES = [
     "_PROXY", "_PROXY_VERIFY_SSL", "_EMBEDDINGS_DIMENSIONS",
 ]
 
-_VAR_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_\-]*)\s*=\s*(.*)')
-
 # ---------------------------------------------------------------------------
 # Provider list  (pulled from UniformLLM + UniformEmbeddings at runtime)
 # ---------------------------------------------------------------------------
@@ -68,101 +71,238 @@ def _get_known_providers():
 # Parsing
 # ---------------------------------------------------------------------------
 
+def _read_text(filepath):
+    """Read an env file. Skips the BOM that Windows editors add."""
+    with open(filepath, encoding="utf-8-sig") as f:
+        return f.read()
+
+def _statement_from_binding(binding, active, raw_lines):
+    """Build a config statement from a python-dotenv binding."""
+    text = binding.original.string.rstrip("\r\n")
+    head, _, raw_value = text.partition("=")
+    return {
+        "type": "config",
+        "name": binding.key,
+        "active": active,
+        "value": raw_value.strip(),            # raw text, quotes included
+        "clean_value": binding.value or "",    # value after quotes and escapes
+        "export": head.lstrip().startswith("export "),
+        "raw_lines": raw_lines,
+    }
+
+def _uncomment(lines):
+    """Remove one leading '#' from each line."""
+    out = []
+    for line in lines:
+        stripped = line.lstrip()
+        out.append(stripped[1:] if stripped.startswith("#") else line)
+    return out
+
+_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.\-]*$")
+
+def _scan_commented_block(lines):
+    """The dotenv parser does not return commented variables, so we need to scan for them manually."""
+    as_comments = [{"type": "comment", "raw_lines": [line]} for line in lines]
+    body = "\n".join(_uncomment(lines)) + "\n"
+    try:
+        bindings = list(dotenv_parser.parse_stream(io.StringIO(body)))
+    except Exception:
+        return as_comments
+
+    statements = []
+    cursor = 0
+    for binding in bindings:
+        span = binding.original.string.count("\n") or 1
+        chunk = lines[cursor:cursor + span]
+        cursor += span
+        if binding.key and not binding.error and _NAME_RE.match(binding.key):
+            statements.append(_statement_from_binding(binding, False, chunk))
+        else:
+            statements.extend({"type": "comment", "raw_lines": [line]} for line in chunk)
+    statements.extend({"type": "comment", "raw_lines": [line]} for line in lines[cursor:])
+    return statements
+
+def _scan_statements(text):
+    """Split an env file into statements.
+
+    Each statement has a "type" of "blank", "comment" or "config", plus the
+    "raw_lines" it came from. A config statement also carries name, active,
+    value, clean_value and export. A statement the parser could not read is
+    marked malformed=True, which usually means a quote was never closed.
+    """
+    statements = []
+    if not text:
+        return statements
+
+    lines = text.rstrip("\n").split("\n")
+    cursor = 0
+    pending = []                      # '#' lines waiting to be checked
+
+    def flush():
+        if pending:
+            statements.extend(_scan_commented_block(list(pending)))
+            pending.clear()
+
+    for binding in dotenv_parser.parse_stream(io.StringIO(text)):
+        span = binding.original.string.count("\n") or 1
+        chunk = lines[cursor:cursor + span]
+        cursor += span
+
+        if binding.key and not binding.error:
+            flush()
+            statements.append(_statement_from_binding(binding, True, chunk))
+            continue
+
+        if binding.error:
+            flush()
+            # One error is reported per line, so join them into one block.
+            if statements and statements[-1].get("malformed"):
+                statements[-1]["raw_lines"].extend(chunk)
+            else:
+                statements.append({
+                    "type": "config", "name": None, "active": True, "value": "",
+                    "clean_value": "", "export": False, "raw_lines": chunk,
+                    "malformed": True,
+                })
+            continue
+
+        for line in chunk:
+            stripped = line.strip()
+            if stripped.startswith("#") and not stripped.startswith("##"):
+                pending.append(line)
+                continue
+            flush()
+            statements.append({
+                "type": "blank" if not stripped else "comment", "raw_lines": [line],
+            })
+
+    flush()
+    for line in lines[cursor:]:
+        statements.append({"type": "comment" if line.strip() else "blank", "raw_lines": [line]})
+
+    return statements
+
+def _scan_file(filepath):
+    if not os.path.exists(filepath):
+        return []
+    return _scan_statements(_read_text(filepath))
+
 def _parse_env_variables(filepath):
-    """Parse an env file into {var_name: {"active": bool, "value": str}}.
-    Skips ## explanation lines and blank lines.
-    When a variable appears more than once, the last occurrence is kept as
-    primary and earlier occurrences are returned separately as duplicates.
+    """Parse an env file into {var_name: {"active", "value", "clean_value", "export"}}.
+
+    Returns (variables, duplicates, parse_error).
+    When a variable appears more than once, the one kept is the one the SDK
+    reads: the last active assignment, or the last commented one if none is
+    active. The rest are returned as duplicates. parse_error is True if the
+    file is not a valid env file.
     """
     variables = {}
     duplicates = []
-    if not os.path.exists(filepath):
-        return variables, duplicates
+    parse_error = False
+    occurrences = {}
 
-    with open(filepath, encoding="utf-8") as f:
-        for line in f:
-            stripped = line.strip()
-            if not stripped or stripped.startswith("##"):
-                continue
-            commented = stripped.startswith("#")
-            cleaned = stripped.lstrip("#").strip()
-            m = _VAR_RE.match(cleaned)
-            if m:
-                var_name = m.group(1)
-                info = {"active": not commented, "value": m.group(2).strip()}
-                if var_name in variables:
-                    duplicates.append({"var_name": var_name, **variables[var_name]})
-                variables[var_name] = info
-    return variables, duplicates
+    for st in _scan_file(filepath):
+        if st["type"] != "config":
+            continue
+        if st.get("malformed"):
+            parse_error = True
+            continue
+        occurrences.setdefault(st["name"], []).append({
+            "active": st["active"], "value": st["value"],
+            "clean_value": st["clean_value"], "export": st["export"],
+        })
+
+    for name, occ in occurrences.items():
+        actives = [o for o in occ if o["active"]]
+        primary = actives[-1] if actives else occ[-1]
+        variables[name] = primary
+        duplicates.extend({"var_name": name, **o} for o in occ if o is not primary)
+
+    return variables, duplicates, parse_error
 
 def _parse_example_template(filepath):
     """Parse a .env.example into an ordered list of template lines and a variable dict.
 
     Returns (template_lines, example_vars).
     Each template line is {"raw": str, "type": "blank"|"comment"|"config",
-                           "var_name": str|None, "active": bool}.
+                           "var_name": str|None, "active": bool,
+                           "substitute": bool}.
+    If the template lists the same variable more than once, only the first one
+    is filled in with the user's value. The others are left as they are.
     """
     template_lines = []
     example_vars = {}
 
-    if not os.path.exists(filepath):
-        return template_lines, example_vars
-
-    with open(filepath, encoding="utf-8") as f:
-        for raw in f:
-            line = raw.rstrip("\n\r")
-            stripped = line.strip()
-
-            if not stripped:
-                template_lines.append({"raw": line, "type": "blank", "var_name": None, "active": False})
-                continue
-
-            if stripped.startswith("##"):
-                template_lines.append({"raw": line, "type": "comment", "var_name": None, "active": False})
-                continue
-
-            commented = stripped.startswith("#")
-            cleaned = stripped.lstrip("#").strip()
-            m = _VAR_RE.match(cleaned)
-            if m:
-                var_name, value = m.group(1), m.group(2).strip()
+    for st in _scan_file(filepath):
+        if st["type"] == "config" and not st.get("malformed"):
+            first = st["name"] not in example_vars
+            template_lines.append({
+                "raw": "\n".join(st["raw_lines"]), "type": "config",
+                "var_name": st["name"], "active": st["active"], "substitute": first,
+            })
+            if first:
+                example_vars[st["name"]] = {
+                    "active": st["active"], "value": st["value"],
+                    "clean_value": st["clean_value"], "export": st["export"],
+                }
+        else:
+            for raw in st["raw_lines"]:
                 template_lines.append({
-                    "raw": line, "type": "config",
-                    "var_name": var_name, "active": not commented,
+                    "raw": raw, "type": "blank" if not raw.strip() else "comment",
+                    "var_name": None, "active": False, "substitute": False,
                 })
-                example_vars[var_name] = {"active": not commented, "value": value}
-            else:
-                template_lines.append({"raw": line, "type": "comment", "var_name": None, "active": False})
 
     return template_lines, example_vars
+
+def _format_assignment(var_name, info):
+    """Turn a variable back into env-file text.
+
+    The value is written as it was read. An inactive variable gets a '#' on
+    every one of its lines, so a multi-line value is commented as a whole.
+    """
+    prefix = "export " if info.get("export") else ""
+    line = f"{prefix}{var_name}={info['value']}"
+    if info.get("active", True):
+        return line
+    return "\n".join("#" + part for part in line.split("\n"))
 
 # ---------------------------------------------------------------------------
 # Rename logic
 # ---------------------------------------------------------------------------
 
+def _rename(var_name, rename_rules):
+    for old_sub, new_sub in rename_rules:
+        if old_sub in var_name:
+            return var_name.replace(old_sub, new_sub)
+    return var_name
+
 def _apply_renames(variables, rename_rules):
     """Apply ordered rename rules (substring replacement) to variable names.
 
-    Returns (renamed_dict, rename_log) where rename_log is [(old, new), ...].
-    If two old names map to the same new name, the first one seen wins.
+    Returns (renamed_dict, rename_log, conflicts).
+    A variable is renamed only when the new name is not already in the file. If
+    it is, the value already set is kept and the old one is returned as a
+    conflict, to be written back commented out under the new name.
     """
     renamed = {}
     rename_log = []
+    conflicts = []
 
     for var_name, info in variables.items():
-        new_name = var_name
-        for old_sub, new_sub in rename_rules:
-            if old_sub in new_name:
-                new_name = new_name.replace(old_sub, new_sub)
-                break
+        new_name = _rename(var_name, rename_rules)
 
-        if new_name != var_name:
-            rename_log.append((var_name, new_name))
-
-        if new_name not in renamed:
+        if new_name == var_name:
             renamed[new_name] = info
+            continue
 
-    return renamed, rename_log
+        if new_name in variables or new_name in renamed:
+            conflicts.append({"old": var_name, "new": new_name, "info": info})
+            continue
+
+        rename_log.append((var_name, new_name))
+        renamed[new_name] = info
+
+    return renamed, rename_log, conflicts
 
 def _apply_renames_to_duplicates(duplicates, rename_rules):
     """Apply rename rules to duplicate variable names."""
@@ -183,8 +323,8 @@ def _apply_renames_to_duplicates(duplicates, rename_rules):
 def _get_active_custom_providers(env_vars, provider_keys, known_providers):
     providers = set()
     for key in provider_keys:
-        if key in env_vars and env_vars[key]["value"]:
-            pname = env_vars[key]["value"].strip().strip('"').strip("'")
+        if key in env_vars and env_vars[key].get("clean_value", env_vars[key]["value"]):
+            pname = env_vars[key].get("clean_value", env_vars[key]["value"]).strip()
             if pname.lower() not in known_providers:
                 providers.add(pname.upper())
     return providers
@@ -235,8 +375,8 @@ def _classify_extra_var(var_name, active_providers, orphaned_providers):
 
 def _analyze(example_path, env_path, rename_rules, provider_keys, known_providers):
     template_lines, example_vars = _parse_example_template(example_path)
-    user_vars_raw, duplicates_raw = _parse_env_variables(env_path)
-    user_vars, rename_log = _apply_renames(user_vars_raw, rename_rules)
+    user_vars_raw, duplicates_raw, parse_error = _parse_env_variables(env_path)
+    user_vars, rename_log, rename_conflicts = _apply_renames(user_vars_raw, rename_rules)
     duplicates = _apply_renames_to_duplicates(duplicates_raw, rename_rules)
 
     example_names = set(example_vars)
@@ -272,6 +412,8 @@ def _analyze(example_path, env_path, rename_rules, provider_keys, known_provider
         "matching_vars": matching_vars,
         "extra_classified": extra_classified,
         "duplicates": duplicates,
+        "rename_conflicts": rename_conflicts,
+        "parse_error": parse_error,
     }
 
 # ---------------------------------------------------------------------------
@@ -281,7 +423,14 @@ def _analyze(example_path, env_path, rename_rules, provider_keys, known_provider
 def _truncate(value, max_len=25):
     if not value:
         return "(empty)"
-    return value[:max_len] + ("…" if len(value) > max_len else "")
+    flat = " ".join(value.split())          # keep multi-line values on one row
+    if not flat:
+        return "(empty)"
+    return flat[:max_len] + ("…" if len(flat) > max_len else "")
+
+def _display_value(info):
+    """The value without its quotes and inline comment."""
+    return info.get("clean_value", info.get("value", ""))
 
 def _print_migration_header():
     header = Text.assemble(
@@ -370,7 +519,7 @@ def _render_sections(analysis, kept_indices=None, title=None):
         console.print(f"  [bold]{title}[/]")
 
     # ── RENAME ──
-    if analysis["rename_log"]:
+    if analysis["rename_log"] or analysis.get("rename_conflicts"):
         console.print("  [bold magenta]RENAME[/] [dim]— These variables have been renamed in the new version.[/]")
         table = _section_table(col1_header="Old name")
         table.add_column("Rename to", no_wrap=True, overflow="ellipsis")
@@ -379,8 +528,15 @@ def _render_sections(analysis, kept_indices=None, title=None):
             table.add_row(
                 old_name,
                 _status_cell(info.get("active", False)),
-                _truncate(info.get("value", "")),
+                _truncate(_display_value(info)),
                 f"[magenta]{new_name}[/]",
+            )
+        for conflict in analysis.get("rename_conflicts", []):
+            table.add_row(
+                conflict["old"],
+                _status_cell(conflict["info"]["active"]),
+                _truncate(_display_value(conflict["info"])),
+                f"[yellow]{conflict['new']} [dim](already set)[/][/]",
             )
         console.print(table)
         console.print()
@@ -394,7 +550,7 @@ def _render_sections(analysis, kept_indices=None, title=None):
         table.add_column("Default value", no_wrap=True, overflow="ellipsis")
         for var in analysis["new_vars"]:
             info = example_vars[var]
-            table.add_row(var, _status_cell(info["active"]), _truncate(info["value"]))
+            table.add_row(var, _status_cell(info["active"]), _truncate(_display_value(info)))
         console.print(table)
         console.print()
 
@@ -405,7 +561,7 @@ def _render_sections(analysis, kept_indices=None, title=None):
         table = _section_table()
         for var, _ in custom_vars:
             info = user_vars[var]
-            table.add_row(var, _status_cell(info["active"]), _truncate(info["value"]))
+            table.add_row(var, _status_cell(info["active"]), _truncate(_display_value(info)))
         console.print(table)
         console.print()
 
@@ -423,7 +579,7 @@ def _render_sections(analysis, kept_indices=None, title=None):
             info = user_vars[var]
             is_kept = i in kept_indices
             action = "[white]Keep[/]" if is_kept else "[red]Remove[/]"
-            table.add_row(str(i), var, _status_cell(info["active"]), _truncate(info["value"]), action)
+            table.add_row(str(i), var, _status_cell(info["active"]), _truncate(_display_value(info)), action)
 
         for j, dup in enumerate(dups, 1):
             idx = n_dep + j
@@ -432,7 +588,7 @@ def _render_sections(analysis, kept_indices=None, title=None):
             label = f"{dup['var_name']} [dim](duplicate)[/]"
             table.add_row(
                 str(idx), label, _status_cell(dup["active"]),
-                _truncate(dup["value"]), action,
+                _truncate(_display_value(dup)), action,
             )
 
         console.print(table)
@@ -455,8 +611,8 @@ def _prompt_deprecated_selection(deprecated_count, duplicate_count=0):
         console.print(
             f"[bold yellow]Select variables to KEEP by #[/] "
             f"[dim](duplicates kept by default: {default_str})[/]\n"
-            "  Comma-separated numbers (e.g. 1,3,5), [bold]all[/], [bold]none[/], "
-            "or press Enter for defaults:"
+            "  Comma-separated numbers (e.g. 1,3,5) keep only those, "
+            "[bold]all[/], [bold]none[/], or press Enter for the defaults:"
         )
     else:
         console.print(
@@ -464,7 +620,11 @@ def _prompt_deprecated_selection(deprecated_count, duplicate_count=0):
             "  Comma-separated numbers (e.g. 1,3,5), [bold]all[/], or press Enter to remove all:"
         )
 
-    choice = console.input("  > ").strip().lower()
+    try:
+        choice = console.input("  > ").strip().lower()
+    except EOFError:
+        console.print("  [dim]No input available, using defaults.[/]")
+        return default_kept
 
     if choice == "all":
         return set(range(1, total + 1))
@@ -473,7 +633,7 @@ def _prompt_deprecated_selection(deprecated_count, duplicate_count=0):
     if not choice:
         return default_kept
 
-    indices = set(default_kept)
+    indices = set()
     for part in choice.split(","):
         part = part.strip()
         if part.isdigit():
@@ -492,8 +652,8 @@ def _build_migrated_content(analysis, kept_deprecated_names, kept_duplicates=Non
     - Config lines present in user env: user's value and active/commented state.
     - Config lines NOT in user env (new): kept as-is from the example.
     - Comment / blank lines: kept as-is from the example.
-    - Extra vars (custom providers, headers, kept deprecated, kept duplicates):
-      appended at the end.
+    - Extra vars (custom providers, headers, kept deprecated)
+    - Kept duplicates
     """
     if kept_duplicates is None:
         kept_duplicates = []
@@ -501,6 +661,7 @@ def _build_migrated_content(analysis, kept_deprecated_names, kept_duplicates=Non
     template_lines = analysis["template_lines"]
     user_vars = analysis["user_vars"]
     extra = analysis["extra_classified"]
+    conflicts = analysis.get("rename_conflicts", [])
 
     out = []
     for tl in template_lines:
@@ -509,10 +670,8 @@ def _build_migrated_content(analysis, kept_deprecated_names, kept_duplicates=Non
             continue
 
         var = tl["var_name"]
-        if var and var in user_vars:
-            info = user_vars[var]
-            prefix = "" if info["active"] else "#"
-            out.append(f"{prefix}{var}={info['value']}")
+        if var and var in user_vars and tl.get("substitute", True):
+            out.append(_format_assignment(var, user_vars[var]))
         else:
             out.append(tl["raw"])
 
@@ -521,7 +680,7 @@ def _build_migrated_content(analysis, kept_deprecated_names, kept_duplicates=Non
         extras_to_append.extend(var for var, _ in extra[cat])
     extras_to_append.extend(kept_deprecated_names)
 
-    has_extras = extras_to_append or kept_duplicates
+    has_extras = extras_to_append or kept_duplicates or conflicts
     if has_extras:
         out.append("")
         out.append("## ==============================")
@@ -532,14 +691,64 @@ def _build_migrated_content(analysis, kept_deprecated_names, kept_duplicates=Non
         out.append("")
         for var in extras_to_append:
             if var in user_vars:
-                info = user_vars[var]
-                prefix = "" if info["active"] else "#"
-                out.append(f"{prefix}{var}={info['value']}")
-        for dup in kept_duplicates:
-            prefix = "" if dup["active"] else "#"
-            out.append(f"{prefix}{dup['var_name']}={dup['value']}")
+                out.append(_format_assignment(var, user_vars[var]))
+        if conflicts:
+            if out[-1]:
+                out.append("")
+            out.append("## Renamed variables whose new name was already in use.")
+            out.append("## The value in use was kept. These are the old values.")
+            for conflict in conflicts:
+                out.append(_format_assignment(
+                    conflict["new"], {**conflict["info"], "active": False}))
+        if kept_duplicates:
+            if out[-1]:
+                out.append("")
+            out.append("## Duplicate entries, kept for reference only.")
+            for dup in kept_duplicates:
+                out.append(_format_assignment(dup["var_name"], {**dup, "active": False}))
 
     return "\n".join(out) + "\n"
+
+# ---------------------------------------------------------------------------
+# Check that the migrated file still holds the same configuration
+# ---------------------------------------------------------------------------
+
+def _effective_values(text):
+    """{name: value} as python-dotenv reads the file."""
+    return {
+        b.key: b.value
+        for b in dotenv_parser.parse_stream(io.StringIO(text))
+        if b.key and not b.error
+    }
+
+def _verify_migration(original_text, new_text, analysis, kept_deprecated_names):
+    """List the variables the migration would change or lose.
+
+    Every active variable must still have the same value afterwards, unless the
+    user chose to drop it or it was renamed. An empty list means the migrated
+    file is safe to write.
+    """
+    before = _effective_values(original_text)
+    after = _effective_values(new_text)
+    renames = dict(analysis.get("rename_log") or [])
+    dropped = {
+        var for var, _ in analysis["extra_classified"]["deprecated"]
+        if var not in kept_deprecated_names
+    }
+    dropped.update(c["old"] for c in analysis.get("rename_conflicts", []))
+
+    problems = []
+    for name, value in before.items():
+        target = renames.get(name, name)
+        if target in dropped or name in dropped:
+            continue
+        if target not in after:
+            problems.append(f"{name}: lost (no longer set)")
+        elif after[target] != value:
+            problems.append(
+                f"{name}: value changed ({_truncate(value, 20)} -> {_truncate(after[target], 20)})"
+            )
+    return problems
 
 # ---------------------------------------------------------------------------
 # Backup (incrementing: .bak  →  .2.bak  →  .3.bak  …)
@@ -565,6 +774,19 @@ def _create_backup(filepath):
 # ---------------------------------------------------------------------------
 
 def run_migration_tool():
+    if not sys.stdin.isatty():
+        console.print(Panel(
+            Text.assemble(
+                ("--migrate needs an interactive terminal.\n\n", "bold yellow"),
+                ("The migration tool asks which deprecated and duplicate variables to "
+                 "keep before rewriting your .env files, so it will not run "
+                 "unattended. No files were modified. Re-run it from a terminal.",
+                 "yellow"),
+            ),
+            border_style="yellow", width=PANEL_WIDTH, padding=(1, 2),
+        ))
+        return False
+
     _print_migration_header()
     known_providers = _get_known_providers()
 
@@ -604,6 +826,13 @@ def run_migration_tool():
             example_path, env_path,
             cfg["rename_rules"], cfg["provider_keys"], known_providers,
         )
+
+        if analysis["parse_error"]:
+            console.print(
+                f"  [bold red]{filename} could not be parsed correctly.[/] "
+                f"[red]It was left unchanged.[/]\n"
+            )
+            continue
 
         has_work = (
             analysis["rename_log"]
@@ -687,7 +916,7 @@ def run_migration_tool():
                 info = analysis["user_vars"][var]
                 is_kept = i in kept
                 action = "[white]Keep[/]" if is_kept else "[red]Remove[/]"
-                table.add_row(str(i), var, _status_cell(info["active"]), _truncate(info["value"]), action)
+                table.add_row(str(i), var, _status_cell(info["active"]), _truncate(_display_value(info)), action)
 
             for j, dup in enumerate(dups, 1):
                 idx = n_dep + j
@@ -696,7 +925,7 @@ def run_migration_tool():
                 label = f"{dup['var_name']} [dim](duplicate)[/]"
                 table.add_row(
                     str(idx), label, _status_cell(dup["active"]),
-                    _truncate(dup["value"]), action,
+                    _truncate(_display_value(dup)), action,
                 )
 
             console.print(table)
@@ -718,6 +947,23 @@ def run_migration_tool():
             plan.get("kept_duplicates", []),
         )
         try:
+            problems = _verify_migration(
+                _read_text(filepath), content, plan["analysis"],
+                plan["kept_deprecated_names"],
+            )
+            if problems:
+                console.print(Panel(
+                    Text.assemble(
+                        (f"{filename} was NOT migrated.\n\n", "bold red"),
+                        ("The rewritten file would not resolve to the same "
+                         "configuration, so it was left untouched:\n", "red"),
+                        ("\n".join(f"  - {p}" for p in problems), "dim"),
+                    ),
+                    border_style="red", width=PANEL_WIDTH, padding=(1, 2),
+                ))
+                errors += 1
+                continue
+
             backup = _create_backup(filepath)
             console.print(f"  -> Backup created: [dim]{backup}[/]")
             with open(filepath, "w", encoding="utf-8") as f:

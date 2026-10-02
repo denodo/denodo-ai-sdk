@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import socket
 import platform
 import threading
 import subprocess
@@ -11,6 +12,7 @@ from utils.utils import normalize_root_path
 from utils.version import AI_SDK_VERSION
 from utils.yaml.validate_and_parse import load_and_validate_agents
 from utils.runner_display import print_status
+from api.mcp.spaces import load_spaces
 
 console = Console()
 
@@ -46,6 +48,7 @@ def wait_for_services(specs, args):
                 AI_SDK_VERSION if spec["process_type"] == "api" else None,
                 root_path_prefix=spec["root_path"],
                 imported_agent_names=spec["imported_agent_names"],
+                imported_space_names=spec["imported_space_names"],
             )
             succeeded.append((spec["process_type"], spec))
         else:
@@ -91,6 +94,20 @@ def _build_service_urls(host, port, root_path, ssl_enabled):
         probe_host = f"[{probe_host}]"
 
     return display_url, f"{scheme}://{probe_host}:{port}{root_path}/health"
+
+def _port_is_free(host, port):
+    family = socket.AF_INET6 if host and ":" in host else socket.AF_INET
+    sock = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        if family == socket.AF_INET6:
+            sock.bind((host, int(port), 0, 0))
+        else:
+            sock.bind((host, int(port)))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
 
 def _spawn_service(process_type, args):
     env = os.environ.copy()
@@ -143,14 +160,24 @@ def _spawn_service(process_type, args):
         TIMEOUT = os.getenv("CHATBOT_TIMEOUT")
         ROOT_PATH = normalize_root_path(os.getenv("CHATBOT_ROOT_PATH") or "")
 
+    if not _port_is_free(HOST, PORT):
+        console.print(
+            f"[bold red]ERROR:[/] Port {PORT} on {HOST} is already in use ({process_type}).\n"
+            f"Stop the existing service first: [cyan]python stop.py {process_type}[/]"
+        )
+        sys.exit(1)
+
     display_url, health_url = _build_service_urls(HOST, PORT, ROOT_PATH, bool(SSL_CERT and SSL_KEY))
 
     imported_agent_names = []
+    imported_space_names = []
     if process_type == "sample_chatbot":
         imported_agent_names = [
             agent_config.get("name") or agent_config.get("id", "Unnamed agent")
             for agent_config in load_and_validate_agents()
         ]
+    elif process_type == "api" and os.getenv("AI_SDK_MCP_MODE") == "remote":
+        imported_space_names = [f"/space/{name}/mcp" for name in sorted(load_spaces())]
 
     with console.status(f"[bold blue]Starting {process_type}...", spinner="dots"):
         if args.production:
@@ -221,6 +248,7 @@ def _spawn_service(process_type, args):
         "health_url": health_url,
         "root_path": ROOT_PATH,
         "imported_agent_names": imported_agent_names,
+        "imported_space_names": imported_space_names,
     }
 
 def log_output(process):

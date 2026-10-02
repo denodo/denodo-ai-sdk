@@ -28,8 +28,17 @@ async def generate_view_answer(
     markdown_response=False,
     custom_instructions='',
     query_explanation='',
+    is_masked=False,
     session_id=None
 ):
+    masking_instructions = ""
+    if is_masked:
+        masking_instructions = (
+            "The data provided in the execution result contains intentionally masked values. "
+            "You must explicitly inform the user that some of the requested data has been masked due to security policies. "
+            "Present the data exactly as-is, without guessing, hallucinating, or offering to bypass the security masking."
+        )
+
     prompt = PromptTemplate.from_template(ANSWER_VIEW_PROMPT)
     chain = prompt | llm.llm | StrOutputParser()
 
@@ -40,26 +49,25 @@ async def generate_view_answer(
         "execution_result_csv": vql_execution_result,
         "response_format": response_format,
         "response_example": response_example,
+        "masking_instructions": masking_instructions,
         "custom_instructions": custom_instructions,
         "query_explanation": query_explanation
     }
 
-    with get_usage_metadata_callback() as cb:
+    with get_usage_metadata_callback() as cb, langfuse.trace_context(
+        model_id=f"{llm.provider_name}.{llm.model_name}",
+        session_id=session_id,
+        run_name=inspect.currentframe().f_code.co_name
+    ) as config:
         response = await chain.ainvoke(
             chain_params,
-            config=langfuse.build_config(
-                model_id=f"{llm.provider_name}.{llm.model_name}",
-                session_id=session_id,
-                run_name=inspect.currentframe().f_code.co_name
-            )
+            config=config
         )
 
+    final_text = response.strip() if response else 'There was an error while generating the answer. Please try again later.'
+
     result = LLMCallResult(
-        text=utils.custom_tag_parser(
-            response,
-            'final_answer',
-            default='There was an error while generating the answer. Please try again later.'
-        )[0].strip(),
+        text=final_text,
         tokens=usage_tokens(cb)
     )
     return result.text, result.tokens
@@ -69,28 +77,39 @@ async def generate_view_answer(
 async def related_questions(
     question, sql_query, execution_result, vector_search_tables, llm,
     custom_instructions='',
+    is_masked=False,
     session_id=None,
     sample_data=None,
 ):
+    masking_instructions = ""
+    if is_masked:
+        masking_instructions =  (
+            "The execution_result contains masked or redacted data. "
+            "You must not suggest any questions related to columns whose values appear masked, not even in combination with unmasked columns. "
+            "Ignore their existence and do not even mention the names of the masked columns in the related questions. "
+            "Only generate questions using exclusively the unmasked data available."
+        )
+
     prompt = PromptTemplate.from_template(RELATED_QUESTIONS_PROMPT)
     chain = prompt | llm.llm | StrOutputParser()
 
     schema = [table for table in vector_search_tables if table['view_name'] in sql_query.replace('"', '')]
     relevant_tables = format_schema_text(schema, [], sample_data)
 
-    with get_usage_metadata_callback() as cb:
+    with get_usage_metadata_callback() as cb, langfuse.trace_context(
+        model_id=f"{llm.provider_name}.{llm.model_name}",
+        session_id=session_id,
+        run_name=inspect.currentframe().f_code.co_name
+    ) as config:
         response = await chain.ainvoke(
             {
                 "custom_instructions": f"Here are some things to remember:\n{custom_instructions}" if custom_instructions else '',
                 "schema": relevant_tables,
                 "question": question,
                 "execution_result_csv": execution_result,
+                "masking_instructions": masking_instructions,
             },
-            config=langfuse.build_config(
-                model_id=f"{llm.provider_name}.{llm.model_name}",
-                session_id=session_id,
-                run_name=inspect.currentframe().f_code.co_name
-            )
+            config=config
         )
 
     result = LLMCallResult(
@@ -102,7 +121,8 @@ async def related_questions(
 async def generate_answer_content(
     request, response, vql_query, llm_execution_result,
     vector_search_tables, plot_data, timings, chat_llm, sql_gen_llm,
-    session_id=None, sample_data=None, query_explanation=''
+    session_id=None, sample_data=None, query_explanation='',
+    is_masked=False
 ):
     """The content of an answer can consist of:
 
@@ -133,6 +153,7 @@ async def generate_answer_content(
                     markdown_response=request.markdown_response,
                     custom_instructions=request.custom_instructions,
                     query_explanation=query_explanation,
+                    is_masked=is_masked,
                     session_id=session_id
                 )
             )
@@ -144,6 +165,7 @@ async def generate_answer_content(
                     vector_search_tables=vector_search_tables,
                     llm=chat_llm,
                     custom_instructions=request.custom_instructions,
+                    is_masked=is_masked,
                     session_id=session_id,
                     sample_data=sample_data
                 )
@@ -188,13 +210,13 @@ def terminal_answer(resolution, attempts):
         return "The generated VQL query failed and automatic query fixing is disabled."
     if resolution == Resolution.EXHAUSTED:
         return (
-            f"The data agent tried to generate a query {attempts} times but failed to produce a VQL "
+            f"Automatic query fixing tried {attempts} times but failed to produce a VQL "
             f"query that worked. Returned is the VQL query and query explanations after "
             f"{attempts} attempts."
         )
     if resolution == Resolution.UNFIXABLE:
         return (
-            "The query could not be answered because the data agent generated a VQL query that errored, and "
+            "The query could not be answered because the generated VQL query errored, and "
             "the error is not fixable at the query level. See the query explanation for details."
         )
     return None
@@ -211,6 +233,8 @@ async def build_answer(
     kept_resolved_query = resolved.resolution in (Resolution.SUCCESS, Resolution.EMPTY)
     response_vql = resolved.vql if kept_resolved_query else resolved.original_vql
 
+    is_masked = resolved.outcome.is_masked if execution_result else False
+
     response = prepare_response(
         vql_query=response_vql,
         query_explanation=resolved.explanation,
@@ -218,7 +242,8 @@ async def build_answer(
         execution_result=execution_result,
         vector_search_tables=vector_search_tables,
         raw_graph='',
-        timings=timings
+        timings=timings,
+        is_masked=is_masked
     )
 
     override = terminal_answer(resolved.resolution, resolved.attempts)
@@ -238,7 +263,8 @@ async def build_answer(
             sample_data=sample_data,
             chat_llm=chat_llm,
             sql_gen_llm=sql_gen_llm,
-            query_explanation=resolved.explanation
+            query_explanation=resolved.explanation,
+            is_masked=is_masked
         )
 
     if request.disclaimer:

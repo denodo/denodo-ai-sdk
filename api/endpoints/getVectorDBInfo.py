@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from api.utils import state_manager
 from api.utils.sdk_utils import get_user_synced_resources, handle_endpoint_error, check_metadata_user_permission, authenticate
-from utils.data_marketplace.connection import get_user_permissions, DataCatalogAuthError
+from utils.data_marketplace.connection import get_user_permissions_for_vector_store, DataCatalogAuthError
 from api.utils.sdk_utils import get_custom_request_headers
 
 router = APIRouter()
@@ -66,7 +66,20 @@ async def getVectorDBInfo(
     the current user has permissions for.
     """
     try:
-        permissions_data = await get_user_permissions(auth=auth, custom_headers=custom_headers)
+        vector_store = state_manager.get_vector_store(
+            provider=endpoint_request.vector_store_provider,
+            embeddings_provider=endpoint_request.embeddings_provider,
+            embeddings_model=endpoint_request.embeddings_model
+        )
+    except Exception as e:
+        logging.error(f"Resource initialization error: {str(e)}")
+        logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to get vector store from state manager: {e}") from e
+
+    try:
+        permissions_data = await get_user_permissions_for_vector_store(
+            auth=auth, vector_store=vector_store, custom_headers=custom_headers
+        )
         views_details = permissions_data.get("viewsPermissions", [])
         allowed_view_ids_str = [str(view["viewId"]) for view in views_details]
     except DataCatalogAuthError as e:
@@ -83,17 +96,6 @@ async def getVectorDBInfo(
             "partialResources": {},
             "userSyncPermissions": user_sync_permissions
         }, status_code=200)
-
-    try:
-        vector_store = state_manager.get_vector_store(
-            provider=endpoint_request.vector_store_provider,
-            embeddings_provider=endpoint_request.embeddings_provider,
-            embeddings_model=endpoint_request.embeddings_model
-        )
-    except Exception as e:
-        logging.error(f"Resource initialization error: {str(e)}")
-        logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Failed to get vector store from state manager: {e}") from e
 
     try:
         filtered_synced_resources, filtered_partial_resources = get_user_synced_resources(

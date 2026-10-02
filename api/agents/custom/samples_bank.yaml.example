@@ -43,6 +43,10 @@ settings:
   report_max_size: 50
   report_max_files: 20
 
+  ## Select a target AI Space (combination of databases and tags).
+  ## Unioned with any databases/tags listed below.
+  # space: banking
+
   databases:
     - "samples_bank"
 

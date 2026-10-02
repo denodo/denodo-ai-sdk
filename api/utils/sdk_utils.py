@@ -21,18 +21,25 @@ import asyncio
 import functools
 import traceback
 
+from base64 import b64decode
 from time import time, perf_counter
 from typing import Annotated
 from fastapi import HTTPException, Depends, Request
-from fastapi.security import HTTPBasic, HTTPBearer, HTTPBasicCredentials, HTTPAuthorizationCredentials
+from fastapi.security import HTTPBasic, HTTPBearer, HTTPAuthorizationCredentials
 from contextlib import contextmanager
 from langchain_core.documents.base import Document
 
 from utils.data_marketplace.connection import get_views_metadata_documents
 from utils.schema_catalog import SchemaCatalog
+from utils.schema_catalog.helpers import encode_tag
 from utils.utils import schema_summary, prepare_schema, flatten_list, prepare_sample_data_schema, calculate_tokens, current_endpoint, filter_allowed_headers
 
-security_basic = HTTPBasic(auto_error=False)
+class HTTPBasicOpenAPI(HTTPBasic):
+    """Registers Basic Auth in OpenAPI. Credentials are decoded in authenticate()."""
+    async def __call__(self, request: Request):
+        return None
+
+security_basic = HTTPBasicOpenAPI(auto_error=False, scheme_name="HTTPBasic")
 security_bearer = HTTPBearer(auto_error=False)
 
 def get_custom_request_headers(request: Request):
@@ -226,10 +233,12 @@ def check_env_variables(required_vars):
                 missing_items.append(" or ".join(item))
 
     if missing_items:
-        print("ERROR. The following required environment variables are missing:")
+        error_msg = "The following required environment variables are missing:\n"
         for var_name in missing_items:
-            print(f"- {var_name}")
-        print("Please set these variables before starting the application.")
+            error_msg += f"- {var_name}\n"
+        error_msg += "Please set these variables before starting the application."
+
+        logging.error(error_msg)
         sys.exit(1)
 
 def test_data_catalog_connection(data_catalog_url, verify_ssl):
@@ -430,15 +439,22 @@ def dataframe_stats(df, unique_values_limit=20):
     return str(info)
 
 def authenticate(
-        basic_credentials: Annotated[HTTPBasicCredentials | None, Depends(security_basic)],
+        request: Request,
+        _basic: Annotated[None, Depends(security_basic)],
         bearer_credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_bearer)]
         ):
     if bearer_credentials is not None:
         return bearer_credentials.credentials
-    elif basic_credentials is not None:
-        return (basic_credentials.username, basic_credentials.password)
-    else:
-        raise HTTPException(status_code=401, detail="Authentication required")
+    authorization = request.headers.get("Authorization") or ""
+    if authorization.lower().startswith("basic "):
+        raw = b64decode(authorization.split(" ", 1)[1])
+        try:
+            data = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            data = raw.decode("latin-1")
+        username, _, password = data.partition(":")
+        return (username, password)
+    raise HTTPException(status_code=401, detail="Authentication required")
 
 def check_feature_permission(auth, permissions_data, users_env_var, roles_env_var):
     """
@@ -503,6 +519,17 @@ def check_deepquery_user_permission(auth, permissions_data=None):
         permissions_data,
         users_env_var="AI_SDK_ALLOWED_DEEPQUERY_USERS",
         roles_env_var="AI_SDK_ALLOWED_DEEPQUERY_ROLES"
+    )
+
+def check_log_level_user_permission(auth, permissions_data=None):
+    """
+    Check if the authenticated user is allowed to change the runtime log level.
+    """
+    return check_feature_permission(
+        auth,
+        permissions_data,
+        users_env_var="AI_SDK_ALLOWED_LOG_LEVEL_USERS",
+        roles_env_var="AI_SDK_ALLOWED_LOG_LEVEL_ROLES"
     )
 
 async def process_metadata_source(
@@ -624,11 +651,10 @@ async def process_metadata_source(
 
                     # Get partial DBs
                     if source_type == "TAG":
-                        table_name = view.get('tableName', '')
-                        if '.' in table_name:
-                            db_name = table_name.split('.')[0]
-                            if db_name:
-                                found_dbs_by_tag.setdefault(source_name, set()).add(db_name)
+                        db_name = view.get('databaseName')
+
+                        if db_name:
+                            found_dbs_by_tag.setdefault(source_name, set()).add(db_name)
 
         if vector_store:
             views = flatten_list(prepare_schema(db_schema, request.embeddings_token_limit))
@@ -684,39 +710,39 @@ def format_metadata_response(
     }
 
 def is_non_conflicting_doc(doc, databases_to_delete, tags_to_delete, last_update_dict):
-        """
-        Determines whether a document can be safely deleted without conflicting metadata.
+    """
+    Determines whether a document can be safely deleted without conflicting metadata.
 
-        A document is considered non-conflicting if both of these are true:
-        - Its 'database_name' is either:
-            - in the databases_to_delete list, or
-            - not present in last_update_dict["DATABASE"].
-        - For each of its active tags ('tag_' fields with value '1'):
-            - If the tag is NOT in tags_to_delete, it must also NOT be in last_update_dict["TAG"].
+    A document is considered non-conflicting if both of these are true:
+    - Its 'database_name' is either:
+        - in the databases_to_delete list, or
+        - not present in last_update_dict["DATABASE"].
+    - For each of its active tags ('tag_' fields with value '1'):
+        - If the tag is NOT in tags_to_delete, it must also NOT be in last_update_dict["TAG"].
 
-        This ensures that we don't delete documents whose metadata partially overlaps
-        with deletion criteria, unless they're fully safe to remove.
-        """
-        metadata = doc.metadata or {}
+    This ensures that we don't delete documents whose metadata partially overlaps
+    with deletion criteria, unless they're fully safe to remove.
+    """
+    metadata = doc.metadata or {}
 
-        db_name = metadata.get("database_name")
-        last_updated_dbs = set(last_update_dict.get("DATABASE", []))
-        last_updated_tags = set(last_update_dict.get("TAG", []))
+    db_name = metadata.get("database_name")
+    last_updated_dbs = set(last_update_dict.get("DATABASE", []))
+    last_updated_tags = set(last_update_dict.get("TAG", []))
 
-        db_match = (
-            db_name in databases_to_delete or
-            db_name not in last_updated_dbs
-        )
+    db_match = (
+        db_name in databases_to_delete or
+        db_name not in last_updated_dbs
+    )
 
-        tags_to_delete_full = {f"tag_{tag}" for tag in tags_to_delete}
-        last_updated_tags_full = {f"tag_{tag}" for tag in last_updated_tags}
+    tags_to_delete_full = {f"tag_{encode_tag(tag)}" for tag in tags_to_delete}
+    last_updated_tags_full = {f"tag_{encode_tag(tag)}" for tag in last_updated_tags}
 
-        for k, v in metadata.items():
-            if k.startswith("tag_") and v == "1":
-                if k not in tags_to_delete_full and k in last_updated_tags_full:
-                    return False
+    for k, v in metadata.items():
+        if k.startswith("tag_") and v == "1":
+            if k not in tags_to_delete_full and k in last_updated_tags_full:
+                return False
 
-        return db_match
+    return db_match
 
 async def delete_by_db_or_tag(vector_store, sample_data_vector_store, vdp_database_names, vdp_tag_names, delete_conflicting, allowed_view_ids=None):
     """
@@ -933,7 +959,7 @@ async def handle_detagged_views(
         documents_to_reindex = []
         for doc in conflicting_docs_to_update:
             updated_metadata = doc.metadata.copy()
-            tag_key = f"tag_{tag_name}"
+            tag_key = f"tag_{encode_tag(tag_name)}"
             if tag_key in updated_metadata:
                 del updated_metadata[tag_key]
 
@@ -946,6 +972,10 @@ async def handle_detagged_views(
 
         if documents_to_reindex:
             ids_for_upsert = [doc.id for doc in documents_to_reindex]
+            await asyncio.to_thread(
+                vector_store.delete,
+                ids=ids_for_upsert
+            )
             await asyncio.to_thread(
                 vector_store.client.add_documents,
                 documents=documents_to_reindex,

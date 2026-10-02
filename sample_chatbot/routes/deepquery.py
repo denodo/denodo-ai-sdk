@@ -30,16 +30,34 @@ def generate_report():
         if not deepquery_metadata:
             return jsonify({"error": "Missing deepquery_metadata"}), 400
 
+        chatbot = user_obj.get_or_create_chatbot()
+        ai_sdk_params = chatbot.ai_sdk_params or {}
+        llm_override_keys = (
+            "llm_provider",
+            "llm_model",
+            "llm_temperature",
+            "llm_max_tokens",
+            "thinking_llm_provider",
+            "thinking_llm_model",
+            "thinking_llm_temperature",
+            "thinking_llm_max_tokens",
+            "check_ambiguity",
+        )
+        report_payload = {
+            "deepquery_metadata": deepquery_metadata,
+            "color_palette": color_palette,
+            "language": language,
+        }
+        for key in llm_override_keys:
+            if key in ai_sdk_params and ai_sdk_params[key] is not None:
+                report_payload[key] = ai_sdk_params[key]
+
         # Make request to the generateDeepQueryReport endpoint using the logged-in
         # user's credentials, matching the analysis (/deepQuery) flow
         auth = (user_obj.id, user_obj.password)
         response = requests.post(
             f"{config.ai_sdk_host}/generateDeepQueryReport",
-            json={
-                "deepquery_metadata": deepquery_metadata,
-                "color_palette": color_palette,
-                "language": language
-            },
+            json=report_payload,
             auth=auth,
             verify=config.ai_sdk_verify_ssl,
             timeout=config.chatbot_timeout

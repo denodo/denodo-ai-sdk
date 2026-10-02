@@ -157,6 +157,32 @@ def generate_transaction_id():
     """Generates a unique transaction ID (UUID4) for tracking a request."""
     return str(uuid4())
 
+MAX_TRANSACTION_ID_LENGTH = 128
+
+def resolve_transaction_id(headers):
+    """
+    Use the caller-supplied correlation header when it is present and valid,
+    otherwise generate a UUID. Invalid means empty, longer than
+    MAX_TRANSACTION_ID_LENGTH, or containing control characters.
+    """
+    header_name = os.getenv("CUSTOM_TRANSACTION_HEADER", "X-Correlation-ID")
+    value = headers.get(header_name) if headers is not None else None
+    if value is None:
+        return generate_transaction_id()
+
+    transaction_id = value.strip()
+    if (
+        not transaction_id
+        or len(transaction_id) > MAX_TRANSACTION_ID_LENGTH
+        or any(ord(char) < 32 for char in transaction_id)
+    ):
+        logging.warning(
+            f"Ignoring invalid {header_name} header; generating a new transaction ID."
+        )
+        return generate_transaction_id()
+
+    return transaction_id
+
 # Timer Decorator
 def timed(func):
     @wraps(func)
@@ -238,9 +264,6 @@ def custom_tag_parser(text, tag, default=[]):
 def flatten_list(list_of_lists):
     flattened_list = [x for item in list_of_lists for x in (item if isinstance(item, list) else [item])]
     return flattened_list
-
-def create_chunks(table, embeddings_token_limit):
-    return SchemaTable.from_dict(table).to_embedding_documents(embeddings_token_limit)
 
 @timed
 def prepare_sample_data_schema(schema):

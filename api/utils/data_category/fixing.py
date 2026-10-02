@@ -58,14 +58,14 @@ def _parse_vql_and_thoughts(response):
 
 async def _invoke(llm, messages, session_id, run_name):
     chain = llm.llm | StrOutputParser()
-    with get_usage_metadata_callback() as cb:
+    with get_usage_metadata_callback() as cb, langfuse.trace_context(
+        model_id=f"{llm.provider_name}.{llm.model_name}",
+        session_id=session_id,
+        run_name=run_name,
+    ) as config:
         text = await chain.ainvoke(
             messages,
-            config=langfuse.build_config(
-                model_id=f"{llm.provider_name}.{llm.model_name}",
-                session_id=session_id,
-                run_name=run_name,
-            ),
+            config=config,
         )
     return text, usage_tokens(cb)
 

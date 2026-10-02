@@ -11,6 +11,7 @@
 import os
 import platform
 import logging
+import sys
 from dotenv import load_dotenv
 
 load_dotenv('api/utils/sdk_config.env')
@@ -30,9 +31,7 @@ required_vars = [
     "VECTOR_STORE"
 ]
 
-# Load and check configuration variables
-check_env_variables(required_vars)
-
+AI_SDK_EMBEDDINGS_TOKEN_LIMIT = int(os.getenv("EMBEDDINGS_TOKEN_LIMIT", 0))
 AI_SDK_HOST = os.getenv("AI_SDK_HOST", "0.0.0.0")
 AI_SDK_PORT = int(os.getenv("AI_SDK_PORT", 8008))
 AI_SDK_ROOT_PATH = normalize_root_path(os.getenv("AI_SDK_ROOT_PATH", ""))
@@ -53,10 +52,14 @@ AI_SDK_EMBEDDINGS_MODEL = os.getenv("EMBEDDINGS_MODEL")
 AI_SDK_VECTOR_STORE_PROVIDER = os.getenv("VECTOR_STORE")
 AI_SDK_DATA_MARKETPLACE_URL = os.getenv("AI_SDK_DATA_MARKETPLACE_URL")
 AI_SDK_DATA_MARKETPLACE_VERIFY_SSL = bool(int(os.getenv("DATA_MARKETPLACE_VERIFY_SSL", 0)))
+DATA_MARKETPLACE_TIMEOUT = int(os.getenv("DATA_MARKETPLACE_TIMEOUT", 300))
 AI_SDK_CHECK_AMBIGUITY = bool(int(os.getenv("CHECK_AMBIGUITY", "1")))
+AI_SDK_AUTO_FIXING = bool(int(os.getenv("AUTO_FIXING", "1")))
+AI_SDK_AUTO_FIXING_ATTEMPTS = max(1, min(5, int(os.getenv("AUTO_FIXING_ATTEMPTS", "2"))))
 AI_SDK_ALLOWED_METADATA_USERS = os.getenv("AI_SDK_ALLOWED_METADATA_USERS")
 AI_SDK_ALLOWED_METADATA_ROLES = os.getenv("AI_SDK_ALLOWED_METADATA_ROLES")
 AI_SDK_FORWARD_CUSTOM_HEADERS = os.getenv("FORWARD_CUSTOM_HEADERS")
+AI_SDK_CUSTOM_TRANSACTION_HEADER = os.getenv("CUSTOM_TRANSACTION_HEADER", "X-Correlation-ID")
 AI_SDK_MCP_MODE = os.getenv("AI_SDK_MCP_MODE")
 AI_SDK_PERMISSIONS_CACHE = os.getenv("AI_SDK_PERMISSIONS_CACHE", "1") == "1"
 AI_SDK_PERMISSIONS_CACHE_MAX_SIZE = int(os.getenv("AI_SDK_PERMISSIONS_CACHE_MAX_SIZE", "1000"))
@@ -81,7 +84,16 @@ else:
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 def log_ai_sdk_parameters():
-    """Logs the initialized SDK parameters."""
+    """Validates configuration and logs the initialized SDK parameters."""
+
+    check_env_variables(required_vars)
+
+    if 0 < AI_SDK_EMBEDDINGS_TOKEN_LIMIT < 1000:
+        logging.error(
+            f"Invalid EMBEDDINGS_TOKEN_LIMIT value ({AI_SDK_EMBEDDINGS_TOKEN_LIMIT}). "
+            "The token limit must be either 0 (to disable chunking) or >= 1000."
+        )
+        sys.exit(1)
 
     access_control_log = []
     if AI_SDK_ALLOWED_METADATA_ROLES:
@@ -113,14 +125,19 @@ def log_ai_sdk_parameters():
             if THINKING_MODEL_AVAILABLE else "Not configured"
         ),
         "Embeddings Model": f"{AI_SDK_EMBEDDINGS_PROVIDER}/{AI_SDK_EMBEDDINGS_MODEL}",
+        "Chunking Embeddings Token Limit": AI_SDK_EMBEDDINGS_TOKEN_LIMIT if AI_SDK_EMBEDDINGS_TOKEN_LIMIT > 0 else "Disabled",
         "Vector Store Provider": AI_SDK_VECTOR_STORE_PROVIDER,
         "Data Marketplace URL": AI_SDK_DATA_MARKETPLACE_URL,
+        "Data Marketplace Timeout": f"{DATA_MARKETPLACE_TIMEOUT}s",
         "Data Marketplace Connection": test_data_catalog_connection(AI_SDK_DATA_MARKETPLACE_URL, AI_SDK_DATA_MARKETPLACE_VERIFY_SSL),
         "Data Marketplace Verify SSL": AI_SDK_DATA_MARKETPLACE_VERIFY_SSL,
         "Check Ambiguity": AI_SDK_CHECK_AMBIGUITY,
+        "Auto Fixing": AI_SDK_AUTO_FIXING,
+        "Auto Fixing Attempts": AI_SDK_AUTO_FIXING_ATTEMPTS,
         "Metadata Access Control": access_msg,
         "Permissions Cache": cache_status,
-        "Forwarded Custom Headers": format_comma_separated_list(AI_SDK_FORWARD_CUSTOM_HEADERS) if AI_SDK_FORWARD_CUSTOM_HEADERS else "None"
+        "Forwarded Custom Headers": format_comma_separated_list(AI_SDK_FORWARD_CUSTOM_HEADERS) if AI_SDK_FORWARD_CUSTOM_HEADERS else "None",
+        "Custom Transaction Header": AI_SDK_CUSTOM_TRANSACTION_HEADER,
     }
 
     if THINKING_MODEL_AVAILABLE:

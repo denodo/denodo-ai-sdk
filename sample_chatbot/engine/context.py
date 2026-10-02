@@ -4,6 +4,7 @@ and TOOL_DEFINITIONS for frontend tool configuration (aliases, tool_public_text_
 """
 
 from dataclasses import dataclass, field
+
 @dataclass
 class UserContext:
     api_host: str
@@ -13,8 +14,8 @@ class UserContext:
     verify_ssl: bool
     ai_sdk_params: dict
     timeout: int = 1200
-    vdp_database_names: str = ""
-    vdp_tag_names: str = ""
+    vdp_database_names: list = field(default_factory=list)
+    vdp_tag_names: list = field(default_factory=list)
     vector_store: object = None
     active_csv_sources: list | None = None  # List of active CSV source names to filter knowledge queries
     kb_collections: dict = field(default_factory=dict)  # name -> description for the user's active collections
@@ -26,11 +27,23 @@ class UserContext:
 
 # Tool definitions for frontend configuration
 TOOL_DEFINITIONS = {
-    "data_agent": {
-        "pretty_name": "Data Agent",
-        "aliases": ["@data_agent", "@sql", "@data"],
+    "generate_vql": {
+        "pretty_name": "Generate VQL",
+        "aliases": ["@generate_vql", "@sql", "@data"],
         "optional": False,
         "tool_public_text_key": "request",
+    },
+    "execute_vql": {
+        "pretty_name": "Execute VQL",
+        "aliases": ["@execute_vql", "@vql"],
+        "optional": False,
+        "tool_public_text_key": "vql",
+    },
+    "generate_graph": {
+        "pretty_name": "Generate Graph",
+        "aliases": ["@generate_graph", "@graph", "@plot"],
+        "optional": False,
+        "tool_public_text_key": "plot_details",
     },
     "deep_query": {
         "pretty_name": "Deep Query",

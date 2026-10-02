@@ -4,6 +4,7 @@ import time
 import logging
 import concurrent.futures
 from utils.utils import log_params, prepare_last_update_vector, timed
+from utils.schema_catalog.helpers import encode_tag
 
 class UniformVectorStore:
     def __init__(self, provider, embeddings, index_name = "ai_sdk_vector_store", rate_limit_rpm = None, chunk_factor = 5):
@@ -15,6 +16,7 @@ class UniformVectorStore:
         self.search_vector = self.embeddings.embed_query("tables")
         self.dimensions = len(self.search_vector)
         self.chunk_factor = chunk_factor
+        self.search_batch_size = 2000 if self.provider == "sqlserver" else 30000
         self._connect()
 
     @staticmethod
@@ -120,6 +122,28 @@ class UniformVectorStore:
                     index_name=self.index_name,
                     engine="faiss"
                 )
+        elif self.provider == "sqlserver":
+            from langchain_sqlserver import SQLServer_VectorStore
+            from sqlalchemy import create_engine
+
+            SQLSERVER_CONNECTION_STRING = os.getenv("SQLSERVER_CONNECTION_STRING")
+
+            if not SQLSERVER_CONNECTION_STRING:
+                raise ValueError("SQLSERVER_CONNECTION_STRING environment variable not set.")
+
+            engine = create_engine(
+                SQLSERVER_CONNECTION_STRING,
+                pool_pre_ping=True,
+                pool_recycle=1800,
+            )
+
+            self.client = SQLServer_VectorStore(
+                connection=engine,
+                connection_string=SQLSERVER_CONNECTION_STRING,
+                embedding_function=self.embeddings,
+                embedding_length=self.dimensions,
+                table_name=self.index_name
+            )
         elif self.provider == "oracle":
             import oracledb
             from langchain_oracledb.vectorstores import OracleVS
@@ -132,17 +156,18 @@ class UniformVectorStore:
             if not all([ORACLE_USERNAME, ORACLE_PASSWORD, ORACLE_DSN]):
                 raise ValueError("ORACLE_USERNAME, ORACLE_PASSWORD, and ORACLE_DSN environment variables must be set.")
 
-            try:
-                connection = oracledb.connect(
-                    user=ORACLE_USERNAME,
-                    password=ORACLE_PASSWORD,
-                    dsn=ORACLE_DSN
-                )
-            except Exception as e:
-                raise ConnectionError(f"Failed to connect to Oracle Database: {e}")
+            pool = oracledb.create_pool(
+                user=ORACLE_USERNAME,
+                password=ORACLE_PASSWORD,
+                dsn=ORACLE_DSN,
+                min=2,
+                max=10,
+                increment=1,
+                ping_interval=0,
+            )
 
             self.client = OracleVS(
-                client=connection,
+                client=pool,
                 embedding_function=self.embeddings,
                 table_name=self.index_name,
                 distance_strategy=DistanceStrategy.COSINE,
@@ -150,8 +175,22 @@ class UniformVectorStore:
         else:
             raise ValueError(f"Unsupported vector store provider: {self.provider}")
 
+    def _fix_sqlserver_ids(self, results):
+        """
+        Restores missing Document IDs for SQL Server search results.
+        SQL Server implementation returns Document.id as None, causing Upsert issues.
+        """
+        if not results or self.provider != "sqlserver":
+            return results
+
+        for item in results:
+            doc = item[0] if isinstance(item, tuple) else item
+            if getattr(doc, 'id', None) is None:
+                doc.id = doc.metadata.get('custom_id') or doc.metadata.get('document_id')
+        return results
+
     def get_last_update_dict(self):
-        search_vector = self.search_by_vector(self.search_vector, k = 1, view_ids = ["last_update"])
+        search_vector = self.search_by_vector(self.search_vector, k=1, view_ids=["last_update"])
         if search_vector and 'last_update_dict' in search_vector[0].metadata:
             return json.loads(search_vector[0].metadata['last_update_dict'])
         else:
@@ -304,15 +343,20 @@ class UniformVectorStore:
 
     @log_params
     @timed
-    def search(self, query, k=3, view_ids=None, database_names=None, tag_names=None, view_names=None, scores=False):
+    def search(self, query, k=3, view_ids=None, database_names=None, tag_names=None, view_names=None, scores=False,
+               filter_logic='OR'):
         # If view_ids is provided and it's empty, return empty list
         if view_ids is not None and len(view_ids) == 0:
             return []
         # Build search filter if view_ids has values
         elif view_ids is not None:
-            search_filter = self._build_search_filter(view_ids, database_names, tag_names, view_names)
+            search_filter = self._build_search_filter(
+                view_ids, database_names, tag_names, view_names, filter_logic=filter_logic
+            )
         elif not view_names and ((database_names and len(database_names) > 0) or (tag_names and len(tag_names) > 0)):
-            search_filter = self._build_metadata_search_filter(database_names, tag_names)
+            search_filter = self._build_metadata_search_filter(
+                database_names, tag_names, filter_logic=filter_logic
+            )
         elif view_names:
             search_filter = self._build_get_view_ids_search_filter(view_names)
         else:
@@ -320,77 +364,117 @@ class UniformVectorStore:
 
         if scores:
             if self.provider == "opensearch":
-                return self.client.similarity_search_with_score(query, k=k, search_type="script_scoring", pre_filter=search_filter)
-            elif self.provider in ["chroma", "pgvector", "oracle"]:
-                return self.client.similarity_search_with_score(query, k=k, filter=search_filter)
+                result = self.client.similarity_search_with_score(query, k=k, search_type="script_scoring", pre_filter=search_filter)
+            elif self.provider in ["chroma", "pgvector", "oracle", "sqlserver"]:
+                result = self.client.similarity_search_with_score(query, k=k, filter=search_filter)
         else:
             if self.provider == "opensearch":
-                return self.client.similarity_search(query, k=k, search_type="script_scoring", pre_filter=search_filter)
-            elif self.provider in ["chroma", "pgvector", "oracle"]:
-                return self.client.similarity_search(query, k=k, filter=search_filter)
+                result = self.client.similarity_search(query, k=k, search_type="script_scoring", pre_filter=search_filter)
+            elif self.provider in ["chroma", "pgvector", "oracle", "sqlserver"]:
+                result = self.client.similarity_search(query, k=k, filter=search_filter)
+
+        return self._fix_sqlserver_ids(result)
 
     @log_params
     @timed
-    def search_by_vector(self, vector, k=3, view_ids=None, database_names=None, tag_names=None, view_names=None, scores=False):
+    def search_by_vector(self, vector, k=3, view_ids=None, database_names=None, tag_names=None, view_names=None,
+                         scores=False, filter_logic='OR'):
         # If view_ids is provided and it's empty, return empty list
         if view_ids is not None and len(view_ids) == 0:
             return []
         # Build search filter if view_ids has values
         elif view_ids is not None:
-            search_filter = self._build_search_filter(view_ids, database_names, tag_names, view_names)
+            search_filter = self._build_search_filter(
+                view_ids, database_names, tag_names, view_names, filter_logic=filter_logic
+            )
         elif not view_names and ((database_names and len(database_names) > 0) or (tag_names and len(tag_names) > 0)):
-            search_filter = self._build_metadata_search_filter(database_names, tag_names)
+            search_filter = self._build_metadata_search_filter(
+                database_names, tag_names, filter_logic=filter_logic
+            )
         else:
             search_filter = self._build_get_view_ids_search_filter(view_names)
 
         if scores:
             if self.provider == "opensearch":
-                return self.client.similarity_search_with_score_by_vector(vector, k=k, search_type="script_scoring", pre_filter=search_filter)
-            elif self.provider in ["pgvector", "oracle"]:
-                return self.client.similarity_search_with_score_by_vector(vector, k=k, filter=search_filter)
-            elif self.provider == "chroma":
-                return self.client.similarity_search_by_vector_with_relevance_scores(vector, k=k, filter=search_filter)
+                result = self.client.similarity_search_with_score_by_vector(
+                    vector, k=k, search_type="script_scoring", pre_filter=search_filter
+                )
+            elif self.provider in ["oracle", "chroma"]:
+                result = self.client.similarity_search_by_vector_with_relevance_scores(
+                    vector, k=k, filter=search_filter
+                )
+            elif self.provider == "sqlserver":
+                result = self.client.similarity_search_by_vector_with_score(
+                    vector, k=k, filter=search_filter
+                )
+            elif self.provider == "pgvector":
+                result = self.client.similarity_search_with_score_by_vector(
+                    vector, k=k, filter=search_filter
+                )
         else:
             if self.provider == "opensearch":
-                return self.client.similarity_search_by_vector(vector, k=k, search_type="script_scoring", pre_filter=search_filter)
-            elif self.provider in ["chroma", "pgvector", "oracle"]:
-                return self.client.similarity_search_by_vector(vector, k=k, filter=search_filter)
+                result = self.client.similarity_search_by_vector(vector, k=k, search_type="script_scoring", pre_filter=search_filter)
+            elif self.provider in ["chroma", "pgvector", "oracle", "sqlserver"]:
+                result = self.client.similarity_search_by_vector(vector, k=k, filter=search_filter)
 
-    @log_params
-    def _build_metadata_search_filter(self, database_names=None, tag_names=None):
-        """
-        Builds a search filter for metadata-only queries (database_names, tag_names)
-        using OR logic across the provided lists.
-        """
-        or_conditions = []
+        return self._fix_sqlserver_ids(result)
 
-        if database_names:
-            for db_name in database_names:
-                if self.provider == "opensearch":
-                    or_conditions.append({"match": {"metadata.database_name": db_name}})
-                elif self.provider in ["chroma", "pgvector", "oracle"]:
-                    or_conditions.append({"database_name": {"$eq": db_name}})
+    def _or_clause(self, conditions):
+        if not conditions:
+            return None
+        if len(conditions) == 1:
+            return conditions[0]
+        if self.provider == "opensearch":
+            return {"bool": {"should": conditions, "minimum_should_match": 1}}
+        return {"$or": conditions}
 
-        if tag_names:
-            for tag_name in tag_names:
-                if self.provider == "opensearch":
-                    or_conditions.append({"match": {f"metadata.tag_{tag_name}": "1"}})
-                elif self.provider in ["chroma", "pgvector", "oracle"]:
-                    or_conditions.append({f"tag_{tag_name}": {"$eq": "1"}})
+    def _and_clause(self, conditions):
+        if not conditions:
+            return None
+        if len(conditions) == 1:
+            return conditions[0]
+        if self.provider == "opensearch":
+            return {"bool": {"must": conditions}}
+        return {"$and": conditions}
 
-        if not or_conditions:
-            return None # No filter to apply if no conditions were added
+    def _category_filter_clause(self, database_names=None, tag_names=None, filter_logic='OR'):
+        database_names = [name for name in (database_names or []) if name]
+        tag_names = [name for name in (tag_names or []) if name]
 
         if self.provider == "opensearch":
-            if len(or_conditions) == 1:
-                return or_conditions[0] # If only one OR condition, return it directly
-            return {"bool": {"should": or_conditions, "minimum_should_match": 1}}
-        elif self.provider in ["chroma", "pgvector", "oracle"]:
-            if len(or_conditions) == 1:
-                return or_conditions[0] # If only one OR condition, return it directly
-            return {"$or": or_conditions}
+            db_conditions = [{"match": {"metadata.database_name": db}} for db in database_names]
+            tag_conditions = [{"match": {f"metadata.tag_{encode_tag(tag)}": "1"}} for tag in tag_names]
+        elif self.provider in ["chroma", "pgvector", "oracle", "sqlserver"]:
+            db_conditions = [{"database_name": {"$eq": db}} for db in database_names]
+            tag_conditions = [{f"tag_{encode_tag(tag)}": {"$eq": "1"}} for tag in tag_names]
         else:
             return None
+
+        category_clauses = []
+        for conditions in (db_conditions, tag_conditions):
+            clause = self._or_clause(conditions)
+            if clause:
+                category_clauses.append(clause)
+
+        if not category_clauses:
+            return None
+
+        if filter_logic == "AND":
+            return self._and_clause(category_clauses)
+
+        return self._or_clause(db_conditions + tag_conditions)
+
+    @log_params
+    def _build_metadata_search_filter(self, database_names=None, tag_names=None, filter_logic='OR'):
+        """
+        Builds a search filter for metadata-only queries (database_names, tag_names).
+        OR combines all values; AND combines database and tag categories.
+        """
+        return self._category_filter_clause(
+            database_names=database_names,
+            tag_names=tag_names,
+            filter_logic=filter_logic,
+        )
 
     @log_params
     def _build_get_view_ids_search_filter(self, view_names):
@@ -399,131 +483,42 @@ class UniformVectorStore:
             return {"terms": {
                 "metadata.view_name.keyword": view_names
             }}
-        elif self.provider in ["chroma", "pgvector", "oracle"]:
+        elif self.provider in ["chroma", "pgvector", "oracle", "sqlserver"]:
             return {"view_name": {"$in": view_names}}
         else:
             return None
 
     @log_params
-    def _build_search_filter(self, view_ids, database_names=None, tag_names=None, view_names=None):
-        # Check if any additional filters are provided
-        has_additional_filters = database_names or tag_names or view_names
-
+    def _build_search_filter(self, view_ids, database_names=None, tag_names=None, view_names=None,
+                             filter_logic='OR'):
         if self.provider == "opensearch":
-            # If no additional filters, return a simple terms filter for view_ids
-            if not has_additional_filters:
-                return {
-                    "terms": {
-                        "metadata.view_id": view_ids
-                    }
-                }
-
-            # Otherwise, create the more complex filter with boolean logic
-            filter_query = {
-                "bool": {
-                    "must": [
-                        {
-                            "terms": {
-                                "metadata.view_id": view_ids
-                            }
-                        }
-                    ]
-                }
-            }
-
-            # Add additional filters if provided
-            or_conditions = []
-
-            # Add database name conditions
-            if database_names:
-                for db_name in database_names:
-                    or_conditions.append({
-                        "match": {
-                            "metadata.database_name": db_name
-                        }
-                    })
-
-            # Add tag conditions
-            if tag_names:
-                for tag_name in tag_names:
-                    or_conditions.append({
-                        "match": {
-                            f"metadata.tag_{tag_name}": "1"
-                        }
-                    })
-
-            # Add view name conditions
-            if view_names:
-                for view_name in view_names:
-                    or_conditions.append({
-                        "match": {
-                            "metadata.view_name": view_name
-                        }
-                    })
-
-            # Add the conditions to the filter
-            if len(or_conditions) == 1:
-                # If only one condition, add it directly to must
-                filter_query["bool"]["must"].append(or_conditions[0])
-            elif len(or_conditions) > 1:
-                # If multiple conditions, use should with minimum_should_match
-                filter_query["bool"]["must"].append({
-                    "bool": {
-                        "should": or_conditions,
-                        "minimum_should_match": 1
-                    }
-                })
-
-            return filter_query
-
-        elif self.provider in ['chroma', 'pgvector', 'oracle']:
-            # If no additional filters, return a simple filter for view_ids
-            if not has_additional_filters:
-                return {"view_id": {"$in": view_ids}}
-
-            # Otherwise, create the more complex filter with $and
-            filter_query = {
-                "$and": [
-                    {"view_id": {"$in": view_ids}}
-                ]
-            }
-
-            # Add additional filters if provided
-            or_conditions = []
-
-            # Add database name conditions
-            if database_names:
-                for db_name in database_names:
-                    or_conditions.append({"database_name": {"$eq": db_name}})
-
-            # Add tag conditions
-            if tag_names:
-                for tag_name in tag_names:
-                    or_conditions.append({f"tag_{tag_name}": {"$eq": "1"}})
-
-            # Add view name conditions
-            if view_names:
-                for view_name in view_names:
-                    or_conditions.append({"view_name": {"$eq": view_name}})
-
-            # Add the conditions to the filter
-            if len(or_conditions) == 1:
-                # If only one condition, add it directly to $and
-                filter_query["$and"].append(or_conditions[0])
-            elif len(or_conditions) > 1:
-                # If multiple conditions, use $or
-                filter_query["$and"].append({"$or": or_conditions})
-
-            return filter_query
+            clauses = [{"terms": {"metadata.view_id": view_ids}}]
+        elif self.provider in ['chroma', 'pgvector', 'oracle', 'sqlserver']:
+            clauses = [{"view_id": {"$in": view_ids}}]
         else:
             return None
+
+        # view_names is a hard restriction, like view_ids. filter_logic only governs databases and tags.
+        view_names = [name for name in (view_names or []) if name]
+        if view_names:
+            clauses.append(self._build_get_view_ids_search_filter(view_names))
+
+        category_filter = self._category_filter_clause(
+            database_names=database_names,
+            tag_names=tag_names,
+            filter_logic=filter_logic,
+        )
+        if category_filter:
+            clauses.append(category_filter)
+
+        return self._and_clause(clauses)
 
     def delete(self, ids, batch_size = 1000):
         for i in range(0, len(ids), batch_size):
             batch_ids = ids[i:i+batch_size]
             self.client.delete(ids=batch_ids)
 
-    def add_views(self, views, parallel = True, source_type = "OTHER", source_name = "default", sample_data = False, tags_by_db=None, dbs_by_tag=None, tags_by_tag=None):
+    def add_views(self, views, parallel=True, source_type="OTHER", source_name="default", sample_data=False, tags_by_db=None, dbs_by_tag=None, tags_by_tag=None):
         views = list({view.id: view for view in views}.values())
 
         if source_type in ["DATABASE", "TAG"]:
@@ -723,13 +718,12 @@ class UniformVectorStore:
         Checks if ANY document exists for the given view_ids/filters, handling batching.
         Returns True immediately if found.
         """
-        BATCH_SIZE = 30000
         total_ids = len(view_ids) if view_ids else 0
 
         if view_ids is not None and total_ids == 0:
             return False
 
-        if not view_ids or total_ids <= BATCH_SIZE:
+        if not view_ids or total_ids <= self.search_batch_size:
             results = self.search_by_vector(
                 vector=self.search_vector,
                 k=1, # We only need to know if at least 1 exists
@@ -739,8 +733,8 @@ class UniformVectorStore:
             )
             return bool(results)
 
-        for i in range(0, total_ids, BATCH_SIZE):
-            batch_ids = view_ids[i : i + BATCH_SIZE]
+        for i in range(0, total_ids, self.search_batch_size):
+            batch_ids = view_ids[i : i + self.search_batch_size]
 
             if self.search_by_vector(
                 vector=self.search_vector,
@@ -756,10 +750,8 @@ class UniformVectorStore:
     def search_batched(self, k, view_ids=None, query=None, vector=None, scores=False, **kwargs):
         """
         Performs a search (text or vector) handling large lists of view_ids by batching.
-        Safe to use with >65k view_ids on Postgres.
+        Safe to use with >65k view_ids on Postgres and >2100 on SQL Server.
         """
-
-        BATCH_SIZE = 30000
         total_ids = len(view_ids) if view_ids else 0
 
         if view_ids is not None and total_ids == 0:
@@ -772,12 +764,12 @@ class UniformVectorStore:
             search_method = self.search
             search_arg = query
 
-        if not view_ids or total_ids <= BATCH_SIZE:
+        if not view_ids or total_ids <= self.search_batch_size:
             return search_method(search_arg, k=k, view_ids=view_ids, scores=scores, **kwargs)
 
         all_candidates = []
-        for i in range(0, total_ids, BATCH_SIZE):
-            batch_ids = view_ids[i : i + BATCH_SIZE]
+        for i in range(0, total_ids, self.search_batch_size):
+            batch_ids = view_ids[i : i + self.search_batch_size]
             batch_results = search_method(search_arg, k=k, view_ids=batch_ids, scores=True, **kwargs)
             all_candidates.extend(batch_results)
 

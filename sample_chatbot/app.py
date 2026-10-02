@@ -11,6 +11,7 @@ import logging.config
 from flask import Flask
 from utils.utils import validate_data_dir
 from utils.logging_utils import get_logging_config
+from utils.runtime_config import reconcile_runtime_config_with_cli
 from utils.yaml.validate_and_parse import load_and_validate_agents
 from sample_chatbot.config import init_agents, setup_agents_directories, log_agents_config
 from sample_chatbot.engine.skills import log_skills
@@ -46,16 +47,17 @@ def create_app(config=None):
     # Ignore warnings
     warnings.filterwarnings("ignore")
 
-    # Check required environment variables
-    check_env_variables(REQUIRED_VARS)
-
     data_dir = validate_data_dir()
 
     # Set up logging
     log_config = get_logging_config()
     logging.config.dictConfig(log_config)
+    reconcile_runtime_config_with_cli()
 
-    #Load agents configuration:
+    # Check required environment variables
+    check_env_variables(REQUIRED_VARS)
+
+    # Load agents configuration:
     agents_config = load_and_validate_agents()
 
     # Initialize configuration

@@ -12,7 +12,7 @@ const useQuestionForm = (currentQuestion, setCurrentQuestion, results, dispatch,
     databases: [],
     tags: [],
   });
-  const [allowExternalAssociations, setAllowExternalAssociations] = useState(true);
+  const [allowExternalAssociations, setAllowExternalAssociations] = useState(false);
   const [lastToolRequest, setLastToolRequest] = useState(null);
 
   const textInputRef = useRef(null);
@@ -22,7 +22,7 @@ const useQuestionForm = (currentQuestion, setCurrentQuestion, results, dispatch,
       databases: [],
       tags: [],
     });
-    setAllowExternalAssociations(true);
+    setAllowExternalAssociations(false);
   }, [selectedChatbot]);
 
   const activeRequestId = runningRequests.length > 0 ? runningRequests[runningRequests.length - 1] : null;
@@ -71,8 +71,8 @@ const useQuestionForm = (currentQuestion, setCurrentQuestion, results, dispatch,
     });
 
     const options = {
-      databases: searchFilters.databases.join(','),
-      tags: searchFilters.tags.join(','),
+      databases: searchFilters.databases,
+      tags: searchFilters.tags,
       allow_external_associations: allowExternalAssociations
     };
 

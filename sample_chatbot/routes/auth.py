@@ -64,6 +64,7 @@ def login():
     user.synced_resources = synced_resources
     user.partial_resources = partial_resources
     user.ai_sdk_info = ai_sdk_info
+    user.apply_ai_sdk_defaults()
     user.user_sync_permissions = user_sync_permissions
     user.thread_id = str(username)
     user.roles = roles
@@ -76,7 +77,7 @@ def login():
     login_user(user)
     logging.info(f"[Auth] Login successful for user: {username} | Roles: {roles} | Global admin: {is_admin} | Legacy DM: {legacy_permissions_endpoint}")
 
-    can_use_deepquery = ai_sdk_info.get("can_use_deepquery", True)
+    can_use_deepquery = ai_sdk_info.get("can_use_deepquery", True) if ai_sdk_info else True
 
     return jsonify({
         "success": True,
@@ -107,6 +108,7 @@ def login():
             "user_edit_llm": config.user_edit_llm,
             "filters_enabled": config.filters_enabled,
             "enable_deep_query": config.deepquery_enabled if can_use_deepquery else False,
+            "embeddings_token_limit": ai_sdk_info.get("embeddings_token_limit", 0) if ai_sdk_info else 0,
             "default_custom_instructions": {
                 "ai_sdk": config.custom_instructions_ai_sdk,
                 "chatbot": config.custom_instructions_chatbot,
@@ -222,6 +224,7 @@ def change_agent():
             "user_edit_llm": agent_config.user_edit_llm,
             "filters_enabled": agent_config.filters_enabled,
             "enable_deep_query": agent_config.deepquery_enabled if can_use_deepquery else False,
+            "embeddings_token_limit": current_user.ai_sdk_info.get("embeddings_token_limit", 0) if current_user.ai_sdk_info else 0,
             "default_custom_instructions": {
                 "ai_sdk": agent_config.custom_instructions_ai_sdk,
                 "chatbot": agent_config.custom_instructions_chatbot,

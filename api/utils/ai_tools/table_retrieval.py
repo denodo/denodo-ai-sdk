@@ -2,7 +2,8 @@ import asyncio
 import logging
 
 from utils import utils
-from utils.data_marketplace.connection import get_user_permissions
+from utils.schema_catalog.helpers import encode_tag
+from utils.data_marketplace.connection import get_user_permissions_for_vector_store
 from api.utils import sdk_utils
 
 @utils.log_params
@@ -15,27 +16,29 @@ async def get_relevant_tables(
     tag_list,
     auth,
     vector_search_k=5,
-    use_views="",
+    use_views=None,
     expand_set_views=True,
     vector_search_sample_data_k=3,
-    allow_external_associations=True,
+    allow_external_associations=False,
     vector_search_total_limit=20,
     custom_headers=None,
+    filter_logic="OR",
 ):
     """
     Fetches relevant tables from the vector store based on the user's query, applying
     security policies, expanding chunks, fetching associations, and gathering sample data.
     """
-    # Input parameter normalization
-    vdb_list = [db.strip() for db in vdb_list.split(",")] if vdb_list else []
-    tag_list = [tag.strip() for tag in tag_list.split(",")] if tag_list else []
-    use_views_list = [view.strip() for view in use_views.split(",") if view.strip()] if use_views else []
+    vdb_list = vdb_list or []
+    tag_list = tag_list or []
+    use_views_list = use_views or []
 
     timings = {}
 
     # Asynchronous fetching of embeddings and permissions
     embedding_task = asyncio.create_task(vector_store.embeddings.aembed_query(query))
-    permissions_task = asyncio.create_task(get_user_permissions(auth=auth, custom_headers=custom_headers))
+    permissions_task = asyncio.create_task(
+        get_user_permissions_for_vector_store(auth=auth, vector_store=vector_store, custom_headers=custom_headers)
+    )
     embedded_query, permissions_data = await asyncio.gather(embedding_task, permissions_task)
 
     views_details = permissions_data.get("viewsPermissions", [])
@@ -58,6 +61,7 @@ async def get_relevant_tables(
         "database_names": vdb_list,
         "tag_names": tag_list,
         "view_ids": valid_view_ids,
+        "filter_logic": filter_logic,
     }
 
     with sdk_utils.timing_context("vector_store_search_time", timings):
@@ -105,6 +109,7 @@ async def get_relevant_tables(
         tag_list,
         security_policies_by_view,
         timings,
+        filter_logic,
     )
 
     # Restrict results if expansion is not allowed
@@ -137,6 +142,145 @@ async def get_relevant_tables(
     )
 
     return relevant_tables, sample_data, timings, error_message, permissions_data
+
+@utils.log_params
+@utils.timed
+async def get_tables_by_name(
+    query,
+    view_names,
+    vector_store,
+    sample_data_vector_store,
+    auth,
+    vector_search_sample_data_k=3,
+    custom_headers=None,
+    vdb_list=None,
+    tag_list=None,
+    filter_logic="OR",
+):
+    """Look up named views in the vector store without similarity search or association expansion.
+
+    Every requested view must be found, permitted, and (when vdb_list / tag_list are set) in
+    scope. If any name fails those checks, no tables are returned together with a message
+    listing the views that could not be used.
+    """
+    view_names_list = [name.strip() for name in (view_names or []) if name and name.strip()]
+    vdb_list = [name.strip() for name in (vdb_list or []) if name and name.strip()]
+    tag_list = [name.strip() for name in (tag_list or []) if name and name.strip()]
+    timings = {}
+
+    embedding_task = asyncio.create_task(vector_store.embeddings.aembed_query(query))
+    permissions_task = asyncio.create_task(
+        get_user_permissions_for_vector_store(auth=auth, vector_store=vector_store, custom_headers=custom_headers)
+    )
+    embedded_query, permissions_data = await asyncio.gather(embedding_task, permissions_task)
+
+    views_details = permissions_data.get("viewsPermissions", [])
+    valid_view_ids = {str(view["viewId"]) for view in views_details}
+    security_policies_by_view = {str(view["viewId"]): view for view in views_details}
+
+    if not valid_view_ids:
+        return (
+            [],
+            {},
+            timings,
+            "You don't have permission to access any views in Denodo. Please contact your administrator.",
+            permissions_data,
+        )
+
+    if not view_names_list:
+        return (
+            [],
+            {},
+            timings,
+            "No view names were provided.",
+            permissions_data,
+        )
+
+    seen_view_ids = set()
+    relevant_tables = []
+
+    with sdk_utils.timing_context("vector_store_search_time", timings):
+        view_ids = [str(view_id) for view_id in vector_store.get_view_ids(view_names_list) if str(view_id) in valid_view_ids]
+        docs = vector_store.get_views(view_ids) if view_ids else []
+
+    scope_error = _build_view_names_scope_error(docs, vdb_list, tag_list, filter_logic)
+    if scope_error:
+        return [], {}, timings, scope_error, permissions_data
+
+    requested_names = set(view_names_list)
+    for doc in docs:
+        _process_and_append_document(doc, seen_view_ids, relevant_tables, security_policies_by_view)
+
+    relevant_tables = [table for table in relevant_tables if table["view_name"] in requested_names]
+    found_names = {table["view_name"] for table in relevant_tables}
+    missing_names = [name for name in view_names_list if name not in found_names]
+    if missing_names:
+        return (
+            [],
+            {},
+            timings,
+            (
+                f"The specified views ({', '.join(missing_names)}) were not found in the vector store "
+                "or you don't have permission to access them."
+            ),
+            permissions_data,
+        )
+
+    sample_data = _fetch_sample_data(
+        relevant_tables,
+        sample_data_vector_store,
+        embedded_query,
+        vector_search_sample_data_k,
+        security_policies_by_view,
+        timings,
+    )
+
+    return relevant_tables, sample_data, timings, None, permissions_data
+
+def _build_view_names_scope_error(docs, vdb_list, tag_list, filter_logic="OR"):
+    """Returns an error message when any of the explicitly requested views falls outside the
+    vdp_database_names / vdp_tag_names scope of the request, or None when all views are in scope.
+
+    When both filters are set, filter_logic decides the rule. OR accepts a view that matches
+    either list. AND accepts a view only when it matches both.
+    """
+    if not vdb_list and not tag_list:
+        return None
+
+    out_of_scope = [
+        doc.metadata.get("view_name") for doc in docs
+        if not _passes_external_filters(doc, False, vdb_list, tag_list, filter_logic)
+    ]
+    out_of_scope = [name for name in out_of_scope if name]
+    if not out_of_scope:
+        return None
+
+    names = ", ".join(out_of_scope)
+    if vdb_list and tag_list and filter_logic == "AND":
+        return (
+            f"The request is filtered by vdp_database_names ({', '.join(vdb_list)}) AND "
+            f"vdp_tag_names ({', '.join(tag_list)}) but the following views in view_names "
+            f"do not match both filters: {names}. "
+            "Please fix your request so that view_names only contains views from those databases that are also tagged with those tags."
+        )
+    if vdb_list and tag_list:
+        return (
+            f"The request is filtered by vdp_database_names ({', '.join(vdb_list)}) OR "
+            f"vdp_tag_names ({', '.join(tag_list)}) but the following views in view_names "
+            f"do not belong to those databases and are not tagged with those tags: {names}. "
+            "Please fix your request so that view_names only contains views from those databases or tagged with those tags."
+        )
+    if vdb_list:
+        return (
+            f"The request is filtered by vdp_database_names ({', '.join(vdb_list)}) but the following views "
+            f"in view_names do not belong to those databases: {names}. "
+            "Please fix your request so that view_names only contains views from those databases."
+        )
+    return (
+        f"The request is filtered by vdp_tag_names ({', '.join(tag_list)}) but the following views "
+        f"in view_names are not tagged with those tags: {names}. "
+        "Please fix your request so that view_names only contains views tagged with those tags."
+    )
 
 def _process_and_append_document(
     doc, seen_view_ids, relevant_tables, security_policies_by_view, filter_associations=False, valid_view_ids=None
@@ -213,17 +357,24 @@ def _collect_additional_view_ids(vector_store, relevant_tables, seen_view_ids, v
 
     return [v_id for v_id in additional_ids if v_id in valid_view_ids]
 
-def _passes_external_filters(assoc_doc, allow_external_associations, vdb_list, tag_list):
+def _passes_external_filters(assoc_doc, allow_external_associations, vdb_list, tag_list, filter_logic="OR"):
     """Checks if a view document passes database and tag filters when external associations are restricted."""
     if allow_external_associations or not (vdb_list or tag_list):
         return True
 
     db_match = not vdb_list or assoc_doc.metadata.get("database_name") in vdb_list
     tag_match = not tag_list or any(
-        f"tag_{tag}" in assoc_doc.metadata and assoc_doc.metadata.get(f"tag_{tag}") == "1" for tag in tag_list
+        f"tag_{encode_tag(tag)}" in assoc_doc.metadata and assoc_doc.metadata.get(f"tag_{encode_tag(tag)}") == "1"
+        for tag in tag_list
     )
 
-    return db_match and tag_match
+    if not vdb_list:
+        return tag_match
+    if not tag_list:
+        return db_match
+    if filter_logic == "AND":
+        return db_match and tag_match
+    return db_match or tag_match
 
 def _get_and_append_associations(
     vector_store,
@@ -237,6 +388,7 @@ def _get_and_append_associations(
     tag_list,
     security_policies_by_view,
     timings,
+    filter_logic="OR",
 ):
     """Finds and extracts associations (or explicitly requested views), safely integrating them into the results."""
     association_ids = _collect_additional_view_ids(
@@ -264,7 +416,9 @@ def _get_and_append_associations(
         if not assoc_doc or assoc_doc.metadata.get("view_id") in seen_view_ids:
             continue
 
-        if not _passes_external_filters(assoc_doc, allow_external_associations, vdb_list, tag_list):
+        if not _passes_external_filters(
+            assoc_doc, allow_external_associations, vdb_list, tag_list, filter_logic
+        ):
             continue
 
         _process_and_append_document(

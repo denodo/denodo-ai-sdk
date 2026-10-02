@@ -15,8 +15,9 @@ Three different schema representations are supported:
 - `selector`
   - Purpose: compact schema text for table selection
   - Used by: selector/category detection before query generation
-  - Characteristics: plain text with the same table/column grammar as
-    `embedding`, but can include association lines for views present in context;
+  - Characteristics: plain text with the same column grammar as
+    `embedding`, but table names use the VQL quoted form `"db"."view"`
+    and association lines can be included for views present in context;
 
 - `vql`
   - Purpose: rich schema context for query generation, query review, and query
@@ -26,7 +27,7 @@ Three different schema representations are supported:
     values, join lines, view/column tags, and a tag description appendix
 """
 
-from .helpers import build_table_name, format_tag_names
+from .helpers import build_table_name, format_tag_names, normalize_table_name
 from .view import SchemaTable
 
 # Single source of truth for the `vql` schema representation grammar.
@@ -124,6 +125,20 @@ class SchemaCatalog:
     def to_view_jsons(self):
         return [view.to_dict() for view in self.views]
 
+    def _views_for_selected_names(self, selected_table_names):
+        table_lookup = {view.get_name(): view for view in self.views}
+        selected_views = []
+        seen = set()
+        for name in selected_table_names or []:
+            canonical = normalize_table_name(name)
+            if not canonical or canonical in seen:
+                continue
+            view = table_lookup.get(canonical)
+            if view is not None:
+                seen.add(canonical)
+                selected_views.append(view)
+        return selected_views
+
     def render_selector_schema(self, column_description_char_limit=None, table_description_char_limit=None):
         present_tables = [view.get_name() for view in self.views]
         return "".join(
@@ -133,20 +148,15 @@ class SchemaCatalog:
 
     def render_vql_schema(self, filtered_tables=None, sample_data=None, examples_per_table=3):
         filtered_tables = filtered_tables or []
-        table_lookup = {view.get_name(): view for view in self.views}
         present_tables = [view.get_name() for view in self.views]
 
         views_to_render = self.views
         reference_tables = present_tables
         if filtered_tables:
-            selected_views = [
-                table_lookup[filtered_table]
-                for filtered_table in filtered_tables
-                if filtered_table in table_lookup
-            ]
+            selected_views = self._views_for_selected_names(filtered_tables)
             if selected_views:
                 views_to_render = selected_views
-                reference_tables = filtered_tables
+                reference_tables = [view.get_name() for view in selected_views]
 
         schema_text = "\n\n".join(
             view.render_vql_text(sample_data, reference_tables, examples_per_table)
@@ -198,16 +208,14 @@ class SchemaCatalog:
         if not selected_table_names:
             views = self.views
         else:
-            table_lookup = {view.get_name(): view for view in self.views}
-            views = [table_lookup[name] for name in selected_table_names if name in table_lookup]
+            views = self._views_for_selected_names(selected_table_names)
         return any(view.has_vector_column() for view in views)
 
     def selected_tables_include_metric_view(self, selected_table_names):
         if not selected_table_names:
             views = self.views
         else:
-            table_lookup = {view.get_name(): view for view in self.views}
-            views = [table_lookup[name] for name in selected_table_names if name in table_lookup]
+            views = self._views_for_selected_names(selected_table_names)
         return any(view.is_metric_view() for view in views)
 
     def to_embedding_documents(self, embeddings_token_limit=0):

@@ -58,10 +58,12 @@ def check_env_variables(required_vars):
     missing_vars = [var for var in required_vars if not os.getenv(var)]
 
     if missing_vars:
-        print("ERROR. The following required environment variables are missing:")
+        error_msg = "The following required environment variables are missing:\n"
         for var in missing_vars:
-            print(f"- {var}")
-        print("Please set these variables before starting the application.")
+            error_msg += f"- {var}\n"
+        error_msg += "Please set these variables before starting the Chatbot application."
+
+        logging.error(error_msg)
         sys.exit(1)
 
 def setup_directories(upload_folder="uploads", report_folder="reports"):

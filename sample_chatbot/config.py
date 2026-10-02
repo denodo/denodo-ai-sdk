@@ -34,7 +34,7 @@ class ChatbotConfig:
         self.llm_provider = get_config_value(settings, 'llm_provider', 'CHATBOT_LLM_PROVIDER')
         self.llm_model = get_config_value(settings, 'llm_model', 'CHATBOT_LLM_MODEL')
         self.llm_temperature = get_config_value(settings, 'llm_temperature', 'CHATBOT_LLM_TEMPERATURE', '0', float)
-        self.llm_max_tokens = get_config_value(settings, 'llm_max_tokens', 'CHATBOT_LLM_MAX_TOKENS', '4096', int)
+        self.llm_max_tokens = get_config_value(settings, 'llm_max_tokens', 'CHATBOT_LLM_MAX_TOKENS', '8192', int)
         self.llm_response_rows_limit = get_config_value(settings, 'llm_response_rows_limit', 'CHATBOT_LLM_RESPONSE_ROWS_LIMIT', '15', int)
 
         # Initialize LLM
@@ -61,6 +61,12 @@ class ChatbotConfig:
         self.ai_sdk_base_llm_max_tokens = base_llm.get('llm_max_tokens')
 
         self.use_base_llm_for_execution = ai_sdk_llm_settings.get('use_base_llm_for_execution', False)
+
+        # None means this agent does not override the AI SDK CHECK_AMBIGUITY default.
+        if 'check_ambiguity' in ai_sdk_llm_settings:
+            self.check_ambiguity = bool(ai_sdk_llm_settings['check_ambiguity'])
+        else:
+            self.check_ambiguity = None
 
         # Embeddings Configuration
         self.embeddings_provider = os.environ['CHATBOT_EMBEDDINGS_PROVIDER']
@@ -182,9 +188,6 @@ class ChatbotConfig:
             self.user_edit_instructions = user_edit_instructions
         else:
             self.user_edit_instructions = bool(int(user_edit_instructions))
-
-        # Check ambiguity
-        self.check_ambiguity = get_config_value(settings, 'check_ambiguity', 'CHATBOT_CHECK_AMBIGUITY', '1', bool)
 
         # Agent metadata
         self.databases = settings.get('databases', [])

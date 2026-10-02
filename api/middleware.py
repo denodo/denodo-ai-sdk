@@ -8,15 +8,17 @@
  Confidential Information and shall use it only in accordance with the terms
  of the license agreement you entered into with DENODO.
 """
+import os
 import time
 import json
 import base64
 import logging
 import asyncio
 from fastapi import Response
-from utils.utils import generate_transaction_id
+from utils.utils import resolve_transaction_id
 from utils.data_marketplace.connection import get_username_from_denodo
 from utils.logging_utils import transaction_id_var, username_var
+from utils.runtime_config import sync_runtime_config
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +29,18 @@ MAX_CACHE_SIZE = 1000
 
 async def logging_context_middleware(request, call_next):
     """
-    Middleware to generate a transaction ID and extract the username
+    Middleware to set a transaction ID and extract the username
     from the Authorization header (Basic Auth, JWT, or opaque tokens
     via Denodo fallback), storing them in context variables. Includes
     an in-memory TTL cache to prevent redundant decoding/network calls.
+
+    The transaction ID comes from CUSTOM_TRANSACTION_HEADER when that configuration parameter is present and valid, otherwise
+    a UUID is generated. It is echoed as X-Transaction-ID and as the
+    configured custom header.
     """
-    transaction_id = generate_transaction_id()
+    sync_runtime_config()
+
+    transaction_id = resolve_transaction_id(request.headers)
     transaction_id_var.set(transaction_id)
 
     username = "anonymous"
@@ -84,6 +92,7 @@ async def logging_context_middleware(request, call_next):
     try:
         response = await call_next(request)
         response.headers["X-Transaction-ID"] = transaction_id
+        response.headers[os.getenv("CUSTOM_TRANSACTION_HEADER", "X-Correlation-ID")] = transaction_id
         return response
     except RuntimeError as exc:
         if str(exc) == "No response returned.":

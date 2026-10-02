@@ -16,13 +16,15 @@ import traceback
 
 from pydantic import BaseModel, Field
 from api.utils import state_manager
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException
 from api.utils.sdk_utils import handle_endpoint_error, authenticate
 from api.deepquery.main import generate_report_from_deepquery_metadata
 from api.utils.sdk_utils import get_custom_request_headers
+from utils.logging_utils import username_var
+from api.utils import param_descriptions as desc
 
 router = APIRouter()
 
@@ -34,7 +36,7 @@ class generateDeepQueryReportRequest(BaseModel):
         min_length=1,
         max_length=30,
         pattern=r"^[a-zA-Z\u00C0-\u024F\s-]+$",
-        description="The language in which the report should be generated."
+        description=desc.REPORT_LANGUAGE
     )
     max_reporting_loops: int = int(os.getenv("DEEPQUERY_MAX_REPORTING_LOOPS", "25"))
     include_failed_tool_calls_appendix: bool = False
@@ -43,20 +45,24 @@ class generateDeepQueryReportRequest(BaseModel):
     thinking_llm_temperature: float = float(os.getenv("THINKING_LLM_TEMPERATURE", "0.0"))
     thinking_llm_max_tokens: int = Field(
         default = int(os.getenv("THINKING_LLM_MAX_TOKENS", "10240")),
-        description="The maximum OUTPUT tokens for the thinking LLM. Not recommended to decrease this value."
+        description=desc.THINKING_LLM_MAX_TOKENS
     )
     llm_provider: str = os.getenv("LLM_PROVIDER")
     llm_model: str = os.getenv("LLM_MODEL")
     llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.0"))
     llm_max_tokens: int = Field(
         default = int(os.getenv("LLM_MAX_TOKENS", "4096")),
-        description="The maximum OUTPUT tokens for the general LLM. Not recommended to decrease this value."
+        description=desc.LLM_MAX_TOKENS
+    )
+    check_ambiguity: bool = Field(
+        default = bool(int(os.getenv("CHECK_AMBIGUITY", "1"))),
+        description="If false, skip ambiguity detection in nested answerQuestion calls."
     )
 
 class generateDeepQueryReportResponse(BaseModel):
-    html_report: Optional[str] = None
+    html_report: str | None = None
     total_execution_time: float
-    translated_title: Optional[str] = None
+    translated_title: str | None = None
 
 @router.post(
     "/generateDeepQueryReport",
@@ -81,9 +87,7 @@ async def generate_deep_query_report_post(
 
     start_time = time.time()
 
-    deepquery_metadata = endpoint_request.deepquery_metadata
-
-    if not deepquery_metadata:
+    if not endpoint_request.deepquery_metadata:
         return JSONResponse(
             content=jsonable_encoder(
                 {
@@ -95,6 +99,22 @@ async def generate_deep_query_report_post(
             status_code=400,
             media_type="application/json",
         )
+
+    deepquery_metadata = dict(endpoint_request.deepquery_metadata)
+
+    # Older analyses may not have stored base-LLM overrides. Fall back to the
+    # request (chatbot / API caller) so nested database_agent calls do not use
+    # sdk_config.env defaults.
+    if not deepquery_metadata.get("llm_provider") and endpoint_request.llm_provider:
+        deepquery_metadata["llm_provider"] = endpoint_request.llm_provider
+    if not deepquery_metadata.get("llm_model") and endpoint_request.llm_model:
+        deepquery_metadata["llm_model"] = endpoint_request.llm_model
+    if deepquery_metadata.get("llm_temperature") is None:
+        deepquery_metadata["llm_temperature"] = endpoint_request.llm_temperature
+    if deepquery_metadata.get("llm_max_tokens") is None:
+        deepquery_metadata["llm_max_tokens"] = endpoint_request.llm_max_tokens
+    if deepquery_metadata.get("check_ambiguity") is None:
+        deepquery_metadata["check_ambiguity"] = endpoint_request.check_ambiguity
 
     executing_provider = deepquery_metadata.get(
         "executing_provider", endpoint_request.thinking_llm_provider
@@ -116,6 +136,8 @@ async def generate_deep_query_report_post(
         logging.error(f"Resource initialization traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error initializing LLM resources: {str(e)}") from e
 
+    current_user = username_var.get(None)
+
     result = await generate_report_from_deepquery_metadata(
         deepquery_metadata=deepquery_metadata,
         executing_llm=executing_llm,
@@ -124,7 +146,8 @@ async def generate_deep_query_report_post(
         max_reporting_loops=endpoint_request.max_reporting_loops,
         include_failed_tool_calls_appendix=endpoint_request.include_failed_tool_calls_appendix,
         auth=auth,
-        custom_headers=custom_headers
+        custom_headers=custom_headers,
+        username=current_user
     )
 
     total_time = time.time() - start_time

@@ -14,7 +14,7 @@ import logging
 import traceback
 
 from pydantic import BaseModel, Field
-from typing import Dict, List
+from typing import Dict, List, Literal
 
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from api.utils.sdk_utils import timing_context, handle_endpoint_error, authenticate
 from api.utils import ai_tools
 from api.utils import answer_question
+from api.utils import param_descriptions as desc
 from api.utils import state_manager
 from api.utils.sdk_utils import get_custom_request_headers
 
@@ -40,54 +41,58 @@ class answerMetadataQuestionRequest(BaseModel):
     llm_temperature: float = float(os.getenv('LLM_TEMPERATURE', '0.0'))
     llm_max_tokens: int = Field(
         default = int(os.getenv('LLM_MAX_TOKENS', '4096')),
-        description="The maximum OUTPUT tokens for the general LLM. Not recommended to decrease this value."
+        description=desc.LLM_MAX_TOKENS
     )
-    vdp_database_names: str = Field(
-        default = '',
-        description="A comma-separated list of databases to reduce the scope of the question to. If empty, all databases in the vector DB the user has permissions to will be considered."
+    vdp_database_names: List[str] = Field(
+        default_factory=list,
+        description=desc.VDP_DATABASE_NAMES
     )
-    vdp_tag_names: str = Field(
-        default = '',
-        description="A comma-separated list of tags to reduce the scope of the question to. If empty, all tags in the vector DB the user has permissions to will be considered."
+    vdp_tag_names: List[str] = Field(
+        default_factory=list,
+        description=desc.VDP_TAG_NAMES
+    )
+    filter_logic: Literal["AND", "OR"] = Field(
+        default = 'OR',
+        description=desc.FILTER_LOGIC
     )
     allow_external_associations: bool = Field(
         default = False,
-        description="If False, views from associations will NOT be considered if they don't belong to the VDBs/Tags specified in vdp_database_names and vdp_tag_names. If no VDBs/Tags specified, all views from associations will be considered."
+        description=desc.ALLOW_EXTERNAL_ASSOCIATIONS
     )
-    use_views: str = Field(
-            default = '',
-            description="Please specify a view you want the LLM to take into consideration when answering the question. Expected format is views separated by commas: database.view_name, database.view_name2"
-        )
+    use_views: List[str] = Field(
+        default_factory=list,
+        description=desc.USE_VIEWS
+    )
     expand_set_views: bool = Field(
-            default = True,
-            description="If set to true, the LLM will search for relevant views in the vector store. If set to false, the LLM will not search in the vector store and will only access those specified in use_views"
-        )
+        default = True,
+        description=desc.EXPAND_SET_VIEWS
+    )
     custom_instructions: str = ''
     markdown_response: bool = True
     vector_search_k: int = Field(
         default = 5,
-        description="Number of results to return from the similarity search in the vector store."
+        description=desc.VECTOR_SEARCH_K
     )
     vector_search_sample_data_k: int = Field(
         default = 3,
-        description="Number of similar sample data rows to return for the given question."
+        description=desc.VECTOR_SEARCH_SAMPLE_DATA_K
     )
     vector_search_total_limit: int = Field(
         default = 20,
-        description="Maximum number of views to consider in total, including associations of the initial vector_search_k results."
+        description=desc.VECTOR_SEARCH_TOTAL_LIMIT
     )
     vector_search_column_description_char_limit: int = Field(
         default=200,
-        description="Maximum characters of column descriptions used when filtering how many views to keep. Not applied during vector search or VQL generation (those use full descriptions). Refer to the docs for when this trimming is applied."
+        description=desc.VECTOR_SEARCH_COLUMN_DESCRIPTION_CHAR_LIMIT
     )
     vector_search_table_description_char_limit: int = Field(
         default=1000,
-        description="Maximum characters of table descriptions used when filtering how many views to keep. Not applied during vector search or VQL generation (those use full descriptions). Refer to the docs for when this trimming is applied."
+        description=desc.VECTOR_SEARCH_TABLE_DESCRIPTION_CHAR_LIMIT
     )
     disclaimer: bool = True
     verbose: bool = Field(
         default = True,
-        description="If true, the LLM will receive the vector search output of the schema of the relevant views and return a natural language response in the answer key. If set to false, it will return the vector search output of the schema of the relevant views. Setting to false is the recommended option when using the endpoint as a tool."
+        description=desc.VERBOSE_METADATA
     )
 
 class answerMetadataQuestionResponse(BaseModel):
@@ -173,6 +178,10 @@ async def answer_metadata_question_post(
 async def process_metadata_question(request_data: answerMetadataQuestionRequest, auth: str, custom_headers: dict = None):
     """Main function to process the metadata question and return the answer"""
 
+    request_data.vdp_database_names = [db.strip() for db in request_data.vdp_database_names if db.strip()]
+    request_data.vdp_tag_names = [tag.strip() for tag in request_data.vdp_tag_names if tag.strip()]
+    request_data.use_views = [view.strip() for view in request_data.use_views if view.strip()]
+
     try:
         llm = state_manager.get_llm(
             provider_name=request_data.llm_provider,
@@ -203,6 +212,7 @@ async def process_metadata_question(request_data: answerMetadataQuestionRequest,
         sample_data_vector_store=sample_data_vector_store,
         vdb_list=request_data.vdp_database_names,
         tag_list=request_data.vdp_tag_names,
+        filter_logic=request_data.filter_logic,
         auth=auth,
         custom_headers=custom_headers,
         vector_search_k=request_data.vector_search_k,

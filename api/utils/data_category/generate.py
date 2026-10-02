@@ -88,7 +88,11 @@ async def query_to_vql(
     }
     vql_restrictions = build_vql_restrictions(prompt_parts)
 
-    with get_usage_metadata_callback() as cb:
+    with get_usage_metadata_callback() as cb, langfuse.trace_context(
+        model_id=f"{llm.provider_name}.{llm.model_name}",
+        session_id=session_id,
+        run_name=inspect.currentframe().f_code.co_name
+    ) as config:
         response = await chain.ainvoke(
             {
                 "query": query,
@@ -98,11 +102,7 @@ async def query_to_vql(
                 "custom_instructions": custom_instructions,
                 "query_generation_process": query_generation_process
             },
-            config=langfuse.build_config(
-                model_id=f"{llm.provider_name}.{llm.model_name}",
-                session_id=session_id,
-                run_name=inspect.currentframe().f_code.co_name
-            )
+            config=config
         )
 
     if '```' in response:

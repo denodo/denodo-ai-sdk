@@ -145,7 +145,13 @@ class AnalysisToolsMixin:
             disclaimer=False,
             vdp_database_names=self.vdp_database_names,
             vdp_tag_names=self.vdp_tag_names,
-            allow_external_associations=self.allow_external_associations
+            allow_external_associations=self.allow_external_associations,
+            filter_logic=self.filter_logic,
+            llm_provider=self.llm_provider,
+            llm_model=self.llm_model,
+            llm_temperature=self.llm_temperature,
+            llm_max_tokens=self.llm_max_tokens,
+            check_ambiguity=self.check_ambiguity
         )
 
         # Return early if there was an error (cohort not found, etc.)

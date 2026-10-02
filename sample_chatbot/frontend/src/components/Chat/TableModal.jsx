@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import PropTypes from "prop-types";
 import Modal from "react-bootstrap/Modal";
 import Button from "react-bootstrap/Button";
@@ -8,6 +8,7 @@ import Pagination from "react-bootstrap/Pagination";
 const TableModal = ({ show, handleClose, handleResetData, executionResult }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 10;
+  const tableScrollRef = useRef(null);
 
   const handleOnExited = () => {
     setCurrentPage(1);
@@ -45,6 +46,9 @@ const TableModal = ({ show, handleClose, handleResetData, executionResult }) => 
 
   const handlePageChange = (pageNumber) => {
     setCurrentPage(pageNumber);
+    if (tableScrollRef.current) {
+      tableScrollRef.current.scrollLeft = 0;
+    }
   };
 
   const renderPagination = () => {
@@ -121,7 +125,7 @@ const TableModal = ({ show, handleClose, handleResetData, executionResult }) => 
       show={show} 
       onHide={handleClose} 
       onExited={handleOnExited}
-      size="lg" 
+      size="xl" 
       centered
     >
       <Modal.Header closeButton data-bs-theme="light">
@@ -130,12 +134,18 @@ const TableModal = ({ show, handleClose, handleResetData, executionResult }) => 
       <Modal.Body>
         {totalRows > 0 ? (
           <>
-            <div className="table-responsive">
+            <div
+              className="table-responsive"
+              ref={tableScrollRef}
+              tabIndex={0}
+              role="region"
+              aria-label="Scrollable execution result"
+            >
               <Table className="custom-table" striped bordered hover variant="light">
                 <thead>
                   <tr>
                     {tableData.headers.map((header, index) => (
-                      <th key={index}>{header}</th>
+                      <th key={index} title={header}>{header}</th>
                     ))}
                   </tr>
                 </thead>
@@ -143,7 +153,7 @@ const TableModal = ({ show, handleClose, handleResetData, executionResult }) => 
                   {paginatedRows.map((row, rowIndex) => (
                     <tr key={rowIndex}>
                       {row.map((cell, cellIndex) => (
-                        <td key={cellIndex}>{String(cell)}</td>
+                        <td key={cellIndex} title={String(cell)}>{String(cell)}</td>
                       ))}
                     </tr>
                   ))}

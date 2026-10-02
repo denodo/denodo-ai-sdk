@@ -28,6 +28,7 @@ class ExecutionOutcome:
     data: dict = field(default_factory=dict)   # VQL execution result; only populated for SUCCESS
     error: str = ""                            # human-readable error text
     raw: object = None                         # original response body, for debugging
+    is_masked: bool = False                    # flag indicating if the data is masked
 
     @property
     def is_success(self) -> bool:

@@ -28,12 +28,16 @@ async def process_analysis(
     auth=None,
     thinking_llm_temperature=0.0,
     thinking_llm_max_tokens=10240,
+    llm_provider=None,
+    llm_model=None,
     llm_temperature=0.0,
     llm_max_tokens=4096,
+    check_ambiguity=None,
     execution_model="thinking",
-    vdp_database_names: str = '',
-    vdp_tag_names: str = '',
-    allow_external_associations: bool = True,
+    vdp_database_names: list = None,
+    vdp_tag_names: list = None,
+    allow_external_associations: bool = False,
+    filter_logic: str = "OR",
     custom_headers: dict = None
 ):
     """
@@ -52,10 +56,17 @@ async def process_analysis(
         max_concurrent_tool_calls: Maximum number of tools that can be called concurrently
         formatted_schema: Pre-formatted schema text from get_relevant_tables
         auth: Authentication token for database access
+        vdp_database_names: List of databases the sub-queries are scoped to
+        vdp_tag_names: List of tags the sub-queries are scoped to
+        allow_external_associations: Whether associations outside the databases/tags are allowed
+        filter_logic: How databases and tags are combined ("AND" or "OR")
 
     Returns:
         Dict with 'answer' and 'deepquery_metadata' keys
     """
+    vdp_database_names = vdp_database_names or []
+    vdp_tag_names = vdp_tag_names or []
+
     start_time = time.time()
 
     # Log the start of analysis
@@ -64,6 +75,7 @@ async def process_analysis(
     logger.info(f"Parameters: execution_model={execution_model}")
     logger.info(f"Parameters: execution_model_provider={planning_provider if execution_model == 'thinking' else executing_provider}")
     logger.info(f"Parameters: execution_model_model={planning_model if execution_model == 'thinking' else executing_model}")
+    logger.info(f"Parameters: nested_answer_question_llm={llm_provider}/{llm_model}")
 
     # Storage for the first plan
     first_plan = {"content": None, "captured": False}
@@ -119,7 +131,13 @@ async def process_analysis(
             xml_callbacks=xml_callbacks,
             vdp_database_names=vdp_database_names,
             vdp_tag_names=vdp_tag_names,
-            allow_external_associations=allow_external_associations
+            allow_external_associations=allow_external_associations,
+            filter_logic=filter_logic,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            llm_temperature=llm_temperature,
+            llm_max_tokens=llm_max_tokens,
+            check_ambiguity=check_ambiguity
         )
 
         # Run the analysis
@@ -173,12 +191,21 @@ async def process_analysis(
             "executing_provider": executing_provider,
             "executing_model": executing_model,
             "default_rows": default_rows,
+            "vdp_database_names": vdp_database_names,
+            "vdp_tag_names": vdp_tag_names,
+            "allow_external_associations": allow_external_associations,
+            "filter_logic": filter_logic,
             "plan": first_plan.get("content", "<PLAN_NOT_FOUND>"),
             "analysis_execution_time": analysis_duration,
             "analysis_iterations": analysis_result.get("loop_count", 0),
             "total_tool_calls": len(analysis_result.get("tool_calls", [])),
             "thinking_llm_temperature": thinking_llm_temperature,
             "thinking_llm_max_tokens": thinking_llm_max_tokens,
+            "llm_provider": llm_provider,
+            "llm_model": llm_model,
+            "llm_temperature": llm_temperature,
+            "llm_max_tokens": llm_max_tokens,
+            "check_ambiguity": check_ambiguity,
             "actual_executing_provider": actual_executing_provider,
             "actual_executing_model": actual_executing_model,
             "actual_executing_temperature": actual_executing_temperature,
@@ -205,7 +232,8 @@ async def generate_report_from_deepquery_metadata(
     max_reporting_loops=None,
     include_failed_tool_calls_appendix=False,
     auth=None,
-    custom_headers: dict = None
+    custom_headers: dict = None,
+    username: str = None
 ):
     """
     Generate an HTML report from deepquery metadata.
@@ -218,6 +246,7 @@ async def generate_report_from_deepquery_metadata(
         max_reporting_loops: Maximum number of reporting loops
         include_failed_tool_calls_appendix: Whether to include failed tool calls appendix
         auth: Authentication token for database access
+        username: Name of the user generating the report
 
     Returns:
         Dict with 'html_report' key
@@ -252,6 +281,7 @@ async def generate_report_from_deepquery_metadata(
             ),
             language=language
         )
+        # Reuse the scope filters from the analysis phase so report queries hit the same views
         reporting_agent = ReportingAgent(
             llm=executing_llm,
             cohorts=cohorts,
@@ -259,7 +289,16 @@ async def generate_report_from_deepquery_metadata(
             auth=auth,
             custom_headers=custom_headers,
             max_loops=max_reporting_loops,
-            language=language
+            language=language,
+            vdp_database_names=deepquery_metadata.get("vdp_database_names", ""),
+            vdp_tag_names=deepquery_metadata.get("vdp_tag_names", ""),
+            allow_external_associations=deepquery_metadata.get("allow_external_associations", False),
+            filter_logic=deepquery_metadata.get("filter_logic", "OR"),
+            llm_provider=deepquery_metadata.get("llm_provider"),
+            llm_model=deepquery_metadata.get("llm_model"),
+            llm_temperature=deepquery_metadata.get("llm_temperature"),
+            llm_max_tokens=deepquery_metadata.get("llm_max_tokens"),
+            check_ambiguity=deepquery_metadata.get("check_ambiguity")
         )
 
         analysis_result = {
@@ -311,7 +350,13 @@ async def generate_report_from_deepquery_metadata(
         final_translated_title = deepquery_metadata.get("analysis_title", analysis_title)
         text_direction = deepquery_metadata.get("text_direction", "ltr")
 
-        html_report = build_styled_html(html_body, selected_palette, final_translated_title, text_direction)
+        html_report = build_styled_html(
+            html_content=html_body,
+            color_palette=selected_palette,
+            title=final_translated_title,
+            text_direction=text_direction,
+            username=username
+        )
 
         total_duration = time.time() - start_time
         logger.info(f"Report HTML generation completed in {total_duration:.2f}s")

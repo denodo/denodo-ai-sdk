@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { useConfig } from "../../contexts/ConfigContext";
+import { useConfig, useNumberFormat } from "../../contexts/ConfigContext";
 import Card from "react-bootstrap/Card";
 import Dropdown from "react-bootstrap/Dropdown";
 import Badge from "react-bootstrap/Badge";
@@ -12,8 +12,16 @@ import remarkGfm from "remark-gfm";
 import { CSVLink } from "react-csv";
 import ExcelJS from "exceljs";
 import "./ToolBlocks.css";
+import { markdownComponents } from "./markdownComponents";
 
 const assetBaseUrl = import.meta.env.BASE_URL;
+
+const formatToolDuration = (seconds, formatNumber) => {
+  if (seconds === undefined || seconds === null || seconds === "") return null;
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value < 0) return null;
+  return formatNumber(value, 2);
+};
 
 const ToolBlocks = ({
   blocks,
@@ -25,6 +33,7 @@ const ToolBlocks = ({
   onToolIconClick,
 }) => {
   const { config } = useConfig();
+  const formatNumber = useNumberFormat();
   const toolPublicTextKeys = useMemo(() => {
     const map = {};
     const tools = Array.isArray(config?.chatbot_tools) ? config.chatbot_tools : [];
@@ -119,7 +128,9 @@ const ToolBlocks = ({
       });
     };
 
-    if (toolCall.toolName === "data_agent") {
+    // data_agent: backwards compatibility for chats saved before it was split into generate_vql / execute_vql / generate_graph
+    const isVqlTool = ["generate_vql", "execute_vql", "generate_graph", "data_agent"].includes(toolCall.toolName);
+    if (isVqlTool) {
       icons.push(
         <OverlayTrigger
           key="denodo"
@@ -219,6 +230,8 @@ const ToolBlocks = ({
       );
       }
       if (
+        // data_agent: backwards compatibility — old chats stored the graph on the data_agent artifact
+        (toolCall.toolName === "generate_graph" || toolCall.toolName === "data_agent") &&
         artifact.raw_graph &&
         artifact.raw_graph.startsWith("data:image") &&
         artifact.raw_graph.length > 300
@@ -409,7 +422,15 @@ const ToolBlocks = ({
   };
 
   const getToolArgPreview = (toolCall) => {
-    const argKey = toolPublicTextKeys[toolCall.toolName];
+    let argKey = toolPublicTextKeys[toolCall.toolName];
+
+    // Fallback for data_agent
+    if (!argKey) {
+      if (toolCall.toolName === "data_agent") {
+        argKey = "request"; 
+      }
+    }
+
     if (!argKey || !toolCall.args) return null;
     const value = toolCall.args[argKey];
     if (value === undefined || value === null) return null;
@@ -424,6 +445,7 @@ const ToolBlocks = ({
     const outputString = toolOutput 
       ? (typeof toolOutput === 'object' ? JSON.stringify(toolOutput, null, 2) : String(toolOutput))
       : "";
+    const formattedDuration = formatToolDuration(toolCall.artifact?.tool_duration, formatNumber);
 
     return (
       <div
@@ -474,7 +496,12 @@ const ToolBlocks = ({
 
             {(toolCall.status === "finished" || toolCall.status === "error") && (
               <div>
-                <div className="small fw-bold mb-1 text-muted">Output</div>
+                <div className="toolbox-output-header">
+                  <span className="small fw-bold text-muted">Output</span>
+                  {formattedDuration && (
+                    <span className="toolbox-run-time">(ran in {formattedDuration}s)</span>
+                  )}
+                </div>
                 <div className="args-container" style={{ maxHeight: '300px' }}>
                   <div className="d-flex justify-content-between align-items-start mb-1">
                     <span className="arg-key">result</span>
@@ -515,15 +542,11 @@ const ToolBlocks = ({
         b.type === "tool" ? (
           renderToolBox(b)
         ) : (
-          <Card.Text key={`msg-${idx}`}>
+          <Card.Text as="div" key={`msg-${idx}`}>
             <div className="markdown-container">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
-                components={{
-                  a: ({node, ...props}) => (
-                    <a {...props} target="_blank" rel="noopener noreferrer" />
-                  )
-                }}
+                components={markdownComponents}
               >
                 {b.content}
               </ReactMarkdown>

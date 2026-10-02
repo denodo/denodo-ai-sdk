@@ -140,9 +140,10 @@ class UniformLLM:
             "model": model,
             "api_key": api_key,
             "base_url": base_url,
-            "temperature": self.temperature,
             "max_tokens": self.max_tokens,
         }
+        if self.temperature != -1:
+            kwargs["temperature"] = self.temperature
 
         extra_body = {}
         if preferred_providers:
@@ -166,11 +167,15 @@ class UniformLLM:
         if api_key is None:
             raise ValueError("SAMBANOVA_API_KEY environment variable not set.")
 
-        self.llm = ChatSambaNovaCloud(
-            model = self.model_name,
-            sambanova_api_key = api_key,
-            temperature = self.temperature,
-            max_tokens = self.max_tokens)
+        sambanova_kwargs = {
+            "model": self.model_name,
+            "sambanova_api_key": api_key,
+            "max_tokens": self.max_tokens,
+        }
+        if self.temperature != -1:
+            sambanova_kwargs["temperature"] = self.temperature
+
+        self.llm = ChatSambaNovaCloud(**sambanova_kwargs)
 
     def setup_google_ai_studio(self):
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -179,20 +184,25 @@ class UniformLLM:
         if google_ai_studio_api_key is None:
             raise ValueError("GOOGLE_AI_STUDIO_API_KEY environment variable not set.")
 
-        self.llm = ChatGoogleGenerativeAI(
-            model = self.model_name,
-            api_key = google_ai_studio_api_key,
-            temperature = self.temperature,
-            max_tokens = self.max_tokens)
+        google_studio_kwargs = {
+            "model": self.model_name,
+            "api_key": google_ai_studio_api_key,
+            "max_tokens": self.max_tokens,
+        }
+        if self.temperature != -1:
+            google_studio_kwargs["temperature"] = self.temperature
+
+        self.llm = ChatGoogleGenerativeAI(**google_studio_kwargs)
 
     def setup_ollama(self):
         from langchain_ollama import ChatOllama
 
         kwargs = {
             "model": self.model_name,
-            "temperature": self.temperature,
             "num_predict": self.max_tokens,
         }
+        if self.temperature != -1:
+            kwargs["temperature"] = self.temperature
 
         if base_url := os.getenv('OLLAMA_API_BASE_URL'):
             kwargs["base_url"] = base_url
@@ -211,9 +221,10 @@ class UniformLLM:
         kwargs = {
             "model": self.model_name,
             "api_key": api_key,
-            "temperature": self.temperature,
             "max_tokens": self.max_tokens,
         }
+        if self.temperature != -1:
+            kwargs["temperature"] = self.temperature
 
         if base_url is not None:
             kwargs["base_url"] = base_url
@@ -224,15 +235,22 @@ class UniformLLM:
         from langchain_anthropic import ChatAnthropic
 
         api_key = os.getenv('ANTHROPIC_API_KEY')
+        base_url = os.getenv('ANTHROPIC_BASE_URL')
         if api_key is None:
             raise ValueError("ANTHROPIC_API_KEY environment variable not set.")
 
-        self.llm = ChatAnthropic(
-            model_name = self.model_name,
-            api_key = api_key,
-            temperature = self.temperature,
-            max_tokens = self.max_tokens,
-        )
+        kwargs = {
+            "model_name": self.model_name,
+            "api_key": api_key,
+            "max_tokens": self.max_tokens,
+        }
+        if self.temperature != -1:
+            kwargs["temperature"] = self.temperature
+
+        if base_url is not None:
+            kwargs["base_url"] = base_url
+
+        self.llm = ChatAnthropic(**kwargs)
 
     def setup_groq(self):
         from langchain_groq import ChatGroq
@@ -241,13 +259,16 @@ class UniformLLM:
         if api_key is None:
             raise ValueError("GROQ_API_KEY environment variable not set.")
 
-        self.llm = ChatGroq(
-            model_name = self.model_name,
-            groq_api_key = api_key,
-            temperature = self.temperature,
-            max_tokens = self.max_tokens,
-            streaming = True,
-        )
+        groq_kwargs = {
+            "model_name": self.model_name,
+            "groq_api_key": api_key,
+            "max_tokens": self.max_tokens,
+            "streaming": True,
+        }
+        if self.temperature != -1:
+            groq_kwargs["temperature"] = self.temperature
+
+        self.llm = ChatGroq(**groq_kwargs)
 
     def setup_google(self):
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -305,9 +326,10 @@ class UniformLLM:
         params = {
             "model": model,
             "vertexai": True,
-            "temperature": self.temperature,
             "max_output_tokens": self.max_tokens,
         }
+        if self.temperature != -1:
+            params["temperature"] = self.temperature
         if google_region:
             params["location"] = google_region
         if effort:
@@ -344,7 +366,8 @@ class UniformLLM:
             kwargs["model"] = model
         else:
             kwargs["max_tokens"] = self.max_tokens
-            kwargs["temperature"] = self.temperature
+            if self.temperature != -1:
+                kwargs["temperature"] = self.temperature
 
         if base_url is not None:
             kwargs["base_url"] = base_url
@@ -404,7 +427,8 @@ class UniformLLM:
             kwargs["reasoning_effort"] = effort
         else:
             kwargs["azure_deployment"] = self.model_name
-            kwargs["temperature"] = self.temperature
+            if self.temperature != -1:
+                kwargs["temperature"] = self.temperature
 
         if api_proxy is not None or custom_headers:
             client_kwargs = {}
@@ -459,7 +483,8 @@ class UniformLLM:
             kwargs["reasoning_effort"] = effort
         else:
             kwargs["azure_deployment"] = self.model_name
-            kwargs["temperature"] = self.temperature
+            if self.temperature != -1:
+                kwargs["temperature"] = self.temperature
 
         if api_proxy is not None or custom_headers:
             client_kwargs = {}
@@ -532,13 +557,16 @@ class UniformLLM:
         client = session.client(**client_kwargs)
 
         # Prepare ChatBedrock initialization parameters
+        model_kwargs = {
+            "max_tokens": self.max_tokens
+        }
+        if self.temperature != -1:
+            model_kwargs["temperature"] = self.temperature
+
         bedrock_kwargs = {
             "client": client,
             "model": model,
-            "model_kwargs": {
-                "temperature": self.temperature,
-                "max_tokens": self.max_tokens
-            },
+            "model_kwargs": model_kwargs,
         }
 
         if provider:
@@ -559,13 +587,16 @@ class UniformLLM:
         if api_key is None:
             raise ValueError("MISTRAL_API_KEY environment variable not set.")
 
-        self.llm = ChatMistralAI(
-            model = self.model_name,
-            mistral_api_key = api_key,
-            temperature = self.temperature,
-            max_tokens = self.max_tokens,
-            timeout=480
-        )
+        mistral_kwargs = {
+            "model": self.model_name,
+            "mistral_api_key": api_key,
+            "max_tokens": self.max_tokens,
+            "timeout": 480
+        }
+        if self.temperature != -1:
+            mistral_kwargs["temperature"] = self.temperature
+
+        self.llm = ChatMistralAI(**mistral_kwargs)
 
     def setup_custom(self):
         from langchain_openai import ChatOpenAI
@@ -590,9 +621,10 @@ class UniformLLM:
             "model": self.model_name,
             "api_key": api_key,
             "base_url": base_url,
-            "temperature": self.temperature,
             "max_tokens": self.max_tokens,
         }
+        if self.temperature != -1:
+            kwargs["temperature"] = self.temperature
 
         if proxy is not None or custom_headers:
             client_kwargs = {}

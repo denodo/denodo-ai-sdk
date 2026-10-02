@@ -48,8 +48,8 @@ def delete_metadata():
         }), 403
 
     data = request.json
-    vdp_database_names = data.get('vdp_database_names', '')
-    vdp_tag_names = data.get('vdp_tag_names', '')
+    vdp_database_names = data.get('vdp_database_names', [])
+    vdp_tag_names = data.get('vdp_tag_names', [])
     delete_conflicting = data.get('delete_conflicting', False)
 
     if not vdp_database_names and not vdp_tag_names:
@@ -117,6 +117,7 @@ def sync_vdbs():
     incremental = request.json.get('incremental', True)
     parallel = request.json.get('parallel', True)
     timeout_seconds = request.json.get('timeout_seconds', 300)
+    embeddings_token_limit = request.json.get('embeddings_token_limit', 0)
 
     username, password = _get_sync_credentials(config)
 
@@ -132,7 +133,8 @@ def sync_vdbs():
         vdp_tag_names=tags_to_sync,
         tags_to_ignore=tags_to_ignore,
         verify_ssl=config.ai_sdk_verify_ssl,
-        timeout_seconds=timeout_seconds
+        timeout_seconds=timeout_seconds,
+        embeddings_token_limit=embeddings_token_limit
     )
 
     if status == 200:

@@ -27,6 +27,20 @@
   border-width: 2px;
 }
 
+.toolbox-output-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin-bottom: 0.25rem;
+}
+
+.toolbox-run-time {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: #9aa8b0;
+  line-height: 1;
+}
+
 .report-palette-popup {
   position: absolute;
   top: 120%;

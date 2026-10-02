@@ -8,6 +8,7 @@ const CustomTooltip = ({
   children,
   delay = { show: 400, hide: 250 },
   placement = "right",
+  disabled = false,
 }) => {
   const [show, setShow] = useState(false);
   const target = useRef(null);
@@ -22,7 +23,39 @@ const CustomTooltip = ({
     };
   }, []);
 
+  useEffect(() => {
+    if (disabled) {
+      clearTimeout(showTimeout.current);
+      setShow(false);
+    }
+  }, [disabled]);
+
+  useEffect(() => {
+    const currentTarget = target.current;
+    if (!currentTarget) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) {
+          clearTimeout(showTimeout.current);
+          setShow(false);
+        }
+      },
+      {
+        root: null,
+        threshold: 0,
+      }
+    );
+
+    observer.observe(currentTarget);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
   const handleMouseEnter = () => {
+    if (disabled) return;
     clearTimeout(hideTimeout.current);
 
     if (!show) {
@@ -40,15 +73,28 @@ const CustomTooltip = ({
     }, delay.hide);
   };
 
+  const handleClick = (e) => {
+    clearTimeout(showTimeout.current);
+    setShow(false);
+    if (children.props.onClick) {
+      children.props.onClick(e);
+    }
+  };
+
   return (
     <>
       {React.cloneElement(children, {
         ref: target,
         onMouseEnter: handleMouseEnter,
         onMouseLeave: handleMouseLeave,
+        onClick: handleClick,
       })}
 
-      <Overlay target={target.current} show={show} placement={placement}>
+      <Overlay
+        target={target.current}
+        show={show && !disabled}
+        placement={placement}
+      >
         {(props) => (
           <Tooltip
             id={id}
@@ -56,6 +102,7 @@ const CustomTooltip = ({
             className="custom-light-tooltip"
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
+            style={{ ...props.style, pointerEvents: "none" }}
           >
             <div className="custom-tooltip-scroll-content">{content}</div>
           </Tooltip>

@@ -90,12 +90,12 @@ async def resolve_query(
     sample_data=None,
     custom_headers=None,
     can_use_llm=False,
+    max_attempts=2,
 ):
     """This flow takes the generated VQL, executes it and resolves (fixes/reviews) any issues until it works
     or the limit of fix/review attempts is reached. Returns a ResolvedQuery."""
 
     limit = request.vql_execute_rows_limit
-    max_attempts = 2
     k = request.vector_search_sample_data_k
 
     log = ExplanationLog(gen.explanation)
@@ -106,7 +106,7 @@ async def resolve_query(
     vql_query = sdk_utils.normalize_vql(gen.vql)
     issues = sdk_utils.detect_vql_issues(vql_query)
     static = None
-    if issues:
+    if issues and request.enable_query_fixer:
         with timing_context("llm_time", timings):
             static = await rewrite_static_issue(
                 question=request.question,

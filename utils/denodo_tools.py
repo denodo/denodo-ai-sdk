@@ -82,7 +82,9 @@ def make_ai_sdk_request(endpoint, payload, auth, method="POST", verify_ssl=False
         logging.error(f"Traceback: {traceback.format_exc()}")
         try:
             error_data = e.response.json()
-            detail = error_data.get('detail')
+            detail = error_data.get('detail', error_data)
+            if isinstance(detail, dict):
+                detail = detail.get('error') or detail.get('message') or str(detail)
             return {
                 "error": f"An error occurred when connecting to the AI SDK: {detail}",
                 "traceback": traceback.format_exc()
@@ -107,7 +109,7 @@ def deep_query(
     verify_ssl=False,
     vdp_database_names=None,
     vdp_tag_names=None,
-    allow_external_associations=True,
+    allow_external_associations=False,
     timeout=1200,
     cancel_event=None,
     **llm_params
@@ -157,29 +159,25 @@ def metadata_search(
 
     return response
 
-def data_agent(
+def generate_vql(
     natural_language_query,
     api_host,
     auth,
     vdp_database_names=None,
     vdp_tag_names=None,
-    allow_external_associations=True,
-    plot=0,
-    plot_details='',
+    allow_external_associations=False,
     limit=None,
     custom_instructions='',
+    view_names=None,
+    auto_fixing=True,
+    auto_fixing_attempts=None,
+    check_ambiguity=None,
     verify_ssl=False,
     timeout=1200,
     cancel_event=None,
     **llm_params
 ):
     request_body = {
-        'question': natural_language_query,
-        'mode': 'data',
-        'verbose': False,
-        'disclaimer': False,
-        'plot': bool(int(plot)),
-        'plot_details': plot_details,
         'custom_instructions': custom_instructions,
         'allow_external_associations': allow_external_associations,
     }
@@ -189,15 +187,64 @@ def data_agent(
     if vdp_tag_names:
         request_body['vdp_tag_names'] = vdp_tag_names
 
+    llm_params.pop("filter_logic", None)
     request_body.update(llm_params)
 
+    # Set after the update so llm_params can never override the explicit arguments.
+    request_body['request'] = natural_language_query
+    request_body['auto_fixing'] = auto_fixing
+    request_body['view_names'] = view_names or []
+    if auto_fixing_attempts is not None:
+        request_body['auto_fixing_attempts'] = int(auto_fixing_attempts)
+    if check_ambiguity is not None:
+        request_body['check_ambiguity'] = check_ambiguity
     if limit not in (None, ''):
         request_body['vql_execute_rows_limit'] = int(limit)
 
-    endpoint = f'{api_host}/answerQuestion'
-    response = make_ai_sdk_request(endpoint, request_body, auth, verify_ssl=verify_ssl, timeout=timeout, cancel_event=cancel_event)
+    endpoint = f'{api_host}/generateVQL'
+    return make_ai_sdk_request(endpoint, request_body, auth, verify_ssl=verify_ssl, timeout=timeout, cancel_event=cancel_event)
 
-    return response
+def execute_vql(
+    vql,
+    api_host,
+    auth,
+    limit=None,
+    verify_ssl=False,
+    timeout=1200,
+    cancel_event=None,
+):
+    request_body = {'vql': vql}
+    if limit not in (None, ''):
+        request_body['limit'] = int(limit)
+
+    endpoint = f'{api_host}/executeVQL'
+    return make_ai_sdk_request(endpoint, request_body, auth, verify_ssl=verify_ssl, timeout=timeout, cancel_event=cancel_event)
+
+def generate_graph(
+    vql,
+    api_host,
+    auth,
+    plot_details='',
+    limit=None,
+    verify_ssl=False,
+    timeout=1200,
+    cancel_event=None,
+    **llm_params
+):
+    request_body = {
+        'vql': vql,
+        'plot_details': plot_details,
+    }
+    if limit not in (None, ''):
+        request_body['limit'] = int(limit)
+
+    request_body.update(llm_params)
+
+    endpoint = f'{api_host}/generateGraph'
+    return make_ai_sdk_request(endpoint, request_body, auth, verify_ssl=verify_ssl, timeout=timeout, cancel_event=cancel_event)
+
+def _response_vql(response):
+    return response.get("vql") or response.get("sql_query", "")
 
 def _build_error_data_agent_output(response):
     content = f"Data query failed: {response.get('error', 'Unknown error')}"
@@ -206,9 +253,9 @@ def _build_error_data_agent_output(response):
 def _build_empty_data_agent_content(response):
     content = f"""Response: {response.get("answer", "No answer was provided.")}"""
 
-    sql_query = response.get("sql_query", "")
-    if sql_query:
-        content += f"\nSQL query: {sql_query}"
+    vql = _response_vql(response)
+    if vql:
+        content += "\n" + _wrap_tagged_block("vql_query", vql)
 
     query_explanation = response.get("query_explanation", "")
     if query_explanation:
@@ -230,31 +277,33 @@ def _get_execution_result_views(response):
         "llm_csv": llm_csv,
     }
 
-def _build_success_data_agent_content(response):
+def _wrap_tagged_block(tag, content):
+    return f"<{tag}>\n{str(content).rstrip()}\n</{tag}>"
+
+def _build_success_data_agent_content(response, include_query_explanation=True):
     execution_result_views = _get_execution_result_views(response)
     full_rows = execution_result_views["full_rows"]
     llm_rows = execution_result_views["llm_rows"]
-    full_csv = execution_result_views["full_csv"]
     llm_csv = execution_result_views["llm_csv"]
     row_count = len(full_rows)
 
-    truncation_note = ""
-    if full_csv and llm_csv and full_csv != llm_csv:
-        truncation_note = f"""NOTE: Only the first {len(llm_rows)} row{'s' if len(llm_rows) != 1 else ''} were included here out of a total of {row_count} rows returned.
+    header = f"Execution result returned {row_count} row{'s' if row_count != 1 else ''}."
+    if llm_csv and len(llm_rows) < row_count:
+        header += f"""\nNOTE: Only the first {len(llm_rows)} row{'s' if len(llm_rows) != 1 else ''} were included here out of a total of {row_count} rows returned.
 This limit is set to avoid LLM context saturation."""
 
-    return f"""Execution result returned {row_count} row{'s' if row_count != 1 else ''}.
-{truncation_note}
+    if response.get("is_masked", False):
+        header += "\nNOTE: The data in this execution result contains masked or redacted values due to security policies."
 
-<execution_result_csv>
-{llm_csv}
-</execution_result_csv>
-<sql_query>
-{response.get("sql_query", "No SQL query was generated.")}
-</sql_query>
-<query_explanation>
-{response.get("query_explanation", "No query explanation was provided.")}
-</query_explanation>"""
+    tagged_blocks = [
+        _wrap_tagged_block("execution_result_csv", llm_csv),
+        _wrap_tagged_block("vql_query", _response_vql(response) or "No VQL query was generated."),
+    ]
+    if include_query_explanation:
+        tagged_blocks.append(
+            _wrap_tagged_block("query_explanation", response.get("query_explanation") or "No query explanation was provided.")
+        )
+    return f"{header}\n\n" + "\n\n".join(tagged_blocks)
 
 def _append_graph_output(content, response):
     raw_graph = response.get("raw_graph", "")
@@ -269,7 +318,7 @@ def _append_graph_output(content, response):
 def _build_data_agent_artifact(response):
     tokens = response.get("tokens", {}) or {}
     return {
-        "vql": response.get("sql_query", ""),
+        "vql": _response_vql(response),
         "execution_result": response.get("execution_result", {}),
         "raw_graph": response.get("raw_graph", ""),
         "tables_used": response.get("tables_used", []),
@@ -285,6 +334,7 @@ def _build_data_agent_artifact(response):
         "sql_execution_time": response.get("sql_execution_time", 0),
         "llm_provider": response.get("llm_provider", ""),
         "llm_model": response.get("llm_model", ""),
+        "is_masked": response.get("is_masked", False),
     }
 
 def format_data_agent_output(response, include_graph=True):
@@ -293,17 +343,73 @@ def format_data_agent_output(response, include_graph=True):
         return _build_error_data_agent_output(response)
 
     # CASE 2: Ambiguity detected => returns answer with the ambiguity message
-    # CASE 3: Empty execution result => returns answer with the empty execution result message + sql_query + query_explanation
-    if not response.get("sql_query") or not response.get("execution_result"):
+    # CASE 3: Empty execution result => returns answer with the empty execution result message + vql_query + query_explanation
+    if not _response_vql(response) or not response.get("execution_result"):
         content = _build_empty_data_agent_content(response)
     else:
-        # CASE 4: All ok => returns sql_query + execution_result + query_explanation
+        # CASE 4: All ok => returns vql_query + execution_result + query_explanation
         content = _build_success_data_agent_content(response)
 
     # Graph output is only relevant for UI clients (chatbot), not for MCP
     if include_graph:
         content = _append_graph_output(content, response)
 
+    artifact = _build_data_agent_artifact(response)
+    return (content, artifact)
+
+def format_generate_vql_output(response):
+    return format_data_agent_output(response, include_graph=False)
+
+def format_execute_vql_output(response):
+    if 'error' in response:
+        return (f"VQL execution failed: {response.get('error', 'Unknown error')}", response)
+
+    if not response.get("execution_result"):
+        content = "The VQL executed correctly but returned no rows.\n\n" + _wrap_tagged_block(
+            "vql_query",
+            _response_vql(response) or "No VQL was provided.",
+        )
+    else:
+        execution_result_views = _get_execution_result_views(response)
+        full_rows = execution_result_views["full_rows"]
+        llm_rows = execution_result_views["llm_rows"]
+        full_csv = execution_result_views["full_csv"]
+        llm_csv = execution_result_views["llm_csv"]
+        row_count = len(full_rows)
+
+        header = f"Execution result returned {row_count} row{'s' if row_count != 1 else ''}."
+        if full_csv and llm_csv and full_csv != llm_csv:
+            header += (
+                f"\nNOTE: Only the first {len(llm_rows)} row{'s' if len(llm_rows) != 1 else ''} "
+                f"were included here out of a total of {row_count} rows returned.\n"
+                "This limit is set to avoid LLM context saturation."
+            )
+
+        if response.get("is_masked", False):
+            header += "\nNOTE: The data in this execution result contains masked or redacted values due to security policies."
+
+        tagged_blocks = [
+            _wrap_tagged_block("execution_result_csv", llm_csv),
+            _wrap_tagged_block("vql_query", _response_vql(response) or "No VQL was provided."),
+        ]
+        content = f"{header}\n\n" + "\n\n".join(tagged_blocks)
+
+    artifact = _build_data_agent_artifact(response)
+    return (content, artifact)
+
+def format_generate_graph_output(response):
+    if 'error' in response:
+        return (f"Graph generation failed: {response.get('error', 'Unknown error')}", response)
+
+    if not response.get("execution_result"):
+        content = f"""The VQL executed correctly but returned no rows, so no graph could be generated.
+<vql_query>
+{_response_vql(response) or "No VQL was provided."}
+</vql_query>"""
+    else:
+        content = _build_success_data_agent_content(response, include_query_explanation=False)
+
+    content = _append_graph_output(content, response)
     artifact = _build_data_agent_artifact(response)
     return (content, artifact)
 
@@ -339,8 +445,12 @@ def format_metadata_search_output(response):
     artifact = response
     return (content, artifact)
 
-def format_data_agent_output_mcp(response):
-    content, _ = format_data_agent_output(response, include_graph=False)
+def format_generate_vql_output_mcp(response):
+    content, _ = format_generate_vql_output(response)
+    return content
+
+def format_execute_vql_output_mcp(response):
+    content, _ = format_execute_vql_output(response)
     return content
 
 def format_metadata_search_output_mcp(response):

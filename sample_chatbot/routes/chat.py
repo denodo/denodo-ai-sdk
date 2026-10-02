@@ -72,9 +72,9 @@ def question():
     data = request.get_json()
     query = data.get('query')
     tool_name = data.get('tool')
-    databases_str = data.get('databases', '')
-    tags_str = data.get('tags', '')
-    allow_external_associations = data.get('allow_external_associations', True)
+    databases = data.get('databases', [])
+    tags = data.get('tags', [])
+    allow_external_associations = data.get('allow_external_associations', False)
     force_overwrite = data.get('force_overwrite', False)
 
     # Capture the actual user object, not the proxy
@@ -202,8 +202,8 @@ def question():
                 user=user_obj,
                 query=query,
                 tool_name=tool_name,
-                vdp_databases=databases_str,
-                vdp_tags=tags_str,
+                vdp_databases=databases,
+                vdp_tags=tags,
                 allow_external_associations=allow_external_associations,
                 thread_id=thread_id,
                 is_new_thread=is_new_thread,

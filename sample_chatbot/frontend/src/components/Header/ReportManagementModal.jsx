@@ -95,15 +95,21 @@ const ReportManagementModal = () => {
               )}
             </div>
             
-            <Table striped bordered hover variant="light" className="table-responsive align-middle">
+            <div
+              className="table-responsive"
+              tabIndex={0}
+              role="region"
+              aria-label="Scrollable reports table"
+            >
+            <Table striped bordered hover variant="light" className="align-middle">
               <thead>
                 <tr>
-                  <th style={{ width: '30%' }}>Report Title</th>
-                  <th style={{ width: '10%' }}>Language</th>
-                  <th style={{ width: '15%' }}>Status</th>
-                  <th style={{ width: '15%' }}>Requested</th>
-                  <th style={{ width: '15%' }}>Generated</th>
-                  <th style={{ width: '15%' }}>Actions</th>
+                  <th style={{ minWidth: '16rem' }}>Report Title</th>
+                  <th style={{ minWidth: '6.5rem' }}>Language</th>
+                  <th style={{ minWidth: '7rem' }}>Status</th>
+                  <th style={{ minWidth: '11rem' }}>Requested</th>
+                  <th style={{ minWidth: '11rem' }}>Generated</th>
+                  <th style={{ minWidth: '7rem' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -191,6 +197,7 @@ const ReportManagementModal = () => {
                 ))}
               </tbody>
             </Table>
+            </div>
             
             <div className="mt-3">
               <small className="text-muted">

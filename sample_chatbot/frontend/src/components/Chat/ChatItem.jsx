@@ -15,6 +15,7 @@ import ContextTablesAction from "./ContextTablesAction";
 import ChatItemActions from "./ChatItemActions";
 import ToolBlocks from "./ToolBlocks";
 import NotificationToast from "../NotificationToast/NotificationToast";
+import { markdownComponents } from "./markdownComponents";
 
 const ChatItem = ({
   result,
@@ -145,15 +146,11 @@ const ChatItem = ({
         // If finished but empty (rare, but possible on error)
         if (result.result) {
              return (
-                <Card.Text>
+                <Card.Text as="div">
                     <div className="markdown-container">
                         <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
-                            components={{
-                                a: ({node, ...props}) => (
-                                    <a {...props} target="_blank" rel="noopener noreferrer" />
-                                )
-                            }}
+                            components={markdownComponents}
                         >
                             {result.result}
                         </ReactMarkdown>

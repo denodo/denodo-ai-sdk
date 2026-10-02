@@ -12,13 +12,15 @@ import os
 import logging
 import traceback
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import List
 
 from fastapi.responses import JSONResponse, Response
 from fastapi.encoders import jsonable_encoder
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from utils.data_marketplace.connection import get_user_permissions, DataCatalogAuthError
+from api.utils import param_descriptions as desc
 from api.utils import state_manager
 from api.utils.sdk_utils import (
     handle_endpoint_error, authenticate, delete_by_db_or_tag,
@@ -29,12 +31,21 @@ from api.utils.sdk_utils import get_custom_request_headers
 router = APIRouter()
 
 class deleteMetadataRequest(BaseModel):
-    vdp_database_names: str = ''
-    vdp_tag_names: str = ''
+    vdp_database_names: List[str] = Field(
+        default_factory=list,
+        description=desc.VDP_DATABASE_NAMES_DELETE
+    )
+    vdp_tag_names: List[str] = Field(
+        default_factory=list,
+        description=desc.VDP_TAG_NAMES_DELETE
+    )
     embeddings_provider: str = os.getenv('EMBEDDINGS_PROVIDER')
     embeddings_model: str = os.getenv('EMBEDDINGS_MODEL')
     vector_store_provider: str = os.getenv('VECTOR_STORE')
-    delete_conflicting: bool = False
+    delete_conflicting: bool = Field(
+        default = False,
+        description=desc.DELETE_CONFLICTING
+    )
 
 class deleteMetadataResponse(BaseModel):
     message: str
@@ -47,7 +58,7 @@ class deleteMetadataResponse(BaseModel):
 )
 @handle_endpoint_error("deleteMetadata")
 async def deleteMetadata(
-    endpoint_request: deleteMetadataRequest = Depends(),
+    endpoint_request: deleteMetadataRequest = Query(),
     auth: str = Depends(authenticate),
     custom_headers: dict = Depends(get_custom_request_headers)
 ):
@@ -73,8 +84,8 @@ async def deleteMetadata(
         logging.warning("[Security] User unauthorized attempt to use deleteMetadata.")
         raise HTTPException(status_code=403, detail="You do not have authorization to use the vectorization endpoints.")
 
-    vdp_database_names = [db.strip() for db in endpoint_request.vdp_database_names.split(',') if db]
-    vdp_tag_names = [tag.strip() for tag in endpoint_request.vdp_tag_names.split(',') if tag]
+    vdp_database_names = [db.strip() for db in endpoint_request.vdp_database_names if db.strip()]
+    vdp_tag_names = [tag.strip() for tag in endpoint_request.vdp_tag_names if tag.strip()]
 
     if not vdp_database_names and not vdp_tag_names:
         raise HTTPException(status_code=400, detail="At least one database or tag must be provided for deletion.")

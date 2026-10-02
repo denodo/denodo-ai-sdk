@@ -30,7 +30,11 @@ async def graph_generator(
     execution_result_df = sdk_utils.execution_result_to_dataframe(plot_data)
     data_stats = sdk_utils.dataframe_stats(execution_result_df)
 
-    with get_usage_metadata_callback() as cb:
+    with get_usage_metadata_callback() as cb, langfuse.trace_context(
+        model_id=f"{llm.provider_name}.{llm.model_name}",
+        session_id=session_id,
+        run_name=inspect.currentframe().f_code.co_name
+    ) as config:
         response = await final_chain.ainvoke(
             {
                 "instruction": query,
@@ -38,11 +42,7 @@ async def graph_generator(
                 "sample_data": json.dumps(execution_result_df[:3].to_dict(orient='records')),
                 "sample_data_stats": data_stats
             },
-            config=langfuse.build_config(
-                model_id=f"{llm.provider_name}.{llm.model_name}",
-                session_id=session_id,
-                run_name=inspect.currentframe().f_code.co_name
-            )
+            config=config
         )
 
     response = response.replace('```python', '<python>').replace('```', '</python>').strip()

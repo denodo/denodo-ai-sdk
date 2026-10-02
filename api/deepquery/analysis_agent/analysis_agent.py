@@ -51,9 +51,17 @@ class AnalysisAgent(Agent, AnalysisToolsMixin):
         self.custom_headers = custom_headers
 
         # Save filters
-        self.vdp_database_names = kwargs.get('vdp_database_names', '')
-        self.vdp_tag_names = kwargs.get('vdp_tag_names', '')
-        self.allow_external_associations = kwargs.get('allow_external_associations', True)
+        self.vdp_database_names = kwargs.get('vdp_database_names', [])
+        self.vdp_tag_names = kwargs.get('vdp_tag_names', [])
+        self.allow_external_associations = kwargs.get('allow_external_associations', False)
+        self.filter_logic = kwargs.get('filter_logic', 'OR')
+
+        # Save LLM parameter details from the endpoint request
+        self.llm_provider = kwargs.get('llm_provider')
+        self.llm_model = kwargs.get('llm_model')
+        self.llm_temperature = kwargs.get('llm_temperature')
+        self.llm_max_tokens = kwargs.get('llm_max_tokens')
+        self.check_ambiguity = kwargs.get('check_ambiguity')
 
         # Initialize with tools
         super().__init__(

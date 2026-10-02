@@ -458,9 +458,29 @@ async def execute_base_database_query(
     # Construct the question for the database agent
     question = f"{action}: {action_description}"
 
-    vdp_database_names = kwargs.get('vdp_database_names', '')
-    vdp_tag_names = kwargs.get('vdp_tag_names', '')
-    allow_external_associations = kwargs.get('allow_external_associations', True)
+    vdp_database_names = kwargs.get('vdp_database_names', [])
+    vdp_tag_names = kwargs.get('vdp_tag_names', [])
+    allow_external_associations = kwargs.get('allow_external_associations', False)
+    filter_logic = kwargs.get('filter_logic', 'OR')
+
+    # LLM overrides from the parent DeepQuery request. Without these,
+    # answerQuestion falls back to LLM_* in sdk_config.env.
+    llm_kwargs = {}
+    llm_provider = kwargs.get('llm_provider')
+    llm_model = kwargs.get('llm_model')
+    llm_temperature = kwargs.get('llm_temperature')
+    llm_max_tokens = kwargs.get('llm_max_tokens')
+    check_ambiguity = kwargs.get('check_ambiguity')
+    if llm_provider:
+        llm_kwargs['llm_provider'] = llm_provider
+    if llm_model:
+        llm_kwargs['llm_model'] = llm_model
+    if llm_temperature is not None:
+        llm_kwargs['llm_temperature'] = llm_temperature
+    if llm_max_tokens is not None:
+        llm_kwargs['llm_max_tokens'] = llm_max_tokens
+    if check_ambiguity is not None:
+        llm_kwargs['check_ambiguity'] = check_ambiguity
 
     # Create request object for answerQuestion
     request = answerQuestionRequest(
@@ -472,7 +492,9 @@ async def execute_base_database_query(
         disclaimer=disclaimer,
         vdp_database_names=vdp_database_names,
         vdp_tag_names=vdp_tag_names,
-        allow_external_associations=allow_external_associations
+        allow_external_associations=allow_external_associations,
+        filter_logic=filter_logic,
+        **llm_kwargs
     )
 
     # Call the endpoint function directly

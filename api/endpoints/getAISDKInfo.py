@@ -25,6 +25,7 @@ from api.utils.sdk_utils import (
 )
 from utils.uniformLLM import UniformLLM
 from utils.version import AI_SDK_VERSION
+from utils.logging_utils import get_log_level
 
 router = APIRouter()
 
@@ -41,6 +42,8 @@ class AISDKInfoResponse(BaseModel):
         description="Configuration for the thinking/reasoning LLM. Null if not configured."
     )
     check_ambiguity: bool = Field(description="Whether ambiguity detection is enabled.")
+    auto_fixing: bool = Field(description="Whether automatic VQL fixing is enabled.")
+    auto_fixing_attempts: int = Field(description="Maximum number of automatic VQL fixing attempts.")
     deepquery_execution_model: str = Field(
         description="Which LLM is used for DeepQuery execution: 'thinking' or 'base'."
     )
@@ -56,6 +59,11 @@ class AISDKInfoResponse(BaseModel):
         description="Current release version of the AI SDK"
     )
     can_use_deepquery: bool = Field(description="Whether the authenticated user is allowed to use DeepQuery features.")
+    embeddings_token_limit: int = Field(
+        default=0,
+        description="Maximum tokens for the embedding model (chunking limit). 0 if disabled."
+    )
+    log_level: str = Field(description="Current AI SDK and sample chatbot log level.")
 
 @router.get(
     '/getAISDKInfo',
@@ -70,7 +78,7 @@ async def get_ai_sdk_info(
 ):
     """
     Returns the current AI SDK LLM configuration, including base LLM,
-    thinking LLM settings, and the list of valid providers.
+    thinking LLM settings, the list of valid providers, and the current log level.
     This information can be used to pre-fill settings in client applications.
     """
     try:
@@ -109,15 +117,20 @@ async def get_ai_sdk_info(
         vql_execute_rows_limit
     )
     version = AI_SDK_VERSION
+    embeddings_token_limit = int(os.getenv("EMBEDDINGS_TOKEN_LIMIT", "0"))
 
     return JSONResponse(content={
         "base_llm": base_llm,
         "thinking_llm": thinking_llm,
         "check_ambiguity": bool(int(os.getenv("CHECK_AMBIGUITY", "1"))),
+        "auto_fixing": bool(int(os.getenv("AUTO_FIXING", "1"))),
+        "auto_fixing_attempts": max(1, min(5, int(os.getenv("AUTO_FIXING_ATTEMPTS", "2")))),
         "deepquery_execution_model": deepquery_execution_model,
         "vql_execute_rows_limit": vql_execute_rows_limit,
         "llm_response_rows_limit": llm_response_rows_limit,
         "valid_providers": UniformLLM.get_providers(),
         "version": version,
         "can_use_deepquery": can_use_deepquery,
+        "embeddings_token_limit": embeddings_token_limit,
+        "log_level": get_log_level(),
     }, status_code=200)

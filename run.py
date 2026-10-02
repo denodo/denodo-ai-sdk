@@ -123,7 +123,11 @@ if __name__ == "__main__":
         os.environ["AI_SDK_MCP_MODE"] = "remote"
         console.print(Panel(
             "[bold green]Remote MCP Server with HTTP[/]\n"
-            "[white]The API will include remote HTTP MCP endpoints at /mcp[/]",
+            "[white]MCP accessible at:[/]\n"
+            "[white]- /mcp[/]\n"
+            "[white]- /database/{database_name}/mcp[/]\n"
+            "[white]- /tag/{tag_name}/mcp[/]\n"
+            "[white]- /space/{space_name}/mcp[/]",
             border_style="green",
             width=PANEL_WIDTH
         ))

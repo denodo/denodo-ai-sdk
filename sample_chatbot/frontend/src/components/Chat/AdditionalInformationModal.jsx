@@ -1,8 +1,53 @@
 import React from "react";
 import Modal from "react-bootstrap/Modal";
 import Button from "react-bootstrap/Button";
+import { format } from "sql-formatter";
+import hljs from "highlight.js/lib/core";
+import sqlLanguage from "highlight.js/lib/languages/sql";
+import "highlight.js/styles/github.css";
+import { useNumberFormat } from "../../contexts/ConfigContext";
+
+hljs.registerLanguage("sql", sqlLanguage);
+
+const formatSql = (sql) => {
+  if (!sql || sql === "N/A") return sql;
+  try {
+    return format(sql, {
+      language: "postgresql",
+      keywordCase: "upper",
+      tabWidth: 2,
+    }).replace(/\b([A-Z][A-Z0-9_]*)\s+\(/g, "$1(");
+  } catch {
+    return sql;
+  }
+};
+
+const sqlBlockStyle = {
+  marginTop: "0.5rem",
+  marginBottom: "1rem",
+  padding: "0.75rem",
+  backgroundColor: "#f6f8fa",
+  border: "1px solid #dee2e6",
+  borderRadius: "0.25rem",
+  maxHeight: "320px",
+  overflow: "auto",
+  whiteSpace: "pre-wrap",
+  fontSize: "0.8rem",
+};
+
+const SqlBlock = ({ sql }) => (
+  <pre
+    className="hljs"
+    style={sqlBlockStyle}
+    dangerouslySetInnerHTML={{
+      __html: hljs.highlight(formatSql(sql || "N/A"), { language: "sql" }).value,
+    }}
+  />
+);
 
 const AdditionalInformationModal = ({ show, onClose, result }) => {
+  const formatNumber = useNumberFormat();
+
   if (!result) return null;
 
   const renderContent = () => {
@@ -75,7 +120,8 @@ const AdditionalInformationModal = ({ show, onClose, result }) => {
     }
 
     switch (modalTool) {
-      case "data_agent":
+      case "generate_vql":
+      case "data_agent": // backwards compatibility for chats saved before data_agent was split
         if (errorMessage || traceback) {
           return <div>{renderErrorSection()}</div>;
         }
@@ -102,27 +148,28 @@ const AdditionalInformationModal = ({ show, onClose, result }) => {
                 ? `${activeArtifact.llm_provider}/${activeArtifact.llm_model}`
                 : (result.llm_provider && result.llm_model ? `${result.llm_provider}/${result.llm_model}` : "N/A")}
             </p>
-            <p>
-              <strong>AI-Generated SQL:</strong> {activeArtifact.vql || result.vql || "N/A"}
-            </p>
+            <div>
+              <strong>AI-Generated VQL:</strong>
+              <SqlBlock sql={activeArtifact.vql || result.vql || "N/A"} />
+            </div>
             <p>
               <strong>Query explanation:</strong> {activeArtifact.query_explanation || result.query_explanation || "N/A"}
             </p>
             {/* --- TOKEN BREAKDOWN RENDER --- */}
             <p style={{ marginBottom: hasTokenBreakdown ? "0.25rem" : "1rem" }}>
               <strong>AI SDK Tokens (Total):</strong>{" "}
-              {totalTokens != null ? totalTokens : "N/A"}
+              {totalTokens != null ? formatNumber(totalTokens) : "N/A"}
             </p>
 
             {hasTokenBreakdown && (
               <div style={{ paddingLeft: "1.25rem", marginBottom: "1rem", fontSize: "0.95rem", color: "#555" }}>
                 <div style={{ marginBottom: "0.25rem" }}>
                   <span style={{ color: "#adb5bd", marginRight: "6px" }}>↳</span>
-                  <strong>Input Tokens:</strong> {inputTokens != null ? inputTokens : 0}
+                  <strong>Input Tokens:</strong> {inputTokens != null ? formatNumber(inputTokens) : 0}
                 </div>
                 <div>
                   <span style={{ color: "#adb5bd", marginRight: "6px" }}>↳</span>
-                  <strong>Output Tokens:</strong> {outputTokens != null ? outputTokens : 0}
+                  <strong>Output Tokens:</strong> {outputTokens != null ? formatNumber(outputTokens) : 0}
                 </div>
               </div>
             )}
@@ -131,26 +178,42 @@ const AdditionalInformationModal = ({ show, onClose, result }) => {
             {/* --- TIMING BREAKDOWN RENDER --- */}
             <p style={{ marginBottom: hasBreakdown ? "0.25rem" : "1rem" }}>
               <strong>AI SDK Time (Total):</strong>{" "}
-              {totalTime != null ? `${Number(totalTime).toFixed(2)}s` : "N/A"}
+              {totalTime != null ? `${formatNumber(totalTime, 2)}s` : "N/A"}
             </p>
 
             {hasBreakdown && (
               <div style={{ paddingLeft: "1.25rem", marginBottom: "1rem", fontSize: "0.95rem", color: "#555" }}>
                 <div style={{ marginBottom: "0.25rem" }}>
                   <span style={{ color: "#adb5bd", marginRight: "6px" }}>↳</span>
-                  <strong>Vector Search:</strong> {vectorTime != null ? `${Number(vectorTime).toFixed(2)}s` : "0.00s"}
+                  <strong>Vector Search:</strong> {`${formatNumber(vectorTime ?? 0, 2)}s`}
                 </div>
                 <div style={{ marginBottom: "0.25rem" }}>
                   <span style={{ color: "#adb5bd", marginRight: "6px" }}>↳</span>
-                  <strong>LLM Processing:</strong> {llmTime != null ? `${Number(llmTime).toFixed(2)}s` : "0.00s"}
+                  <strong>LLM Processing:</strong> {`${formatNumber(llmTime ?? 0, 2)}s`}
                 </div>
                 <div>
                   <span style={{ color: "#adb5bd", marginRight: "6px" }}>↳</span>
-                  <strong>SQL Execution:</strong> {sqlTime != null ? `${Number(sqlTime).toFixed(2)}s` : "0.00s"}
+                  <strong>VQL Execution:</strong> {`${formatNumber(sqlTime ?? 0, 2)}s`}
                 </div>
               </div>
             )}
             {/* --------------------------------- */}
+          </div>
+        );
+      case "execute_vql":
+      case "generate_graph":
+        if (errorMessage || traceback) {
+          return <div>{renderErrorSection()}</div>;
+        }
+        return (
+          <div>
+            <p>
+              <strong>Source:</strong> Denodo
+            </p>
+            <div>
+              <strong>Executed VQL:</strong>
+              <SqlBlock sql={activeArtifact.vql || result.vql || "N/A"} />
+            </div>
           </div>
         );
       case "deep_query":
@@ -186,9 +249,10 @@ const AdditionalInformationModal = ({ show, onClose, result }) => {
                 </p>
               </>
             )}
-            {(activeArtifact.total_execution_time || result.total_execution_time) && (
+            {(activeArtifact.total_execution_time ?? result.total_execution_time) != null && (
               <p>
-                <strong>Execution time:</strong> {activeArtifact.total_execution_time || result.total_execution_time}s
+                <strong>Execution time:</strong>{" "}
+                {formatNumber(activeArtifact.total_execution_time ?? result.total_execution_time, 2)}s
               </p>
             )}
           </div>
@@ -209,14 +273,14 @@ const AdditionalInformationModal = ({ show, onClose, result }) => {
 
             <p style={{ marginBottom: mdTotalTime != null ? "0.25rem" : "1rem" }}>
               <strong>AI SDK Time (Total):</strong>{" "}
-              {mdTotalTime != null ? `${Number(mdTotalTime).toFixed(2)}s` : "N/A"}
+              {mdTotalTime != null ? `${formatNumber(mdTotalTime, 2)}s` : "N/A"}
             </p>
 
             {mdTotalTime != null && (
               <div style={{ paddingLeft: "1.25rem", marginBottom: "1rem", fontSize: "0.95rem", color: "#555" }}>
                 <div>
                   <span style={{ color: "#adb5bd", marginRight: "6px" }}>↳</span>
-                  <strong>Vector Search:</strong> {Number(mdTotalTime).toFixed(2)}s
+                  <strong>Vector Search:</strong> {formatNumber(mdTotalTime, 2)}s
                 </div>
               </div>
             )}

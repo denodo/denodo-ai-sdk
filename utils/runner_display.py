@@ -6,6 +6,23 @@ console = Console()
 
 PANEL_WIDTH = 60
 
+def _ok_list_segments(title, names):
+    if not names:
+        return []
+
+    segments = [
+        ("\n\n", ""),
+        (f"{title}\n", "bold white"),
+    ]
+    for index, name in enumerate(names):
+        segments.extend([
+            ("[OK] ", "green"),
+            (name, "white"),
+        ])
+        if index < len(names) - 1:
+            segments.append(("\n", ""))
+    return segments
+
 def _build_chatbot_segments(urls, root_path_prefix="", imported_agent_names=None):
     imported_agent_names = imported_agent_names or []
     segments = []
@@ -20,19 +37,7 @@ def _build_chatbot_segments(urls, root_path_prefix="", imported_agent_names=None
         if i < len(urls) - 1:
             segments.append(("\n", ""))
 
-    if imported_agent_names:
-        segments.extend([
-            ("\n\n", ""),
-            ("Imported specialized agents:\n", "bold white")
-        ])
-        for index, agent_name in enumerate(imported_agent_names):
-            segments.extend([
-                ("[OK] ", "green"),
-                (agent_name, "white")
-            ])
-            if index < len(imported_agent_names) - 1:
-                segments.append(("\n", ""))
-
+    segments.extend(_ok_list_segments("Imported specialized agents:", imported_agent_names))
     return segments
 
 def print_header():
@@ -43,22 +48,25 @@ def print_header():
         width=PANEL_WIDTH
     ))
 
-def print_status(process_type, urls, version=None, root_path_prefix="", imported_agent_names=None):
+def print_status(process_type, urls, version=None, root_path_prefix="", imported_agent_names=None, imported_space_names=None):
     server_url = urls[0]
     full_url = server_url.rstrip('/') + root_path_prefix
     imported_agent_names = imported_agent_names or []
+    imported_space_names = imported_space_names or []
 
     if process_type == "api":
+        segments = [
+            ("AI SDK ", "bold red"),
+            ("is running at: ", "bold white"),
+            (f"{full_url}\n", "green"),
+            ("Swagger docs: ", "bold white"),
+            (f"{full_url}/docs\n", "green"),
+            ("AI SDK version: ", "bold white"),
+            (f"{version or 'Unknown'}", "yellow"),
+        ]
+        segments.extend(_ok_list_segments("Imported AI Spaces:", imported_space_names))
         panel = Panel(
-            Text.assemble(
-                ("AI SDK ", "bold red"),
-                ("is running at: ", "bold white"),
-                (f"{full_url}\n", "green"),
-                ("Swagger docs: ", "bold white"),
-                (f"{full_url}/docs\n", "green"),
-                ("AI SDK version: ", "bold white"),
-                (f"{version or 'Unknown'}", "yellow")
-            ),
+            Text.assemble(*segments),
             title="[bold]API status",
             border_style="red",
             width=PANEL_WIDTH
