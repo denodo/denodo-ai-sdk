@@ -144,6 +144,14 @@ class UniformVectorStore:
                 embedding_length=self.dimensions,
                 table_name=self.index_name
             )
+        elif self.provider == "qdrant":
+            from utils.qdrant_store import QdrantStore
+
+            self.client = QdrantStore(
+                collection_name=self.index_name,
+                embeddings=self.embeddings,
+                dimensions=self.dimensions,
+            )
         elif self.provider == "oracle":
             import oracledb
             from langchain_oracledb.vectorstores import OracleVS
@@ -365,12 +373,12 @@ class UniformVectorStore:
         if scores:
             if self.provider == "opensearch":
                 result = self.client.similarity_search_with_score(query, k=k, search_type="script_scoring", pre_filter=search_filter)
-            elif self.provider in ["chroma", "pgvector", "oracle", "sqlserver"]:
+            elif self.provider in ["chroma", "pgvector", "oracle", "sqlserver", "qdrant"]:
                 result = self.client.similarity_search_with_score(query, k=k, filter=search_filter)
         else:
             if self.provider == "opensearch":
                 result = self.client.similarity_search(query, k=k, search_type="script_scoring", pre_filter=search_filter)
-            elif self.provider in ["chroma", "pgvector", "oracle", "sqlserver"]:
+            elif self.provider in ["chroma", "pgvector", "oracle", "sqlserver", "qdrant"]:
                 result = self.client.similarity_search(query, k=k, filter=search_filter)
 
         return self._fix_sqlserver_ids(result)
@@ -407,14 +415,14 @@ class UniformVectorStore:
                 result = self.client.similarity_search_by_vector_with_score(
                     vector, k=k, filter=search_filter
                 )
-            elif self.provider == "pgvector":
+            elif self.provider in ["pgvector", "qdrant"]:
                 result = self.client.similarity_search_with_score_by_vector(
                     vector, k=k, filter=search_filter
                 )
         else:
             if self.provider == "opensearch":
                 result = self.client.similarity_search_by_vector(vector, k=k, search_type="script_scoring", pre_filter=search_filter)
-            elif self.provider in ["chroma", "pgvector", "oracle", "sqlserver"]:
+            elif self.provider in ["chroma", "pgvector", "oracle", "sqlserver", "qdrant"]:
                 result = self.client.similarity_search_by_vector(vector, k=k, filter=search_filter)
 
         return self._fix_sqlserver_ids(result)
@@ -444,7 +452,7 @@ class UniformVectorStore:
         if self.provider == "opensearch":
             db_conditions = [{"match": {"metadata.database_name": db}} for db in database_names]
             tag_conditions = [{"match": {f"metadata.tag_{encode_tag(tag)}": "1"}} for tag in tag_names]
-        elif self.provider in ["chroma", "pgvector", "oracle", "sqlserver"]:
+        elif self.provider in ["chroma", "pgvector", "oracle", "sqlserver", "qdrant"]:
             db_conditions = [{"database_name": {"$eq": db}} for db in database_names]
             tag_conditions = [{f"tag_{encode_tag(tag)}": {"$eq": "1"}} for tag in tag_names]
         else:
@@ -483,7 +491,7 @@ class UniformVectorStore:
             return {"terms": {
                 "metadata.view_name.keyword": view_names
             }}
-        elif self.provider in ["chroma", "pgvector", "oracle", "sqlserver"]:
+        elif self.provider in ["chroma", "pgvector", "oracle", "sqlserver", "qdrant"]:
             return {"view_name": {"$in": view_names}}
         else:
             return None
@@ -493,7 +501,7 @@ class UniformVectorStore:
                              filter_logic='OR'):
         if self.provider == "opensearch":
             clauses = [{"terms": {"metadata.view_id": view_ids}}]
-        elif self.provider in ['chroma', 'pgvector', 'oracle', 'sqlserver']:
+        elif self.provider in ['chroma', 'pgvector', 'oracle', 'sqlserver', 'qdrant']:
             clauses = [{"view_id": {"$in": view_ids}}]
         else:
             return None
