@@ -10,12 +10,14 @@
 """
 
 import logging
+from functools import partial
 from pathlib import Path
 import yaml
 from jsonschema import validate, ValidationError
-import json
 
 from api.mcp.spaces import load_spaces
+from utils.status import Status, add_status
+from utils.utils import get_agents_custom_dir, get_agents_spaces_dir
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +46,7 @@ def _apply_space_scope(data, spaces, source_name):
     if space_name not in spaces:
         logger.error(
             f"Validation error in {source_name}: unknown AI Space '{space_name}'. "
-            f"Add api/agents/spaces/{space_name}.yaml"
+            f"Add {get_agents_spaces_dir()}/{space_name}.yaml"
         )
         return False
 
@@ -57,13 +59,15 @@ def _apply_space_scope(data, spaces, source_name):
     )
     return True
 
-def load_and_validate_agents() -> list:
+def load_and_validate_agents(report=None):
     """
     Reads YAML files from the custom agents directory, validates them against
     the schema (including slug format), and returns a list of parsed objects.
     """
+    _report = partial(add_status, report)
+
     # Define paths
-    agents_dir = Path("api/agents/custom")
+    agents_dir = Path(get_agents_custom_dir())
     schema_path = Path("utils/yaml/agent_schema.yaml")
 
     parsed_agents = []
@@ -71,38 +75,51 @@ def load_and_validate_agents() -> list:
 
     # 1. Load the schema only once
     if not schema_path.exists():
-        logger.error(f"Schema file not found at: {schema_path}")
+        err = f"schema file not found: {schema_path}"
+        logger.error(err)
+        _report("Agent schema", Status.ERROR)
         return parsed_agents
 
     try:
         with open(schema_path, 'r', encoding='utf-8') as f:
             schema = yaml.safe_load(f)
     except Exception as e:
-        logger.error(f"Critical error reading schema: {e}")
+        err = f"cannot read schema: {e}"
+        logger.error(err)
+        _report("Agent schema", Status.ERROR)
         return parsed_agents
 
     # 2. Check if the agents directory exists
     if not agents_dir.exists() or not agents_dir.is_dir():
-        logger.error(f"Directory {agents_dir} does not exist.")
+        err = f"agents directory does not exist: {agents_dir}"
+        logger.error(err)
+        _report(str(agents_dir), Status.ERROR)
         return parsed_agents
 
     # 3. Find all .yaml and .yml files
-    yaml_files = list(agents_dir.glob("*.yaml")) + list(agents_dir.glob("*.yml"))
+    yaml_files = sorted(
+        list(agents_dir.glob("*.yaml")) + list(agents_dir.glob("*.yml")),
+        key=lambda p: p.name.lower(),
+    )
 
     if not yaml_files:
-        logger.info(f"No YAML files found in the agents {agents_dir} directory.")
+        logger.info(f"No YAML files found in the agents directory: {agents_dir}")
         return parsed_agents
 
     spaces = None
 
     # 4. Process each file
     for file_path in yaml_files:
+        file_name = file_path.name
+
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = yaml.safe_load(f)
 
             if data is None:
-                logger.warning(f"Skipping {file_path.name}: File is empty.")
+                msg = "file is empty"
+                logger.warning(f"{file_name}: {msg}")
+                _report(file_name, Status.WARNING)
                 continue
 
             # Validate content against the schema (includes slug pattern check)
@@ -111,30 +128,46 @@ def load_and_validate_agents() -> list:
             # Extra Logic: Ensure 'id' is globally unique across all files
             agent_id = data.get("id")
             if agent_id in seen_ids:
-                logger.error(f"Validation error in {file_path.name}: Duplicate 'id' slug '{agent_id}' already exists.")
+                err = f"duplicate id '{agent_id}'"
+                logger.error(f"Validation error in {file_name}: {err}")
+                _report(file_name, Status.ERROR)
                 continue
 
             settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
-            if str(settings.get("space") or "").strip():
+            space_name = str(settings.get("space") or "").strip()
+            if space_name:
                 if spaces is None:
                     spaces = load_spaces()
-                if not _apply_space_scope(data, spaces, file_path.name):
+                if not _apply_space_scope(data, spaces, file_name):
+                    target_name = data.get("name") or agent_id or file_name
+                    _report(target_name, Status.ERROR)
                     continue
 
             seen_ids.add(agent_id)
             parsed_agents.append(data)
-            logger.info(f"Successfully loaded and validated: '{agent_id}' ({file_path.name})")
+            _report(data.get("name") or agent_id, Status.OK)
+            logger.info(f"Successfully loaded and validated: '{agent_id}' ({file_name})")
 
         except yaml.YAMLError as e:
-            logger.error(f"YAML syntax error in {file_path.name}: {e}")
+            err = f"YAML syntax error: {e}"
+            logger.error(f"{file_name}: {err}")
+            _report(file_name, Status.ERROR)
+
         except ValidationError as e:
-            # Check if the error is specifically related to the slug pattern
-            if e.validator == "pattern" and "id" in e.json_path:
-                logger.error(
-                    f"Validation error in {file_path.name}: The 'id' must be a valid slug (lowercase, numbers, and hyphens only).")
+            json_path = getattr(e, "json_path", "")
+            if e.validator == "pattern" and "id" in json_path:
+                err = "invalid id slug"
+            elif e.validator == "required":
+                err = e.message
             else:
-                logger.error(f"Validation error in {file_path.name} (field '{e.json_path}'): {e.message}")
+                err = f"invalid field '{json_path}': {e.message}"
+
+            logger.error(f"Validation error in {file_name}: {err}")
+            _report(file_name, Status.ERROR)
+
         except Exception as e:
-            logger.error(f"Unexpected error processing {file_path.name}: {e}")
+            err = f"unexpected error: {e}"
+            logger.error(f"{file_name}: {err}")
+            _report(file_name, Status.ERROR)
 
     return parsed_agents

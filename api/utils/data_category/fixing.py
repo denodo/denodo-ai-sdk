@@ -136,14 +136,23 @@ class Conversation:
         return text, tokens
 
 def make_fixer_conversation(
-    question, query, vector_search_tables,
+    question, vector_search_tables,
     query_explanation='',
     sample_data=None,
     vector_search_sample_data_k=3,
     can_use_llm=False,
     seed=None,
+    filtered_tables=None,
 ):
-    schema = _schema_text(query, vector_search_tables, sample_data, vector_search_sample_data_k)
+    # Same views query_to_vql received. Matching view names against the failed
+    # VQL drops views the fixer still needs, and a short name can match inside
+    # a longer one.
+    schema = format_schema_text(
+        vector_search_tables,
+        filtered_tables or [],
+        sample_data,
+        examples_per_table=vector_search_sample_data_k,
+    )
     system = QUERY_FIXER_SYSTEM_PROMPT.format(
         vql_restrictions=build_full_vql_restrictions(can_use_llm),
         schema=schema,

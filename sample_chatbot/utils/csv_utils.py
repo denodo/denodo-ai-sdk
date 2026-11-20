@@ -13,18 +13,12 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from utils import langfuse
-from utils.utils import custom_tag_parser, calculate_tokens
+from utils.utils import custom_tag_parser, calculate_tokens, get_chatbot_data_dir
 from sample_chatbot.engine.prompts import GENERATE_CSV_DESCRIPTION
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SAMPLE_CHATBOT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.getenv("AI_SDK_DATA_DIR", ".")
-
-if DATA_DIR != ".":
-    UPLOADS_PATH = os.path.abspath(os.path.join(DATA_DIR, "uploads"))
-else:
-    UPLOADS_PATH = os.path.join(REPO_ROOT, "uploads")
-
+UPLOADS_PATH = os.path.abspath(os.path.join(get_chatbot_data_dir(), "uploads"))
 ALLOWED_CSV_ROOTS = (
     UPLOADS_PATH,
     os.path.join(SAMPLE_CHATBOT_ROOT, "sample_data", "unstructured"),

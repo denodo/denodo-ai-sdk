@@ -25,10 +25,16 @@ from uuid import uuid4
 from datetime import datetime
 from functools import wraps
 from langchain_core.documents.base import Document
+from rich.console import Console
 from utils.schema_catalog import SchemaCatalog, SchemaTable
+
+console = Console()
 
 # ContextVar to store the current endpoint name
 current_endpoint: contextvars.ContextVar[str] = contextvars.ContextVar('current_endpoint', default=None)
+
+# Module-level cache to ensure validate_data_dir() runs migration only once
+_validated_data_dir = None
 
 def is_in_venv():
     """
@@ -37,27 +43,232 @@ def is_in_venv():
     """
     return sys.prefix != sys.base_prefix
 
+def _migrate_legacy_data(data_dir_abs):
+    """
+    Automatically migrate legacy data directories and files from the repository
+    root or flat data directory to the new data directory structure on startup.
+
+    This handles:
+    - Transition from the old default (.) to the new default (data/)
+    - Transition from a flat AI_SDK_DATA_DIR layout to the subdirectory structure
+      (api/, sample_chatbot/, windows_service/)
+    - Migration of api/agents/ to data/api/agents/
+
+    When a destination directory already exists, its contents are merged so
+    pre-populated files shipped in the repository do not block user data migration.
+
+    Uses print() instead of logging because this runs in the parent process (run.py)
+    before any logging handlers are configured.
+    """
+    import shutil
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def _rel_path(path):
+        try:
+            return os.path.relpath(path, repo_root).replace("\\", "/")
+        except ValueError:
+            return path.replace("\\", "/")
+
+    def _merge_move_dir(src_dir, dst_dir):
+        """
+        Move src_dir to dst_dir, or recursively merge children when dst_dir
+        already exists. Leaves conflicting files in place with a warning.
+        Returns True if at least one item was moved.
+        """
+        if not os.path.exists(src_dir):
+            return False
+        if os.path.realpath(src_dir) == os.path.realpath(dst_dir):
+            return False
+
+        if not os.path.exists(dst_dir):
+            os.makedirs(os.path.dirname(dst_dir), exist_ok=True)
+            shutil.move(src_dir, dst_dir)
+            return True
+
+        moved_any = False
+        for child in os.listdir(src_dir):
+            src_child = os.path.join(src_dir, child)
+            dst_child = os.path.join(dst_dir, child)
+
+            if not os.path.exists(dst_child):
+                shutil.move(src_child, dst_child)
+                moved_any = True
+            elif os.path.isdir(src_child) and os.path.isdir(dst_child):
+                if _merge_move_dir(src_child, dst_child):
+                    moved_any = True
+            else:
+                console.print(
+                    f"[yellow]WARNING:[/yellow] Skipping migration of '{_rel_path(src_child)}' "
+                    f"because '{_rel_path(dst_child)}' already exists."
+                )
+
+        try:
+            if not os.listdir(src_dir):
+                os.rmdir(src_dir)
+        except OSError:
+            pass
+
+        return moved_any
+
+    # Directories that lived in the repository root or flat inside AI_SDK_DATA_DIR
+    legacy_dirs = [
+        ("skills", "sample_chatbot/skills"),
+        ("reports", "sample_chatbot/reports"),
+        ("cache", "api/cache"),
+        ("uploads", "sample_chatbot/uploads"),
+        ("conversations_history", "sample_chatbot/conversations_history"),
+        ("unstructured_chatbot_kb", "sample_chatbot/unstructured_chatbot_kb"),
+        ("ai_sdk_vector_store", "api/ai_sdk_vector_store"),
+        ("ai_sdk_sample_data", "api/ai_sdk_sample_data"),
+        ("embeddings", "api/cache/embeddings"),
+    ]
+
+    migrated = False
+    for base_dir in (repo_root, data_dir_abs):
+        for item, target_subdir in legacy_dirs:
+            src = os.path.join(base_dir, item)
+            dst = os.path.join(data_dir_abs, target_subdir)
+            if os.path.exists(src):
+                try:
+                    if _merge_move_dir(src, dst):
+                        console.print(f"[green]INFO:[/green] Migrated legacy '{_rel_path(src)}/' to '{_rel_path(dst)}/'")
+                        migrated = True
+                except Exception as e:
+                    console.print(f"[yellow]WARNING:[/yellow] Failed to migrate '{_rel_path(src)}/' to data directory: {e}")
+
+        # Migrate logs/ from root or flat AI_SDK_DATA_DIR by filename pattern (logs are process-specific)
+        legacy_logs = os.path.join(base_dir, "logs")
+        if os.path.isdir(legacy_logs):
+            try:
+                log_files = [f for f in os.listdir(legacy_logs)]
+                migrated_logs = []
+                for log_file in log_files:
+                    src_file = os.path.join(legacy_logs, log_file)
+                    if log_file == "runtime_config.json":
+                        dst_dir = data_dir_abs
+                    elif log_file.startswith("service"):
+                        dst_dir = os.path.join(data_dir_abs, "windows_service", "logs")
+                    elif log_file.startswith("api"):
+                        dst_dir = os.path.join(data_dir_abs, "api", "logs")
+                    elif log_file.startswith("sample_chatbot"):
+                        dst_dir = os.path.join(data_dir_abs, "sample_chatbot", "logs")
+                    else:
+                        dst_dir = os.path.join(data_dir_abs, "api", "logs")
+                    try:
+                        os.makedirs(dst_dir, exist_ok=True)
+                        dst_file = os.path.join(dst_dir, log_file)
+                        if os.path.exists(dst_file):
+                            console.print(
+                                f"[yellow]WARNING:[/yellow] Skipping migration of '{_rel_path(src_file)}' "
+                                f"because '{_rel_path(dst_file)}' already exists."
+                            )
+                            continue
+                        shutil.move(src_file, dst_file)
+                        migrated_logs.append(log_file)
+                        migrated = True
+                    except Exception as e:
+                        console.print(f"[yellow]WARNING:[/yellow] Failed to migrate log '{log_file}': {e}")
+                if migrated_logs:
+                    console.print(f"[green]INFO:[/green] Migrated {len(migrated_logs)} file(s) from '{_rel_path(legacy_logs)}/' to data/ subdirectories")
+                # Remove empty legacy logs directory if possible
+                try:
+                    if not os.listdir(legacy_logs):
+                        os.rmdir(legacy_logs)
+                except OSError:
+                    pass
+            except OSError:
+                pass
+
+    # Migrate api/agents/ (source tree) and flat <AI_SDK_DATA_DIR>/agents/ to data/api/agents/
+    agents_dst = os.path.join(data_dir_abs, "api", "agents")
+    for agents_src in (os.path.join(repo_root, "api", "agents"), os.path.join(data_dir_abs, "agents")):
+        if os.path.exists(agents_src):
+            try:
+                if _merge_move_dir(agents_src, agents_dst):
+                    console.print(f"[green]INFO:[/green] Migrated legacy '{_rel_path(agents_src)}/' to '{_rel_path(agents_dst)}/'")
+                    migrated = True
+            except Exception as e:
+                console.print(f"[yellow]WARNING:[/yellow] Failed to migrate '{_rel_path(agents_src)}/' to data directory: {e}")
+
+    if migrated:
+        console.print("[green]INFO:[/green] Legacy data migration completed. Consider removing any remaining empty directories from the root.")
+
+def get_api_data_dir():
+    """Return the API-specific data subdirectory (<AI_SDK_DATA_DIR>/api/)."""
+    data_dir = os.environ.get("AI_SDK_DATA_DIR", "data/")
+    return os.path.join(data_dir, "api")
+
+def get_chatbot_data_dir():
+    """Return the chatbot-specific data subdirectory (<AI_SDK_DATA_DIR>/sample_chatbot/)."""
+    data_dir = os.environ.get("AI_SDK_DATA_DIR", "data/")
+    return os.path.join(data_dir, "sample_chatbot")
+
+def get_agents_dir():
+    """
+    Return the agents directory path.
+
+    By default, agents live under <AI_SDK_DATA_DIR>/api/agents/ so that container
+    deployments can manage all agent configurations via a single persistent
+    volume (data/).  Falls back to api/agents/ for backward compatibility
+    when the data directory has not been initialized yet.
+    """
+    agents_dir = os.path.join(get_api_data_dir(), "agents")
+    if os.path.isdir(agents_dir):
+        return agents_dir
+
+    # Fallback: legacy location inside the repository source tree
+    return "api/agents"
+
+def get_agents_custom_dir():
+    """Return the path to the custom agents directory (agents/custom/)."""
+    return os.path.join(get_agents_dir(), "custom")
+
+def get_agents_spaces_dir():
+    """Return the path to the AI Spaces directory (agents/spaces/)."""
+    return os.path.join(get_agents_dir(), "spaces")
+
+def get_agents_icons_dir():
+    """Return the path to the agents icons directory (agents/custom/icons/)."""
+    return os.path.join(get_agents_custom_dir(), "icons")
+
 def validate_data_dir():
     """
     Validates and returns the centralized data directory (AI_SDK_DATA_DIR).
+    Defaults to 'data/' if not set. The root directory (.) is not allowed.
     If the directory doesn't exist, it attempts to create it.
-    If it fails or lacks write permissions, it falls back to '.' (current directory).
+    On failure, raises an error (no fallback to root directory).
+    Automatically migrates legacy data from the repository root to data/ on first startup.
     """
-    data_dir = os.getenv("AI_SDK_DATA_DIR", ".")
-    if data_dir != ".":
-        data_dir = os.path.abspath(data_dir)
-        if not os.path.exists(data_dir):
-            try:
-                os.makedirs(data_dir, exist_ok=True)
-            except Exception as e:
-                logging.warning(f"Could not create AI_SDK_DATA_DIR '{data_dir}': {e}. Falling back to '.'")
-                data_dir = "."
+    global _validated_data_dir
+    if _validated_data_dir is not None:
+        return _validated_data_dir
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.getenv("AI_SDK_DATA_DIR", "data/")
+    data_dir = os.path.abspath(data_dir)
 
-        if data_dir != "." and not os.access(data_dir, os.W_OK):
-            logging.warning(f"AI_SDK_DATA_DIR '{data_dir}' is not writable. Falling back to '.'")
-            data_dir = "."
+    # Disallow root directory (.) as it complicates container deployments
+    if os.path.realpath(data_dir) == os.path.realpath(repo_root):
+        raise ValueError(
+            "AI_SDK_DATA_DIR cannot be set to '.' (root directory). "
+            "Please use a subdirectory such as 'data/' to keep generated files organized. "
+            "Example: AI_SDK_DATA_DIR=data/"
+        )
+
+    if not os.path.exists(data_dir):
+        try:
+            os.makedirs(data_dir, exist_ok=True)
+        except Exception as e:
+            raise RuntimeError(f"Could not create AI_SDK_DATA_DIR '{data_dir}': {e}") from e
+
+    if not os.access(data_dir, os.W_OK):
+        raise PermissionError(f"AI_SDK_DATA_DIR '{data_dir}' is not writable.")
+
+    # Migrate any legacy data from the repository root to the new data directory
+    _migrate_legacy_data(data_dir)
 
     os.environ["AI_SDK_DATA_DIR"] = data_dir
+    _validated_data_dir = data_dir
     return data_dir
 
 def safe_str(value, max_chars=None):

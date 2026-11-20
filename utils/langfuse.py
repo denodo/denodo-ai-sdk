@@ -6,7 +6,7 @@ import threading
 from uuid import uuid4
 from datetime import datetime
 from utils.version import AI_SDK_VERSION
-from utils.logging_utils import username_var
+from utils.logging_utils import transaction_id_var, username_var
 
 _lock = threading.Lock()
 _configured = False
@@ -140,6 +140,9 @@ def build_config(model_id=None, session_id=None, run_name=None, user_id=None, ex
         metadata["model_id"] = model_id
     if extra_metadata:
         metadata.update(extra_metadata)
+    # Kept after extra_metadata so the request id wins over a caller-supplied one.
+    # Outside a request this is the context default, "system".
+    metadata["transaction_id"] = transaction_id_var.get()
 
     cleaned = {}
     for key, value in metadata.items():
@@ -189,9 +192,10 @@ class trace_context:
     Scope a group of LLM calls to a single Langfuse trace.
 
     Gives you the LangChain config to pass to invoke/ainvoke, and keeps the
-    trace attributes (user, session, trace name, tags) attached to every step
-    recorded inside the block. Use this instead of build_config for
-    asynchronous chains, where the config alone only labels the first step.
+    trace attributes (user, session, trace name, tags, and the request
+    transaction id) attached to every step recorded inside the block. Use this
+    instead of build_config for asynchronous chains, where the config alone
+    only labels the first step.
     """
     def __init__(self, run_name=None, model_id=None, session_id=None, user_id=None, extra_metadata=None):
         self.run_name = run_name or _default_run_name(depth=2)

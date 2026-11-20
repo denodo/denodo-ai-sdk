@@ -18,7 +18,7 @@ returns 0.
 Use:
 
 <vql>
-SELECT DIV(CAST(4 AS FLOAT), CAST(100 AS FLOAT))
+SELECT DIV(CAST('float', 4), CAST('float', 100))
 </vql>
 
 to get 0.04.
@@ -43,10 +43,14 @@ FROM "school"."students"
 
 Example 3: Using CASE but missing zero check
 
-CASE
-WHEN "orders"."total_items" IS NOT NULL THEN "orders"."total_cost" / "orders"."total_items"
-ELSE NULL
-END
+<vql>
+SELECT
+    CASE
+    WHEN "orders"."total_items" IS NOT NULL THEN "orders"."total_cost" / "orders"."total_items"
+    ELSE NULL
+    END AS "cost_per_item"
+FROM "company"."orders"
+</vql>
 
 All above examples will throw an error if the divisor (units_sold, total_exams, total_items) is zero.
 
@@ -76,8 +80,12 @@ FROM "school"."students"
 
 Example 3: Complete CASE with both NULL and zero checks
 
-CASE
-WHEN "orders"."total_items" IS NOT NULL AND "orders"."total_items" != 0 THEN "orders"."total_cost" / "orders"."total_items"
-ELSE NULL
-END
+<vql>
+SELECT
+    CASE
+    WHEN "orders"."total_items" IS NOT NULL AND "orders"."total_items" != 0 THEN "orders"."total_cost" / "orders"."total_items"
+    ELSE NULL
+    END AS "cost_per_item"
+FROM "company"."orders"
+</vql>
 """

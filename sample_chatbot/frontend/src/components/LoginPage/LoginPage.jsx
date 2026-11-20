@@ -17,33 +17,11 @@ const LoginPage = ({ onSignIn, renderLogo, showBrandAsk = true, isCheckingLogo =
     e.preventDefault();
     setIsLoading(true);
 
-    const savedUserDetails =
-      localStorage.getItem(`${username}_user_details`) || "";
-    let savedCustomInstructions = null;
-    const ciDictStr = localStorage.getItem(
-      `${username}_custom_instructions_dict`,
-    );
-    if (ciDictStr) {
-      try {
-        savedCustomInstructions = JSON.parse(ciDictStr);
-      } catch (e) {
-        savedCustomInstructions = null;
-      }
-    }
-    if (savedCustomInstructions == null) {
-      const legacy = localStorage.getItem(`${username}_custom_instructions`);
-      if (legacy) {
-        savedCustomInstructions = { global: legacy };
-      }
-    }
-
     try {
       await onSignIn({
         username,
         password,
         authType: "Basic",
-        user_details: savedUserDetails,
-        custom_instructions: savedCustomInstructions,
       });
       localStorage.setItem("current_user", username);
     } catch (error) {

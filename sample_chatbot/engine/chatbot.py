@@ -11,11 +11,13 @@ from langchain_core.messages import HumanMessage
 from langchain_core.messages.ai import AIMessageChunk
 from langchain_core.messages.tool import ToolMessage
 
+from sample_chatbot.engine.context_window import prepare_model_messages
 from sample_chatbot.engine.middleware import (
+    ContextWindowMiddleware,
     ToolDurationMiddleware,
-    TrimConversationHistoryMiddleware,
 )
 from sample_chatbot.engine.context import UserContext
+from sample_chatbot.engine.memory import render_user_memories_content, strip_memory_prompt
 from sample_chatbot.engine.skills import build_skills_prompt_section
 from sample_chatbot.engine.tools import (
     generate_vql,
@@ -30,6 +32,10 @@ from sample_chatbot.engine.tools import (
     edit_skill_reference,
     create_skill,
     create_skill_reference,
+    read_memory,
+    list_memories,
+    write_memory,
+    delete_memory,
 )
 from sample_chatbot.utils.helpers import setup_user_details, format_user_instructions_for_prompt, format_chat_log
 from utils.langfuse import build_config
@@ -57,7 +63,7 @@ class ChatbotEngine:
         password,
         vector_store_provider,
         vector_store,
-        message_history_limit=5,
+        context_window=128000,
         user_details="",
         ai_sdk_custom_instructions="",
         chatbot_custom_instructions="",
@@ -75,13 +81,16 @@ class ChatbotEngine:
         active_csv_sources=None,
         kb_collections=None,
         timeout=1200,
+        memory_enabled=True,
+        share_general_memory=True,
     ):
         self.llm = llm.llm
+        self.max_output_tokens = llm.max_tokens
         self.llm_model = f"{llm.provider_name}.{llm.model_name}"
         self.vector_store_provider = vector_store_provider
         self.vector_store = vector_store
         self.chat_history = []
-        self.message_history_limit = message_history_limit
+        self.context_window = context_window
         self.api_host = api_host
         self.username = username
         self.password = password
@@ -99,6 +108,8 @@ class ChatbotEngine:
         self.kb_description = kb_description
         self.active_csv_sources = active_csv_sources or []
         self.kb_collections = kb_collections or {}
+        self.memory_enabled = bool(memory_enabled)
+        self.share_general_memory = bool(share_general_memory)
         self.ai_sdk_custom_instructions = (ai_sdk_custom_instructions or "").strip()
         self.timeout = timeout
         self.user_context = UserContext(
@@ -116,6 +127,8 @@ class ChatbotEngine:
             kb_collections=self.kb_collections,
             can_manage_skills=self.can_manage_skills,
             agent_id=self.agent_id,
+            memory_enabled=self.memory_enabled,
+            share_general_memory=self.share_general_memory,
             allowed_system_skills=self.allowed_system_skills,
             disabled_skills=self.disabled_skills,
         )
@@ -127,6 +140,8 @@ class ChatbotEngine:
             self.deepquery_system_prompt_chunk = (
                 "- You also have access to the deep_query tool, which gives you access to the DeepQuery agent. DeepQuery is a powerful, autonomous analyst agent, that is capable of in-depth reasoning\n"
                 "and generating complete HTML reports regarding an analysis question.\n"
+                "The deep_query tool is ASYNCHRONOUS: it starts a background job and returns immediately with a confirmation, never with the analysis results. Its `languages` argument accepts several languages (for example ['English', 'French']) and queues one report per language. If the user does not specify any language, use the language of the conversation.\n"
+                "After calling it, tell the user the job was started and that they can follow its progress and open the report from the DeepQuery Reports Manager in the header. Never say the analysis or the report is finished, and never invent findings.\n"
                 "You can only execute the DeepQuery tool if explicitly requested by the user.\n"
                 "Before proposing or running any DeepQuery analysis, you MUST read the 'deepquery' skill with read_skill(\"deepquery\") and follow its process. If the skill is not available, you cannot use the DeepQuery tool."
             )
@@ -164,9 +179,20 @@ class ChatbotEngine:
             self.extra_tools_guidance = "There are no extra tools available."
 
         skills_guidance = build_skills_prompt_section(self.skills, can_manage_skills=self.can_manage_skills)
+        self.skills_prompt_section = skills_guidance
+
+        # The memory index is fixed here, when the engine is built. A memory
+        # written during a conversation only appears once the engine is
+        # rebuilt (new chat, agent switch, or settings change).
+        memories_content = ""
+        if self.memory_enabled:
+            memories_content = render_user_memories_content(
+                self.username, self.agent_id, self.share_general_memory
+            )
 
         self.system_prompt = self.system_prompt.format(
             user_details=self.user_details,
+            memories=memories_content,
             custom_instructions=format_user_instructions_for_prompt(chatbot_custom_instructions),
             tool_count_string=self.tool_count_string,
             skills_guidance=skills_guidance,
@@ -175,6 +201,8 @@ class ChatbotEngine:
             graph_guidance_chunk=graph_guidance_chunk,
             extra_tools_guidance=f"<extra_tools_guidance>\n{self.extra_tools_guidance}\n</extra_tools_guidance>",
         )
+        if not self.memory_enabled:
+            self.system_prompt = strip_memory_prompt(self.system_prompt)
 
         # Build agent tools set dynamically
         self.tools = [generate_vql, execute_vql, generate_graph, metadata_search]
@@ -193,20 +221,29 @@ class ChatbotEngine:
         if self.can_manage_skills:
             self.tools.extend([edit_skill_reference, create_skill_reference])
 
+        # Memory is per Denodo user. This agent forms and uses it only when
+        # memory is turned on for the agent.
+        if self.memory_enabled:
+            self.tools.extend([read_memory, list_memories, write_memory, delete_memory])
+
         # Initialize the persistent database-backed checkpointer
         self.checkpointer = UniformCheckpointer.get_saver()
+
+        middleware = [
+            ContextWindowMiddleware(
+                context_window=self.context_window,
+                max_output_tokens=self.max_output_tokens,
+                skills_text=self.skills_prompt_section,
+            ),
+        ]
+        middleware.append(ToolDurationMiddleware())
 
         # Create agent once per engine
         self.agent = create_agent(
             model=self.llm,
             tools=self.tools,
             context_schema=UserContext,
-            middleware=[
-                TrimConversationHistoryMiddleware(
-                    conversation_history_limit=self.message_history_limit,
-                ),
-                ToolDurationMiddleware(),
-            ],
+            middleware=middleware,
             system_prompt=self.system_prompt,
             checkpointer=self.checkpointer,
         )
@@ -305,6 +342,27 @@ class ChatbotEngine:
 
         return aggregated_answer, related_questions, related_questions_deepquery
 
+    def context_usage(self, thread_id=None):
+        """Token breakdown of the next model call for this thread, after compaction and view deduplication."""
+        messages = []
+        if thread_id:
+            try:
+                snapshot = self.agent.get_state({"configurable": {"thread_id": thread_id}})
+                if snapshot and getattr(snapshot, "values", None):
+                    messages = snapshot.values.get("messages") or []
+            except Exception:
+                logging.debug("Could not read conversation state for context usage", exc_info=True)
+
+        _, usage = prepare_model_messages(
+            messages=messages,
+            system_text=self.system_prompt,
+            tools=self.tools,
+            skills_text=self.skills_prompt_section,
+            context_window=self.context_window,
+            max_output_tokens=self.max_output_tokens,
+        )
+        return usage
+
     def process_query(self, query, tool, vdp_database_names=None, vdp_tag_names=None, allow_external_associations=False, thread_id=None, cancel_event=None):
         """
         Process a user query and yield streaming response chunks.
@@ -394,9 +452,12 @@ class ChatbotEngine:
                 kb_collections=self.kb_collections,
                 can_manage_skills=self.can_manage_skills,
                 agent_id=self.agent_id,
+                memory_enabled=self.memory_enabled,
+                share_general_memory=self.share_general_memory,
                 allowed_system_skills=self.allowed_system_skills,
                 disabled_skills=self.disabled_skills,
                 cancel_event=cancel_event,
+                thread_id=thread_id,
             )
 
             human_msg = HumanMessage(content=query, id=uuid_str)
@@ -427,7 +488,8 @@ class ChatbotEngine:
                 "answer": aggregated_answer,
                 "chatbot_llm": self.llm_model,
                 "related_questions": related_questions,
-                "related_questions_deepquery": related_questions_deepquery
+                "related_questions_deepquery": related_questions_deepquery,
+                "context_usage": self.context_usage(thread_id),
             }
         except AISDKRequestCancelled as e:
             logging.info(f"Query cancelled by the user: {e}")

@@ -20,6 +20,7 @@ import aiohttp
 import asyncio
 import functools
 import traceback
+from utils.logging_utils import run_once
 
 from base64 import b64decode
 from time import time, perf_counter
@@ -238,7 +239,9 @@ def check_env_variables(required_vars):
             error_msg += f"- {var_name}\n"
         error_msg += "Please set these variables before starting the application."
 
-        logging.error(error_msg)
+        # Every worker exits, but only one logs the error
+        if run_once("missing_env_variables"):
+            logging.error(error_msg)
         sys.exit(1)
 
 def test_data_catalog_connection(data_catalog_url, verify_ssl):
@@ -1106,8 +1109,26 @@ def filter_restricted_view_data(view_json, security_info):
 
     return filtered_json
 
-def parse_view_document(doc, filter_associations=False, valid_view_ids=None, security_info=None):
-    view_json = json.loads(doc.metadata['view_json'])
+def parse_view_document(doc, filter_associations=False, valid_view_ids=None, security_info=None, vector_store=None):
+    metadata = doc.metadata or {}
+    view_id = metadata.get('view_id', '')
+    view_name = metadata.get('view_name', '')
+    view_json = metadata.get('view_json')
+
+    # When a view is chunked, only its first chunk stores 'view_json', so if
+    # the retrieved chunk does not carry it, fetch it from the first chunk
+    if not view_json and vector_store is not None and view_id:
+        view_docs = vector_store.get_views([view_id])
+        if view_docs:
+            view_json = view_docs[0].metadata.get('view_json')
+
+    if not view_json:
+        raise ValueError(
+            f"Could not find 'view_json' for view '{view_name}' (view_id: {view_id}). "
+            "The metadata of this view may be corrupted or partially synchronized. Please synchronize the metadata again."
+        )
+
+    view_json = json.loads(view_json)
     view_text = doc.page_content
     warnings = []
 
@@ -1129,8 +1150,8 @@ def parse_view_document(doc, filter_associations=False, valid_view_ids=None, sec
 
     return {
         "view_text": view_text,
-        "view_name": doc.metadata['view_name'],
+        "view_name": view_name,
         "view_json": view_json,
-        "view_id": doc.metadata.get('view_id', ''),
+        "view_id": view_id,
         "warnings": warnings
     }

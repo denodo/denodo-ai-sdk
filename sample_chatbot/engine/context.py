@@ -21,9 +21,12 @@ class UserContext:
     kb_collections: dict = field(default_factory=dict)  # name -> description for the user's active collections
     can_manage_skills: bool = False  # Whether the user may create/edit skills
     agent_id: str = "global"  # Agent this engine serves
+    memory_enabled: bool = True  # Whether this agent forms and uses memories for this user
+    share_general_memory: bool = True  # Whether a specialized agent may read the general agent's user/user-metadata memories
     allowed_system_skills: list | None = None  # Agent-declared skills (None = all system skills apply)
     disabled_skills: object = None  # Skills force-deactivated by feature flags (e.g. 'deepquery')
     cancel_event: object = None  # threading.Event set when the user cancels the query; aborts in-flight AI SDK requests
+    thread_id: str | None = None  # Conversation thread of the current request (links background DeepQuery reports to it)
 
 # Tool definitions for frontend configuration
 TOOL_DEFINITIONS = {
@@ -98,5 +101,29 @@ TOOL_DEFINITIONS = {
         "aliases": ["@create_skill_reference"],
         "optional": True,
         "tool_public_text_key": "skill_name",
+    },
+    "read_memory": {
+        "pretty_name": "Read Memory",
+        "aliases": ["@read_memory", "@memory"],
+        "optional": True,
+        "tool_public_text_key": "name",
+    },
+    "list_memories": {
+        "pretty_name": "List Memories",
+        "aliases": ["@list_memories"],
+        "optional": True,
+        "tool_public_text_key": "memory_type",
+    },
+    "write_memory": {
+        "pretty_name": "Write Memory",
+        "aliases": ["@write_memory"],
+        "optional": True,
+        "tool_public_text_key": "description",
+    },
+    "delete_memory": {
+        "pretty_name": "Delete Memory",
+        "aliases": ["@delete_memory"],
+        "optional": True,
+        "tool_public_text_key": "name",
     },
 }

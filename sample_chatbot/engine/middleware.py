@@ -2,77 +2,60 @@
 Contains middleware classes for request logging and conversation history management.
 """
 
-import logging
 import time
 
-from dataclasses import replace
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import ToolMessage
 
-class TrimConversationHistoryMiddleware(AgentMiddleware):
+from sample_chatbot.engine.context_window import message_content_text, prepare_model_messages
+
+class ContextWindowMiddleware(AgentMiddleware):
     """
-    Middleware that trims conversation history to prevent context overflow.
+    Keeps the model request inside the configured context window.
 
-    Trims based on conversation blocks (HumanMessage -> AIMessage pairs)
-    rather than token count for more predictable behavior.
+    Repeated metadata_search view schemas are replaced with a short note, and
+    when the next call would leave no room for the reserved answer the oldest
+    complete question/answer pairs are dropped down to the compaction budget.
     """
 
-    name = "trim_history_middleware"
+    name = "context_window_middleware"
 
-    def __init__(self, conversation_history_limit: int = 5):
+    def __init__(self, context_window, max_output_tokens=0, skills_text=""):
         super().__init__()
-        self.conversation_history_limit = conversation_history_limit
+        self.context_window = context_window
+        self.max_output_tokens = max_output_tokens
+        self.skills_text = skills_text or ""
+        self.last_usage = None
 
-    def _trim_request(self, request):
-        messages = request.messages
+    def _prepare_request(self, request):
+        system_message = getattr(request, "system_message", None)
+        if system_message is not None:
+            system_text = message_content_text(system_message)
+        else:
+            system_text = getattr(request, "system_prompt", None) or ""
 
-        # Count in blocks of HumanMessage -> AIMessage (deleting any intermediate steps like tool calls)
-        blocks = []
-        current_block_start = None
+        prepared, usage = prepare_model_messages(
+            messages=request.messages,
+            system_text=system_text,
+            tools=request.tools or [],
+            skills_text=self.skills_text,
+            context_window=self.context_window,
+            max_output_tokens=self.max_output_tokens,
+            log=True,
+        )
+        self.last_usage = usage
 
-        for index, message in enumerate(messages):
-            if type(message).__name__ == "HumanMessage" or getattr(message, "type", "") in ["human", "user"]:
-                if current_block_start is not None:
-                    blocks.append((current_block_start, index - 1))
-                current_block_start = index
-
-        if current_block_start is not None:
-            blocks.append((current_block_start, len(messages) - 1))
-
-        block_count = len(blocks)
-
-        if block_count > self.conversation_history_limit:
-            logging.debug(f"Conversation history block limit reached: {block_count} > {self.conversation_history_limit}")
-            logging.debug("Current conversation history:")
-            for i, m in enumerate(messages):
-                logging.debug(f"  [{i}] {type(m).__name__}: {str(m.content).strip()[:100]}...")
-
-            blocks_to_remove = block_count - self.conversation_history_limit
-            first_block_start, _ = blocks[0]
-            _, last_removed_end = blocks[blocks_to_remove - 1]
-            cutoff_index = last_removed_end + 1
-
-            kept_messages = []
-            for index, message in enumerate(messages):
-                if index < first_block_start or index >= cutoff_index:
-                    kept_messages.append(message)
-
-            logging.info(f"Removing {blocks_to_remove} oldest conversation blocks (leaving exactly {self.conversation_history_limit})")
-
-            if hasattr(request, "override"):
-                return request.override(messages=kept_messages)
-            else:
-                return replace(request, messages=kept_messages)
-
+        if len(prepared) != len(request.messages) or any(
+            left is not right for left, right in zip(prepared, request.messages)
+        ):
+            return request.override(messages=prepared)
         return request
 
     def wrap_model_call(self, request, handler):
-        trimmed_request = self._trim_request(request)
-        return handler(trimmed_request)
+        return handler(self._prepare_request(request))
 
     async def awrap_model_call(self, request, handler):
-        trimmed_request = self._trim_request(request)
-        return await handler(trimmed_request)
+        return await handler(self._prepare_request(request))
 
 
 class ToolDurationMiddleware(AgentMiddleware):

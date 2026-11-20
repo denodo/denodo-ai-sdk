@@ -1,6 +1,6 @@
 .custom-light-tooltip {
   pointer-events: auto !important;
-  z-index: 1120 !important;
+  z-index: 9999 !important;
 }
 
 .custom-light-tooltip .tooltip-inner {
@@ -29,6 +29,14 @@
 .custom-light-tooltip.bs-tooltip-bottom .tooltip-arrow::before,
 .custom-light-tooltip.bs-tooltip-auto[data-popper-placement^=bottom] .tooltip-arrow::before {
   border-bottom-color: #ced4da !important;
+}
+
+.custom-light-tooltip.custom-tooltip-wide .tooltip-inner {
+  max-width: 420px !important;
+}
+
+.custom-light-tooltip.custom-tooltip-wide .custom-tooltip-scroll-content {
+  max-height: 260px;
 }
 
 .custom-tooltip-scroll-content {

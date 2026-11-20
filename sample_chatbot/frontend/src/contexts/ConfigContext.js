@@ -5,34 +5,43 @@ import { getNumberFormat, formatNumber } from '../utils/numberFormat';
 // Create the context
 const ConfigContext = createContext();
 
-// Returns the input method saved by the user in the User Profile modal, if any
-export const getSavedInputMethod = (username) => {
-  const user = username || localStorage.getItem('current_user');
-  const saved = user && localStorage.getItem(`${user}_input_method`);
-  return ['enter', 'ctrl_enter'].includes(saved) ? saved : null;
-};
+const emptyProfile = () => ({
+  user_details: '',
+  input_method: 'enter',
+  number_format: getNumberFormat(),
+});
 
 // Create a provider component
 export const ConfigProvider = ({ children }) => {
   const [config, setConfig] = useState({
     // No default values - we'll only use what the server provides
   });
+  // Profile is per user (details, input method, number format). It stays off
+  // `config`, which /api/config replaces with the agent settings.
+  const [profile, setProfile] = useState(emptyProfile);
   const [loading, setLoading] = useState(true);
 
   const updateConfig = (newParams) => {
     setConfig(prev => ({ ...prev, ...newParams }));
   };
 
+  const updateProfile = (newParams) => {
+    setProfile(prev => ({
+      ...prev,
+      ...newParams,
+      number_format: newParams.number_format || prev.number_format,
+    }));
+  };
+
+  const clearProfile = () => {
+    setProfile(emptyProfile());
+  };
+
   useEffect(() => {
     const fetchConfig = async () => {
       try {
         const response = await api.get("config");
-        const savedInputMethod = getSavedInputMethod();
-        setConfig({
-          ...response.data,
-          ...(savedInputMethod ? { input_method: savedInputMethod } : {}),
-          number_format: getNumberFormat(),
-        });
+        setConfig({ ...response.data });
       } catch (error) {
         console.error('Error fetching config:', error);
         // Keep empty config if fetch fails
@@ -45,7 +54,7 @@ export const ConfigProvider = ({ children }) => {
   }, []);
 
   return (
-    <ConfigContext.Provider value={{ config, loading, updateConfig }}>
+    <ConfigContext.Provider value={{ config, profile, loading, updateConfig, updateProfile, clearProfile }}>
       {children}
     </ConfigContext.Provider>
   );
@@ -62,8 +71,8 @@ export const useConfig = () => {
 
 // Returns a formatter that uses the number format chosen in the User Profile modal
 export const useNumberFormat = () => {
-  const { config } = useConfig();
-  return (value, decimals = 0) => formatNumber(value, config.number_format, decimals);
+  const { profile } = useConfig();
+  return (value, decimals = 0) => formatNumber(value, profile.number_format, decimals);
 };
 
 export default ConfigContext;

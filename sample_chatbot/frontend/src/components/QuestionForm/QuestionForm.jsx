@@ -3,9 +3,11 @@ import Navbar from "react-bootstrap/Navbar";
 import Button from "react-bootstrap/Button";
 import Dropdown from "react-bootstrap/Dropdown";
 import React, { useEffect, useState } from "react";
-import ResourcesFilterModal from "./ResourcesFilterModal";
+import ContextSelectionModal from "./ContextSelectionModal";
 import useQuestionForm from "../../hooks/useQuestionForm";
 import NotificationToast from "../NotificationToast/NotificationToast";
+import ContextUsageIndicator from "./ContextUsageIndicator";
+import ContextViewsRow from "./ContextViewsRow";
 import "./QuestionForm.css";
 
 const baseToolOptions = [
@@ -29,7 +31,9 @@ const QuestionForm = ({
   sdk,
   syncedResources,
   partialResources,
-  selectedChatbot
+  selectedChatbot,
+  contextUsage,
+  showContextUsage,
 }) => {
   const {
     currentQuestion,
@@ -47,6 +51,7 @@ const QuestionForm = ({
     handleCancelQuery,
     lastToolRequest,
     config,
+    profile,
   } = useQuestionForm(
     propCurrentQuestion,
     propSetCurrentQuestion,
@@ -107,7 +112,7 @@ const QuestionForm = ({
   const handleQuestionKeyDown = (e) => {
     if (e.key !== 'Enter') return;
 
-    if (config.input_method === 'ctrl_enter') {
+    if (profile.input_method === 'ctrl_enter') {
       // metaKey is checked because macOS reports Cmd as metaKey, never as ctrlKey,
       // so Cmd+Enter is accepted alongside Ctrl+Enter on Mac keyboards
       if (e.ctrlKey || e.metaKey) {
@@ -156,6 +161,20 @@ const QuestionForm = ({
     <Navbar className="justify-content-center w-100" data-bs-theme="dark" style={{ backgroundColor: "transparent" }}>
       <div className="w-100 d-flex justify-content-center">
         <div style={{ width: '80%', maxWidth: '800px' }}>
+          {isAuthenticated && (showContextUsage || (contextUsage?.views || []).length > 0) && (
+            <div className="context-composer-bar">
+              <ContextViewsRow
+                views={contextUsage?.views || []}
+                dataCatalogUrl={config.data_marketplace_url}
+              />
+              {showContextUsage && (
+                <ContextUsageIndicator
+                  usage={contextUsage}
+                  draftText={isAnyQueryRunning ? "" : currentQuestion}
+                />
+              )}
+            </div>
+          )}
           <Form onSubmit={handleSubmitWithTool}>
             <div className="position-relative">
               <div
@@ -333,13 +352,13 @@ const QuestionForm = ({
                   <i className="bi bi-send" style={{ fontSize: '1.2rem', pointerEvents: 'none' }}></i>
                 </Button>
                </div>
-             </div>
-           </Form>
-         </div>
+            </div>
+          </Form>
+        </div>
        </div>
      </Navbar>
 
-    <ResourcesFilterModal 
+    <ContextSelectionModal 
       show={showFilterModal}
       handleClose={() => setShowFilterModal(false)}
       syncedResources={syncedResources}

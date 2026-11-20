@@ -89,8 +89,17 @@ export const chatReducer = (state, action) => {
         let combined = new Set(r.combinedTablesUsed || []);
         // data_agent: backwards compatibility for chats saved before it was split into generate_vql / execute_vql / generate_graph
         const isVqlTool = ['generate_vql', 'execute_vql', 'generate_graph', 'data_agent'].includes(toolName);
-        if (isVqlTool && artifact && artifact.tables_used) {
+        // Searched views come from metadata_search (or the VQL tools'
+        // tables_used); used views are later matched against the VQL.
+        // Collect from any artifact that carries them, mirroring the
+        // history rebuild in useChatHistory.
+        if (artifact && Array.isArray(artifact.tables_used)) {
           for (const t of artifact.tables_used) combined.add(t);
+        }
+        if (artifact && Array.isArray(artifact.related_tables)) {
+          for (const entry of artifact.related_tables) {
+            if (entry && entry.view_name) combined.add(entry.view_name);
+          }
         }
 
         let combinedVqls = Array.isArray(r.combinedVqls) ? [...r.combinedVqls] : [];

@@ -4,7 +4,7 @@ import { actionTypes } from "../reducers/chatReducer";
 import useToolSelector from "./useToolSelector";
 
 const useQuestionForm = (currentQuestion, setCurrentQuestion, results, dispatch, sdk, isAuthenticated, selectedChatbot) => {
-  const { config } = useConfig();
+  const { config, profile } = useConfig();
   const { isLoading, processQuestion, cancelQuery, runningRequests } = sdk;
 
   const [showFilterModal, setShowFilterModal] = useState(false);
@@ -120,7 +120,8 @@ const useQuestionForm = (currentQuestion, setCurrentQuestion, results, dispatch,
     handleSendClick,
     handleCancelQuery,
     lastToolRequest,
-    config
+    config,
+    profile,
   };
 };
 

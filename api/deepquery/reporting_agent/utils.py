@@ -14,12 +14,14 @@ def load_color_palettes():
         'blue': {'primary': '#3182ce', 'text': '#ffffff', 'name': 'blue'},
         'black': {'primary': '#2d3748', 'text': '#ffffff', 'name': 'black'},
         'red': {'primary': '#c53030', 'text': '#ffffff', 'name': 'red'},
-        'green': {'primary': '#38a169', 'text': '#ffffff', 'name': 'green'}
+        'green': {'primary': '#38a169', 'text': '#ffffff', 'name': 'green'},
+        'dark': {'primary': '#3b82c4', 'text': '#ffffff', 'name': 'dark'},
+        'light': {'primary': '#a0aec0', 'text': '#1a202c', 'name': 'light'}
     }
 
     palettes = {}
 
-    for color_name in ['blue', 'black', 'red', 'green']:
+    for color_name in ['blue', 'black', 'red', 'green', 'dark', 'light']:
         color_upper = color_name.upper()
         palettes[color_name] = {
             'primary': os.getenv(f'DEEPQUERY_REPORT_COLOR_SCHEME_{color_upper}_PRIMARY',
@@ -34,6 +36,61 @@ def load_color_palettes():
 # Define color palettes for different themes
 # Load from environment variables with fallback to defaults
 COLOR_PALETTES = load_color_palettes()
+
+# Surface variables (backgrounds, text and borders) shared by every theme of the same kind.
+# The accent colors (--dq-primary / --dq-primary-text) come from COLOR_PALETTES.
+LIGHT_SURFACE_VARIABLES = {
+    '--dq-bg': '#ffffff',
+    '--dq-fg': '#333333',
+    '--dq-h1': '#1a365d',
+    '--dq-h2': '#2d3748',
+    '--dq-h3': '#4a5568',
+    '--dq-strong': '#2d3748',
+    '--dq-muted': '#6c757d',
+    '--dq-meta': '#4a5568',
+    '--dq-border': '#e2e8f0',
+    '--dq-code-bg': '#f7fafc',
+    '--dq-code-text': '#e53e3e',
+    '--dq-pre-bg': '#f8f9fa',
+    '--dq-pre-border': '#e9ecef',
+    '--dq-pre-text': '#495057',
+    '--dq-row-alt': '#f8f9fa',
+    '--dq-sql': '#0066cc',
+    '--dq-highlight': '#fef5e7',
+    '--dq-img-bg': 'transparent',
+}
+
+DARK_SURFACE_VARIABLES = {
+    '--dq-bg': '#121826',
+    '--dq-fg': '#e2e8f0',
+    '--dq-h1': '#f7fafc',
+    '--dq-h2': '#e2e8f0',
+    '--dq-h3': '#cbd5e0',
+    '--dq-strong': '#f7fafc',
+    '--dq-muted': '#a0aec0',
+    '--dq-meta': '#cbd5e0',
+    '--dq-border': '#2d3748',
+    '--dq-code-bg': '#1e2638',
+    '--dq-code-text': '#fc8181',
+    '--dq-pre-bg': '#1a2233',
+    '--dq-pre-border': '#2d3748',
+    '--dq-pre-text': '#cbd5e0',
+    '--dq-row-alt': '#1a2233',
+    '--dq-sql': '#63b3ed',
+    '--dq-highlight': '#3b3320',
+    '--dq-img-bg': '#ffffff',
+}
+
+def _theme_variables_css(selector, palette):
+    """Render the CSS custom properties of one theme under the given selector."""
+    surface = DARK_SURFACE_VARIABLES if palette.get('name') == 'dark' else LIGHT_SURFACE_VARIABLES
+    variables = {
+        '--dq-primary': palette['primary'],
+        '--dq-primary-text': palette['text'],
+        **surface,
+    }
+    body = "\n".join(f"        {name}: {value};" for name, value in variables.items())
+    return f"{selector} {{\n{body}\n    }}"
 
 def get_denodo_logo():
     """Load the local Denodo logo and convert to base64 for embedding."""
@@ -52,9 +109,23 @@ def get_denodo_logo():
         return None
 
 def get_css_styles(palette):
-    """Generate comprehensive CSS styles for the report."""
+    """
+    Generate comprehensive CSS styles for the report.
+
+    All colors are CSS custom properties (--dq-*). ':root' holds the theme the
+    report was generated with and html[data-theme="..."] blocks hold every
+    available theme, so a viewer can switch themes just by changing the
+    data-theme attribute of the <html> element, without regenerating the report.
+    """
+    theme_css = "\n\n    ".join(
+        [_theme_variables_css(':root', palette)]
+        + [_theme_variables_css(f'html[data-theme="{name}"]', theme) for name, theme in COLOR_PALETTES.items()]
+    )
 
     return f"""
+    /* Theme variables */
+    {theme_css}
+
     /* Reset and base styles */
     * {{
         margin: 0;
@@ -76,12 +147,16 @@ def get_css_styles(palette):
     body {{
         font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
         line-height: 1.6;
-        color: #333;
-        background-color: #fff;
+        color: var(--dq-fg);
+        background-color: var(--dq-bg);
         font-size: 11pt;
         max-width: 900px;
         margin: 5px auto;
         padding: 16px;
+    }}
+
+    html {{
+        background-color: var(--dq-bg);
     }}
 
     /* Center images */
@@ -90,6 +165,7 @@ def get_css_styles(palette):
         margin: auto;
         max-width: 100%;
         height: auto;
+        background-color: var(--dq-img-bg);
     }}
 
     /* In-flow header for first page */
@@ -109,12 +185,12 @@ def get_css_styles(palette):
 
     .header-text {{
         font-size: 9pt;
-        color: #6c757d;
+        color: var(--dq-muted);
     }}
 
     .header-meta {{
         font-size: 10pt;
-        color: #4a5568;
+        color: var(--dq-meta);
         margin-top: 5pt;
         font-style: italic;
     }}
@@ -123,10 +199,10 @@ def get_css_styles(palette):
     h1 {{
         font-size: 24pt;
         font-weight: 700;
-        color: #1a365d;
+        color: var(--dq-h1);
         margin-bottom: 30pt;
         padding-bottom: 15pt;
-        border-bottom: 3px solid {palette['primary']};
+        border-bottom: 3px solid var(--dq-primary);
         page-break-after: avoid;
         text-align: center;
     }}
@@ -134,11 +210,11 @@ def get_css_styles(palette):
     h2 {{
         font-size: 18pt;
         font-weight: 600;
-        color: #2d3748;
+        color: var(--dq-h2);
         margin-top: 30pt;
         margin-bottom: 15pt;
         padding-top: 10pt;
-        border-top: 2px solid #e2e8f0;
+        border-top: 2px solid var(--dq-border);
         page-break-after: avoid;
     }}
 
@@ -150,7 +226,7 @@ def get_css_styles(palette):
     h3 {{
         font-size: 14pt;
         font-weight: 600;
-        color: #4a5568;
+        color: var(--dq-h3);
         margin-top: 20pt;
         margin-bottom: 10pt;
         page-break-after: avoid;
@@ -178,26 +254,26 @@ def get_css_styles(palette):
     /* Strong text */
     strong {{
         font-weight: 600;
-        color: #2d3748;
+        color: var(--dq-strong);
     }}
 
     /* Inline code */
     code {{
         font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-        background-color: #f7fafc;
-        color: #e53e3e;
+        background-color: var(--dq-code-bg);
+        color: var(--dq-code-text);
         padding: 2pt 4pt;
         border-radius: 3pt;
         font-size: 10pt;
-        border: 1px solid #e2e8f0;
+        border: 1px solid var(--dq-border);
         direction: ltr !important;
         unicode-bidi: embed;
     }}
 
     /* Code blocks */
     pre {{
-        background-color: #f8f9fa;
-        border: 1px solid #e9ecef;
+        background-color: var(--dq-pre-bg);
+        border: 1px solid var(--dq-pre-border);
         border-radius: 6pt;
         padding: 15pt;
         margin: 15pt 0;
@@ -217,7 +293,7 @@ def get_css_styles(palette):
         background-color: transparent;
         border: none;
         padding: 0;
-        color: #495057;
+        color: var(--dq-pre-text);
         font-size: inherit;
     }}
 
@@ -232,8 +308,8 @@ def get_css_styles(palette):
 
     /* Table headers */
     thead {{
-        background-color: {palette['primary']};
-        color: {palette['text']};
+        background-color: var(--dq-primary);
+        color: var(--dq-primary-text);
     }}
 
     th {{
@@ -241,7 +317,7 @@ def get_css_styles(palette):
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.3pt;
-        border: 1px solid {palette['primary']};
+        border: 1px solid var(--dq-primary);
         hyphens: auto;
         overflow-wrap: break-word; /* Use safer wrapping */
         vertical-align: middle;
@@ -249,11 +325,11 @@ def get_css_styles(palette):
 
     /* Table body */
     tbody tr:nth-child(even) {{
-        background-color: #f8f9fa;
+        background-color: var(--dq-row-alt);
     }}
 
     td {{
-        border: 1px solid #e2e8f0;
+        border: 1px solid var(--dq-border);
         vertical-align: top;
         hyphens: auto;
         overflow-wrap: break-word; /* Allow content in cells to wrap */
@@ -294,7 +370,7 @@ def get_css_styles(palette):
     }}
 
     table.definition-table th {{ text-align: center; }}
-    table.definition-table td:first-child {{ font-weight: 600; color: #333; }}
+    table.definition-table td:first-child {{ font-weight: 600; color: var(--dq-fg); }}
     table.definition-table td:last-child {{
         text-align: right;
     }}
@@ -308,7 +384,7 @@ def get_css_styles(palette):
     /* First column (usually text) styling */
     td:first-child {{
         font-weight: 500;
-        color: #2d3748;
+        color: var(--dq-strong);
     }}
 
     [dir="rtl"] td, [dir="rtl"] th {{
@@ -326,7 +402,7 @@ def get_css_styles(palette):
 
     /* Executive summary styling */
     h2 + p strong {{
-        color: {palette['primary']};
+        color: var(--dq-primary);
     }}
 
     /* Methodology section specific styling */
@@ -362,7 +438,7 @@ def get_css_styles(palette):
 
     /* Highlight key metrics */
     strong:contains("2.06") {{
-        background-color: #fef5e7;
+        background-color: var(--dq-highlight);
         padding: 2pt;
         border-radius: 3pt;
     }}
@@ -374,7 +450,7 @@ def get_css_styles(palette):
 
     /* SQL syntax highlighting hints */
     pre code[class*="language-sql"] {{
-        color: #0066cc;
+        color: var(--dq-sql);
     }}
 
     .appendix-ltr-container {{
@@ -503,7 +579,7 @@ def build_styled_html(html_content: str, color_palette: dict, title: str, text_d
 
     final_html_doc = f"""
     <!DOCTYPE html>
-    <html dir="{text_direction}">
+    <html dir="{text_direction}" data-theme="{color_palette['name']}">
     <head>
         <meta charset="UTF-8">
         <title>{title}</title>

@@ -25,7 +25,7 @@
   background-color: #143142;
   border-right: 2px solid #143b5c;
   position: relative;
-  z-index: 1090;
+  z-index: 9999;
 }
 
 .sidebar-header-logo {

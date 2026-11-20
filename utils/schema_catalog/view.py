@@ -457,10 +457,12 @@ class SchemaTable:
         base_tokens = calculate_tokens(header + association_footer)
 
         minimum_required_limit = base_tokens + 500 + 50
+        view_name = self.get_name()
+        view_id = self.get_id()
 
         if embeddings_token_limit < minimum_required_limit:
             raise ValueError(
-                f"Cannot chunk table '{self.get_name()}'. The configured 'embeddings_token_limit' ({embeddings_token_limit}) "
+                f"Cannot chunk table '{view_name}'. The configured 'embeddings_token_limit' ({embeddings_token_limit}) "
                 f"is insufficient. The base schema definition alone requires {base_tokens} tokens. "
                 f"Please increase 'embeddings_token_limit' to at least {minimum_required_limit}. "
                 f"IMPORTANT: Make sure this value does not exceed the actual maximum input token limit of your chosen embedding model."
@@ -473,21 +475,25 @@ class SchemaTable:
         target_chunks = (total_tokens // available_tokens) + 1
         chunk_size = max(1, len(column_lines) // target_chunks)
 
+        base_metadata = {
+            "view_name": view_name,
+            "view_id": view_id,
+            "database_name": self.get_database_name()
+        }
+        for tag in self._view_data.get('tagDetails', []):
+            base_metadata[f"tag_{encode_tag(tag['name'])}"] = "1"
+
         chunks = []
         for index in range(0, len(column_lines), chunk_size):
             current_lines = column_lines[index:index + chunk_size]
             chunk_content = header + "\n".join(current_lines) + association_footer + "\n"
-            document_id = f"{self.get_id()}_{len(chunks)}"
-            metadata = {
-                "view_name": self.get_name(),
-                "view_json": json.dumps(self.to_dict()),
-                "view_id": self.get_id(),
-                "document_id": document_id,
-                "database_name": self.get_database_name()
-            }
+            document_id = f"{view_id}_{len(chunks)}"
+            metadata = {**base_metadata, "document_id": document_id}
 
-            for tag in self._view_data.get('tagDetails', []):
-                metadata[f"tag_{encode_tag(tag['name'])}"] = "1"
+            # Only the first chunk stores the full view definition, so chunked
+            # views do not store an identical copy of 'view_json' in every chunk
+            if not chunks:
+                metadata["view_json"] = json.dumps(self.to_dict())
 
             chunks.append(Document(
                 id=document_id,

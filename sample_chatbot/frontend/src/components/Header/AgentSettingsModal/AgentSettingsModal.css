@@ -1,0 +1,165 @@
+/* Agent Settings: specifics (shared modal rules live in Common/Modal/Modal.css) */
+.settings-modal .rcc-dialog {
+  max-width: min(840px, 96vw);
+}
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.settings-modal .tab-content {
+  overflow-y: auto;
+  padding: 1.25rem 1.5rem;
+}
+
+.settings-banner-wrap {
+  padding: 1rem 1.5rem 0;
+  background: #fff;
+}
+
+.settings-banner {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 2.25rem 0.75rem 1rem;
+  border-radius: 8px;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  margin-bottom: 1rem;
+}
+
+.settings-banner-info {
+  background: #eff6ff;
+  border: 1px solid #dbeafe;
+  color: #1e40af;
+}
+
+.settings-banner-info i {
+  color: #3b82f6;
+  font-size: 1.05rem;
+  margin-top: 1px;
+}
+
+.settings-banner-danger {
+  background: #fef2f2;
+  border: 1px solid #fee2e2;
+  color: #b91c1c;
+}
+
+.settings-banner-danger i {
+  color: #ef4444;
+  font-size: 1.05rem;
+  margin-top: 1px;
+}
+
+.settings-banner-warning {
+  background: #fffbeb;
+  border: 1px solid #fef3c7;
+  color: #92400e;
+}
+
+.settings-banner-warning i {
+  color: #f59e0b;
+  font-size: 1.05rem;
+  margin-top: 1px;
+}
+
+.settings-banner-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: #64748b;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.settings-banner-close:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.settings-card-form {
+  padding: 1.1rem 1.25rem;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  margin-bottom: 1.25rem;
+}
+
+.settings-card-form h6 {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #111827;
+  margin-bottom: 0.85rem;
+}
+
+.settings-modal .form-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #212529;
+  margin-bottom: 0.35rem;
+}
+
+.settings-modal .form-control,
+.settings-modal .form-select {
+  font-size: 0.85rem;
+  color: #111827;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.settings-modal .form-control:focus,
+.settings-modal .form-select:focus {
+  border-color: #6b7280;
+  box-shadow: 0 0 0 3px rgba(107, 114, 128, 0.15);
+}
+
+.settings-modal .form-check-input {
+  cursor: pointer;
+}
+
+.settings-modal .form-check-label {
+  font-size: 0.84rem;
+  color: #374151;
+  cursor: pointer;
+}
+
+.settings-list-item {
+  display: flex;
+  align-items: center;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.settings-list-item:last-child {
+  border-bottom: 0;
+}
+
+.settings-list-item code {
+  font-size: 0.85rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.settings-list-item .skm-code-badge {
+  font-size: 0.875em;
+}
+
+.settings-item-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

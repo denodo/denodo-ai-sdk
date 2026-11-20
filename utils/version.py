@@ -1,1 +1,1 @@
-AI_SDK_VERSION = "1.4"
+AI_SDK_VERSION = "1.5"

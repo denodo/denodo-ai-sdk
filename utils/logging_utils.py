@@ -9,182 +9,269 @@
  of the license agreement you entered into with DENODO.
 """
 import os
-import glob
+import re
+import sys
 import logging
+import time
+import threading
 from datetime import datetime
 from contextvars import ContextVar
-from logging.handlers import RotatingFileHandler
+
+from loguru import logger
+from utils.utils import get_api_data_dir
+
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
 
 transaction_id_var: ContextVar[str] = ContextVar('transaction_id', default='system')
 username_var: ContextVar[str] = ContextVar('username', default='system')
 
-class ContextFilter(logging.Filter):
-    """
-    This filter injects the transaction ID and conditionally formats the username.
-    """
-    def filter(self, record):
-        record.transaction_id = transaction_id_var.get()
-        username = username_var.get()
+DEFAULT_MAX_LOG_FILES = 5
+VALID_LOG_LEVELS = ("DEBUG", "INFO")
+INTERCEPTED_LOGGER_NAMES = ("werkzeug", "uvicorn", "uvicorn.error", "uvicorn.access")
+STATIC_EXTENSIONS = (".png", ".svg", ".css", ".js", ".ico", ".woff", ".woff2")
+TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
 
-        if username in ["system", "anonymous"]:
-            record.user_tag = ""
-        else:
-            record.user_tag = f"[user: {username}] "
+_sink_ids = []
 
-        return True
+def _patcher(record):
+    """Injects the transaction id and the user tag from the context variables."""
+    username = username_var.get()
+    record["extra"]["transaction_id"] = transaction_id_var.get()
+    record["extra"]["user_tag"] = "" if username in ("system", "anonymous") else f"[user: {username}] "
 
-class StaticFilesFilter(logging.Filter):
+def _format(record):
+    return "[{time:YYYY-MM-DD HH:mm:ss ZZ}] [{process.id}] [{level}] [{extra[transaction_id]}] {extra[user_tag]}{message}\n{exception}"
+
+def _log_filter(record):
+    """Applies the runtime log level and hides noisy access logs of static assets."""
+    if record["level"].no < logging.getLogger().level:
+        return False
+    msg = record["message"]
+    if "GET " in msg and any(ext in msg.lower() for ext in STATIC_EXTENSIONS):
+        return False
+    return True
+
+class InterceptHandler(logging.Handler):
+    """Forwards standard library log records to loguru."""
+    def emit(self, record):
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+
+        frame, depth = logging.currentframe(), 2
+        while frame and frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back
+            depth += 1
+
+        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+
+class SharedLogFile:
     """
-    Filters out noisy access logs for static assets (.png, .svg, .css, .js, etc.).
+    Log file sink safe to be used by several processes at the same time.
+
+    All processes of a launch append to `<name>_<session id><ext>`. When the file
+    exceeds `max_bytes` a new `<name>_<timestamp><ext>` file is started (the one
+    created first by any process wins, the rest follow it). Only the newest
+    `max_files` files are kept, both at startup and on rotation.
     """
-    def filter(self, record):
-        msg = record.getMessage()
-        if "GET " in msg and any(ext in msg.lower() for ext in [".png", ".svg", ".css", ".js", ".ico", ".woff", ".woff2"]):
+    def __init__(self, base_path, session_id, max_bytes=0, max_files=0):
+        self.directory, filename = os.path.split(base_path)
+        self.name, self.ext = os.path.splitext(filename)
+        self.max_bytes = max_bytes
+        self.max_files = max_files
+        self._pattern = re.compile(rf"^{re.escape(self.name)}_\d{{8}}_\d{{6}}{re.escape(self.ext)}$")
+        self._lock = threading.Lock()
+
+        os.makedirs(self.directory, exist_ok=True)
+        self.path = self._path_for(session_id)
+        self._touch(self.path)
+        self.prune()
+
+    def _path_for(self, stamp):
+        return os.path.join(self.directory, f"{self.name}_{stamp}{self.ext}")
+
+    @staticmethod
+    def _touch(path):
+        with open(path, "a", encoding="utf-8"):
+            pass
+
+    def files(self):
+        """Log files of this application, oldest first (timestamps sort chronologically)."""
+        try:
+            names = sorted(n for n in os.listdir(self.directory) if self._pattern.match(n))
+        except OSError:
+            return []
+        return [os.path.join(self.directory, n) for n in names]
+
+    def prune(self):
+        if self.max_files <= 0:
+            return
+        files = self.files()
+        excess = len(files) - self.max_files
+        for old in files:
+            if excess <= 0:
+                break
+            if old == self.path:
+                continue
+            try:
+                os.remove(old)
+                excess -= 1
+            except FileNotFoundError:
+                excess -= 1
+            except OSError:
+                pass
+
+    def _is_full(self):
+        try:
+            return os.path.getsize(self.path) >= self.max_bytes
+        except OSError:
             return False
+
+    def _rotate(self):
+        files = self.files()
+        if files and files[-1] > self.path:
+            # Another process already rotated, follow it
+            self.path = files[-1]
+            if not self._is_full():
+                return
+        new_path = self._path_for(datetime.now().strftime(TIMESTAMP_FORMAT))
+        if new_path <= self.path:
+            return
+        self.path = new_path
+        self._touch(new_path)
+        self.prune()
+
+    def _append(self, message):
+        with open(self.path, "a", encoding="utf-8") as f:
+            if msvcrt is None:
+                # POSIX appends of a single write are atomic
+                f.write(message)
+                return
+            # On Windows appends from several processes can overwrite each other:
+            # serialize them with a byte-range lock shared by all processes.
+            fd = f.fileno()
+            while True:
+                try:
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    time.sleep(0.001)
+            try:
+                f.write(message)
+                f.flush()
+            finally:
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+
+    def __call__(self, message):
+        with self._lock:
+            if self.max_bytes > 0 and self._is_full():
+                self._rotate()
+            self._append(message)
+
+def get_session_id():
+    """
+    Identifier shared by every process of one launch (it names the log file).
+    run.py provides it; otherwise the first process creates it and its
+    children inherit it through the environment.
+    """
+    session_id = os.environ.get("LOG_SESSION_ID")
+    if not session_id:
+        session_id = datetime.now().strftime(TIMESTAMP_FORMAT)
+        os.environ["LOG_SESSION_ID"] = session_id
+    return session_id
+
+def _log_base_path():
+    # Default log path lives under the API logs directory; individual processes
+    # override LOG_FILE_PATH to point to their own subdirectory.
+    default_log_path = os.path.join(get_api_data_dir(), "logs", "default.log")
+    return os.environ.get("LOG_FILE_PATH", default_log_path)
+
+def _marker_prefix():
+    return f".run_once_{os.path.splitext(os.path.basename(_log_base_path()))[0]}_"
+
+def _purge_stale_markers():
+    """Removes the run_once markers left by previous launches."""
+    directory = os.path.dirname(_log_base_path())
+    prefix, current = _marker_prefix(), f"{_marker_prefix()}{get_session_id()}_"
+    try:
+        for name in os.listdir(directory):
+            if name.startswith(prefix) and not name.startswith(current):
+                try:
+                    os.remove(os.path.join(directory, name))
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
+def run_once(key):
+    """
+    Returns True in exactly one process per launch (and per key), so that startup
+    banners are printed once when several workers import the application.
+    """
+    directory = os.path.dirname(_log_base_path())
+    marker = os.path.join(directory, f"{_marker_prefix()}{get_session_id()}_{key}")
+    try:
+        os.makedirs(directory, exist_ok=True)
+        os.close(os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        return True
+    except FileExistsError:
+        return False
+    except OSError:
+        # Cannot coordinate: better to print the banner twice than never
         return True
 
-class RotatingLogFileHandler(RotatingFileHandler):
+def _max_log_files(env_var):
+    try:
+        value = int(os.environ.get(env_var, DEFAULT_MAX_LOG_FILES))
+    except ValueError:
+        return DEFAULT_MAX_LOG_FILES
+    return value if value > 0 else DEFAULT_MAX_LOG_FILES
+
+def setup_logging(force=False, max_files_env="AI_SDK_LOG_MAX_FILES"):
     """
-    It inherits from RotatingFileHandler to use its size detection mechanism,
-    but on rollover, it creates a completely new file with a timestamp
-    instead of renaming the old one.
+    Configures loguru from the environment and routes the standard library
+    logging (including uvicorn and werkzeug) through it. Idempotent per process.
+    `max_files_env` is the variable holding the log file limit of the application
+    (AI_SDK_LOG_MAX_FILES for the API, CHATBOT_LOG_MAX_FILES for the chatbot).
     """
-    def __init__(self, filename, mode='a', maxBytes=0, backupCount=0, encoding=None, delay=False):
-        # We store the original filename template (e.g., 'logs/app.log')
-        self._base_filename_template = filename
+    global _sink_ids
+    if _sink_ids and not force:
+        return
 
-        # Generate the name for the first log file with a timestamp
-        initial_filename = self._generate_new_filename()
-
-        # Call the base class constructor with this initial filename
-        super().__init__(initial_filename, mode, maxBytes, backupCount, encoding, delay)
-
-    def _generate_new_filename(self):
-        """Generates a new filename with a timestamp."""
-        base_dir = os.path.dirname(self._base_filename_template)
-        filename = os.path.basename(self._base_filename_template)
-        name, ext = os.path.splitext(filename)
-
-        # Create the base directory if it doesn't exist
-        os.makedirs(base_dir, exist_ok=True)
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        return os.path.join(base_dir, f"{name}_{timestamp}{ext}")
-
-    def doRollover(self):
-        """
-        Performs the rollover.
-        """
-        # 1. Close the current file stream (which is already full)
-        if self.stream:
-            self.stream.close()
-            self.stream = None
-
-        # 2. Manage backups BEFORE creating the new file
-        self._manage_backups()
-
-        # 3. Generate a new name for the next log file
-        self.baseFilename = self._generate_new_filename()
-
-    def _manage_backups(self):
-        """
-        Deletes the oldest log files if backupCount is exceeded.
-        """
-        if self.backupCount > 0:
-            base_dir = os.path.dirname(self._base_filename_template)
-            filename = os.path.basename(self._base_filename_template)
-            name, ext = os.path.splitext(filename)
-
-            search_glob = os.path.join(base_dir, f"{name}_*{ext}")
-
-            # We sort the files by name (the timestamp ensures chronological order)
-            log_files = sorted(glob.glob(search_glob))
-
-            # The current file hasn't been created yet, so we compare with backupCount.
-            # If backupCount is 3, and there are already 3 files, we delete the oldest.
-            while len(log_files) >= self.backupCount:
-                os.remove(log_files[0])
-                log_files.pop(0)
-
-def get_logging_config():
-    """
-    Builds the logging configuration dictionary by reading environment variables.
-    """
     log_level_str = os.environ.get("LOG_LEVEL", "INFO").upper()
     log_level = getattr(logging, log_level_str, logging.INFO)
+    if not isinstance(log_level, int):
+        log_level = logging.INFO
 
-    no_logs_to_file = os.environ.get("NO_LOGS_TO_FILE", "false").lower() == "true"
-    handlers_to_use = ['console']
+    logger.remove()
+    logger.configure(patcher=_patcher)
+    _sink_ids = [logger.add(sys.stdout, level=0, format=_format, filter=_log_filter, colorize=False)]
 
-    LOGGING_CONFIG = {
-        "version": 1,
-        "disable_existing_loggers": False,
-        "filters": {
-            "context_filter": {
-                "()": ContextFilter,
-            },
-            "static_files_filter": {
-                "()": StaticFilesFilter,
-            }
-        },
-        "formatters": {
-            "default": {
-                "()": "uvicorn.logging.DefaultFormatter",
-                "fmt": "[%(asctime)s] [%(process)d] [%(levelname)s] [%(transaction_id)s] %(user_tag)s%(message)s",
-                "datefmt": "%Y-%m-%d %H:%M:%S %z",
-            },
-        },
-        "handlers": {
-            "console": {
-                "class": "logging.StreamHandler",
-                "formatter": "default",
-                "stream": "ext://sys.stdout",
-                "filters": ["context_filter", "static_files_filter"],
-            },
-        },
-        "loggers": {
-            # Root logger for the application
-            "": {"handlers": handlers_to_use, "level": log_level},
-            "werkzeug": {
-                "handlers": handlers_to_use,
-                "level": log_level,
-                "propagate": False
-            },
-            "uvicorn.error": {
-                "handlers": handlers_to_use,
-                "level": log_level,
-                "propagate": False
-            },
-            "uvicorn.access": {
-                "handlers": handlers_to_use,
-                "level": log_level,
-                "propagate": False
-            }
-        },
-    }
+    _purge_stale_markers()
 
-    if not no_logs_to_file:
-        data_dir = os.environ.get("AI_SDK_DATA_DIR", ".")
-        default_log_path = os.path.join(data_dir, "logs", "default.log") if data_dir != "." else "logs/default.log"
-        log_file_path = os.environ.get("LOG_FILE_PATH", default_log_path)
-        max_log_size_mb = float(os.environ.get("LOG_MAX_SIZE_MB", 1))
+    if os.environ.get("NO_LOGS_TO_FILE", "false").lower() != "true":
+        sink = SharedLogFile(
+            _log_base_path(),
+            get_session_id(),
+            max_bytes=int(float(os.environ.get("LOG_MAX_SIZE_MB", 1)) * 1024 * 1024),
+            max_files=_max_log_files(max_files_env),
+        )
+        _sink_ids.append(logger.add(sink, level=0, format=_format, filter=_log_filter, colorize=False))
 
-        LOGGING_CONFIG["handlers"]["rotating_file"] = {
-            "()": RotatingLogFileHandler,
-            "filename": log_file_path,
-            "maxBytes": max_log_size_mb * 1024 * 1024,
-            "backupCount": 5,
-            "encoding": "utf-8",
-            "formatter": "default",
-            "filters": ["context_filter", "static_files_filter"],
-        }
-        for logger in LOGGING_CONFIG["loggers"].values():
-            logger['handlers'].append('rotating_file')
-
-    return LOGGING_CONFIG
-
-VALID_LOG_LEVELS = ("DEBUG", "INFO")
-MANAGED_LOGGER_NAMES = ("", "werkzeug", "uvicorn.error", "uvicorn.access")
+    root = logging.getLogger()
+    root.handlers = [InterceptHandler()]
+    root.setLevel(log_level)
+    for name in INTERCEPTED_LOGGER_NAMES:
+        stdlib_logger = logging.getLogger(name)
+        stdlib_logger.handlers = []
+        stdlib_logger.propagate = True
+        stdlib_logger.setLevel(logging.NOTSET)
 
 def get_log_level():
     """Return the current application log level name, e.g. 'INFO'."""
@@ -204,8 +291,7 @@ def set_log_level(level_name):
         return level_name
 
     level = getattr(logging, level_name)
-    for name in MANAGED_LOGGER_NAMES:
-        logging.getLogger(name).setLevel(level)
+    logging.getLogger().setLevel(level)
 
     os.environ["LOG_LEVEL"] = level_name
     # INFO is hidden once the level is WARNING or higher, so announce at a

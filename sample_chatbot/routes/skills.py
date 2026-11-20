@@ -17,7 +17,7 @@ import logging
 from flask import Blueprint, request, jsonify
 from flask_login import login_required, current_user
 
-from utils.database_utils import UserSkills
+from utils.database_utils import UserSkills, UserUiPreferences
 from sample_chatbot import config as chatbot_configs
 from sample_chatbot.engine import skills as skills_engine
 from sample_chatbot.engine.skills import SkillError
@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 skills_bp = Blueprint('skills', __name__)
 
 UserSkills.init_db()
+UserUiPreferences.init_db()
 
 def _user():
     """Resolve the underlying user (not the LocalProxy)."""
@@ -47,9 +48,9 @@ def _resolve_agent_config(user, agent_id):
         raise KeyError(agent_id)
     if not config.is_user_allowed(
         username=user.id,
-        roles=getattr(user, 'roles', []),
-        is_admin=getattr(user, 'is_admin', False),
-        legacy_permissions_endpoint=getattr(user, 'legacy_permissions_endpoint', False),
+        roles=user.roles,
+        is_admin=user.is_admin,
+        legacy_permissions_endpoint=user.legacy_permissions_endpoint,
     ):
         raise PermissionError(agent_id)
     return config
@@ -92,9 +93,9 @@ def list_skills():
         "agent_id": config.id,
         "can_manage_skills": config.is_skill_management_allowed_for_user(
             username=user.id,
-            roles=getattr(user, 'roles', []),
-            is_admin=getattr(user, 'is_admin', False),
-            legacy_permissions_endpoint=getattr(user, 'legacy_permissions_endpoint', False),
+            roles=user.roles,
+            is_admin=user.is_admin,
+            legacy_permissions_endpoint=user.legacy_permissions_endpoint,
         ),
     })
 

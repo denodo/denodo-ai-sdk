@@ -252,6 +252,17 @@ tr:nth-child(even) {
   border-radius: 8px;
 }
 
+.card-content-area .markdown-container img.inline-graph {
+  cursor: pointer;
+}
+
+.card-content-area .markdown-container .inline-graph-missing {
+  display: block;
+  color: #6c757d;
+  font-size: 0.9rem;
+  margin: 0.75rem 0;
+}
+
 .markdown-container table {
   max-width: none;
   border-collapse: collapse;
@@ -487,4 +498,59 @@ h3 {
 .chat-item-exit {
   animation: collapseMessage 0.4s cubic-bezier(0.25, 1, 0.5, 1) forwards !important;
   pointer-events: none;
+}
+
+/* Process Toggle & Collapse */
+
+.process-toggle-container {
+  display: flex;
+  align-items: center;
+}
+
+.process-toggle-btn {
+  background-color: transparent !important;
+  color: #6c757d !important;
+  border: 1px solid transparent !important;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  padding: 0.25rem 0.5rem;
+  transition: all 0.2s ease-in-out;
+  font-weight: 600;
+  box-shadow: none !important;
+  cursor: pointer;
+}
+
+.process-toggle-btn:hover {
+  background-color: rgba(17, 37, 51, 0.06) !important;
+  color: #112533 !important;
+}
+
+.toggle-fade-in {
+  animation: toggleFadeIn 0.3s ease-out forwards;
+}
+
+@keyframes toggleFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.collapse-tools-wrapper {
+  padding: 0 0 0.5rem 0 !important;
+  margin: 0 !important;
+}
+
+.final-answer-container {
+  margin-top: 0.75rem !important;
+  margin-bottom: 0.5rem;
+}
+
+.collapsing {
+  transition: height 0.35s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  overflow: hidden !important;
 }

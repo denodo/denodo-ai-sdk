@@ -40,8 +40,13 @@ prevent path traversal.
 import os
 import re
 import logging
+from functools import partial
 
 from utils.database_utils import UserSkills
+from utils.status import Status, add_status
+from utils.utils import get_chatbot_data_dir
+
+logger = logging.getLogger(__name__)
 
 # Skill and reference names: max 64 chars, lowercase letters/numbers/hyphens,
 # must not start or end with a hyphen. Keeps tools from escaping the skills dir.
@@ -65,12 +70,11 @@ class PersonalSkillNotFoundError(SkillError):
 def get_skills_dir():
     """Return the absolute path to the AI SDK skills directory.
 
-    Lives under the centralized data directory (``AI_SDK_DATA_DIR``), like
-    reports and conversation history. With the default data dir (``.``) this
-    resolves to ``<repo_root>/skills``, preserving the original layout.
+    Lives under the chatbot data subdirectory (``<AI_SDK_DATA_DIR>/sample_chatbot/``), like
+    reports and conversation history. With the default data dir (``data/``) this
+    resolves to ``<repo_root>/data/sample_chatbot/skills``.
     """
-    data_dir = os.getenv("AI_SDK_DATA_DIR", ".")
-    return os.path.abspath(os.path.join(data_dir, "skills"))
+    return os.path.abspath(os.path.join(get_chatbot_data_dir(), "skills"))
 
 def _is_valid_name(name):
     return bool(name and _NAME_PATTERN.match(name))
@@ -167,12 +171,19 @@ def list_reference_names(skill_name):
         if entry.endswith(".md") and os.path.isfile(os.path.join(references_dir, entry)):
             name = entry[:-3]
             if not _is_valid_name(name):
-                logging.warning(
+                logger.warning(
                     f"Skipping reference with invalid name in skill '{skill_name}': '{name}'"
                 )
                 continue
             names.append(name)
     return sorted(names)
+
+def _is_blank_file(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return not f.read().strip()
+    except Exception:
+        return False
 
 def discover_skills():
     """Discover all skills on disk.
@@ -193,7 +204,7 @@ def discover_skills():
     for entry in sorted(os.listdir(skills_dir)):
         skill_path = os.path.join(skills_dir, entry)
         skill_file = os.path.join(skill_path, SKILL_FILE_NAME)
-        if not os.path.isdir(skill_path) or not os.path.isfile(skill_file):
+        if not os.path.isdir(skill_path) or not os.path.isfile(skill_file) or _is_blank_file(skill_file):
             continue
 
         description = ""
@@ -201,7 +212,6 @@ def discover_skills():
         error = None
         if not _is_valid_name(entry):
             error = _name_error_message(entry, "skill")
-            logging.warning(f"System skill has invalid name on disk: '{entry}'")
         else:
             try:
                 with open(skill_file, "r", encoding="utf-8") as f:
@@ -209,7 +219,6 @@ def discover_skills():
                 description = _parse_description(content, entry)
                 references = list_reference_names(entry)
             except Exception as e:
-                logging.warning(f"Could not load skill '{entry}': {e}")
                 error = str(e)
 
         discovered[entry] = {
@@ -219,6 +228,47 @@ def discover_skills():
             "error": error,
         }
     return discovered
+
+def load_skills_report(report=None):
+    """Validate system skills on disk and append a status entry per skill to `report`."""
+    target_report = report if report is not None else []
+    _report = partial(add_status, target_report)
+
+    skills_dir = get_skills_dir()
+    if not os.path.isdir(skills_dir):
+        msg = f"skills directory not found: {skills_dir}"
+        logger.warning(msg)
+        return target_report
+
+    discovered = discover_skills()
+
+    for entry in sorted(os.listdir(skills_dir)):
+        if entry.startswith((".", "_")):
+            continue
+
+        skill_path = os.path.join(skills_dir, entry)
+        if not os.path.isdir(skill_path):
+            continue
+
+        skill_file = os.path.join(skill_path, SKILL_FILE_NAME)
+        if not os.path.isfile(skill_file):
+            msg = "missing SKILL.md"
+            logger.warning(f"Skill '{entry}': {msg}")
+            _report(entry, Status.WARNING)
+        elif _is_blank_file(skill_file):
+            msg = "SKILL.md is empty"
+            logger.warning(f"Skill '{entry}': {msg}")
+            _report(entry, Status.WARNING)
+        else:
+            info = discovered.get(entry, {})
+            if info.get("valid"):
+                _report(entry, Status.OK)
+            else:
+                err = info.get("error") or "invalid skill"
+                logger.error(f"Validation error in skill '{entry}': {err}")
+                _report(entry, Status.ERROR)
+
+    return target_report
 
 # =============================================================================
 # Per-user skill views (system + personal, with activation state)
@@ -571,19 +621,12 @@ Guidelines:
 
 def log_skills(logger):
     """Log the discovered system skills at startup, mirroring the agents config log."""
+    load_skills_report()
     skills = discover_skills()
     valid = {n: m for n, m in skills.items() if m.get("valid", True)}
-    invalid = {n: m for n, m in skills.items() if not m.get("valid", True)}
     count = len(valid)
     logger.info(f"{count} system skill{'' if count == 1 else 's'} loaded from {get_skills_dir()}")
     for name, meta in valid.items():
         refs = meta.get("references") or []
         ref_text = f" ({len(refs)} reference{'' if len(refs) == 1 else 's'})" if refs else ""
         logger.info(f"    - {name}: {meta.get('description', '')}{ref_text}")
-    if invalid:
-        logger.warning(
-            f"{len(invalid)} system skill{'' if len(invalid) == 1 else 's'} "
-            f"failed validation and will not be loaded into agent context:"
-        )
-        for name, meta in invalid.items():
-            logger.warning(f"    - {name}: {meta.get('error') or 'invalid'}")

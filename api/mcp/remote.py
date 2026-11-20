@@ -211,7 +211,8 @@ def get_mcp_app(host, port, root_path):
         if kind == "tag":
             return [], [name]
         if name not in spaces:
-            raise ValueError(f"Unknown AI Space '{name}'. Add api/agents/spaces/{name}.yaml")
+            from utils.utils import get_agents_spaces_dir
+            raise ValueError(f"Unknown AI Space '{name}'. Add {get_agents_spaces_dir()}/{name}.yaml")
         return spaces[name]
 
     def _extract_auth():

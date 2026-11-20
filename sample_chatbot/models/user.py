@@ -6,6 +6,8 @@ from flask_login import UserMixin
 
 from utils.uniformLLM import UniformLLM
 from sample_chatbot.engine.chatbot import ChatbotEngine
+from sample_chatbot.engine.context_window import MAX_CONTEXT_WINDOW, MIN_CONTEXT_WINDOW
+from sample_chatbot.engine.memory import is_memory_enabled
 from sample_chatbot.engine.skills import active_skills_for_user
 from sample_chatbot.extensions import get_unstructured_vector_store
 from sample_chatbot.services.kb_registry import get_registry_for
@@ -162,14 +164,14 @@ class User(UserMixin):
             return (
                 (self.custom_instructions_map[self.agent_id].get("ai_sdk") or "").strip()
             )
-        return (getattr(self._config, "custom_instructions_ai_sdk", None) or "").strip()
+        return (self._config.custom_instructions_ai_sdk or "").strip()
 
     def _effective_chatbot_instructions(self):
         if self.agent_id in self.custom_instructions_map:
             return (
                 (self.custom_instructions_map[self.agent_id].get("chatbot") or "").strip()
             )
-        return (getattr(self._config, "custom_instructions_chatbot", None) or "").strip()
+        return (self._config.custom_instructions_chatbot or "").strip()
 
     def set_custom_instructions(self, user_details='', custom_instructions=None):
         """Update user profile details and optional per-agent custom instruction map."""
@@ -206,6 +208,16 @@ class User(UserMixin):
                 return tokens_int
             return None
 
+        def validate_context_window(tokens):
+            if tokens is None or tokens == '':
+                return None
+            tokens_int = int(tokens)
+            if not (MIN_CONTEXT_WINDOW <= tokens_int <= MAX_CONTEXT_WINDOW):
+                raise ValueError(
+                    f"Context window must be between {MIN_CONTEXT_WINDOW} and {MAX_CONTEXT_WINDOW}"
+                )
+            return tokens_int
+
         def parse_and_validate(llm_data):
             if not llm_data or not any(llm_data.values()):
                 return None
@@ -217,7 +229,19 @@ class User(UserMixin):
             }
             return {k: v for k, v in prefs.items() if v is not None}
 
-        chatbot_prefs = parse_and_validate(llm_settings.get('chatbot_llm'))
+        chatbot_data = llm_settings.get('chatbot_llm') or {}
+        chatbot_prefs = parse_and_validate(chatbot_data)
+        context_window = validate_context_window(chatbot_data.get('context_window'))
+        if chatbot_data:
+            effective_window = context_window if context_window is not None else self._config.llm_context_window
+            effective_max = (chatbot_prefs or {}).get('max_tokens') or self._config.llm_max_tokens
+            if effective_max >= effective_window:
+                raise ValueError(
+                    f"Max output tokens must be lower than the context window ({effective_window})"
+                )
+        if context_window is not None:
+            chatbot_prefs = dict(chatbot_prefs or {})
+            chatbot_prefs['context_window'] = context_window
         if chatbot_prefs is not None:
             self.chatbot_llm_preferences = chatbot_prefs
 
@@ -251,11 +275,10 @@ class User(UserMixin):
             chatbot_llm = self.get_chatbot_llm()
 
             base_prefs = self.ai_sdk_base_llm_preferences or {}
-            base_provider = base_prefs.get('provider') or getattr(self._config, 'ai_sdk_base_llm_provider', None)
-            base_model = base_prefs.get('model') or getattr(self._config, 'ai_sdk_base_llm_model', None)
-            base_temp = base_prefs.get('temperature') if base_prefs.get('temperature') is not None else getattr(
-                self._config, 'ai_sdk_base_llm_temperature', None)
-            base_tokens = base_prefs.get('max_tokens') or getattr(self._config, 'ai_sdk_base_llm_max_tokens', None)
+            base_provider = base_prefs.get('provider') or self._config.ai_sdk_base_llm_provider
+            base_model = base_prefs.get('model') or self._config.ai_sdk_base_llm_model
+            base_temp = base_prefs.get('temperature') if base_prefs.get('temperature') is not None else self._config.ai_sdk_base_llm_temperature
+            base_tokens = base_prefs.get('max_tokens') or self._config.ai_sdk_base_llm_max_tokens
 
             ai_sdk_llm_params = {}
             if base_provider:
@@ -268,11 +291,11 @@ class User(UserMixin):
                 ai_sdk_llm_params['llm_max_tokens'] = base_tokens
 
             thinking_prefs = self.ai_sdk_thinking_llm_preferences or {}
-            thinking_provider = thinking_prefs.get('provider') or getattr(self._config, 'ai_sdk_thinking_llm_provider', None)
-            thinking_model = thinking_prefs.get('model') or getattr(self._config, 'ai_sdk_thinking_llm_model', None)
+            thinking_provider = thinking_prefs.get('provider') or self._config.ai_sdk_thinking_llm_provider
+            thinking_model = thinking_prefs.get('model') or self._config.ai_sdk_thinking_llm_model
             thinking_temp = thinking_prefs.get('temperature') if thinking_prefs.get(
-                'temperature') is not None else getattr(self._config, 'ai_sdk_thinking_llm_temperature', None)
-            thinking_tokens = thinking_prefs.get('max_tokens') or getattr(self._config, 'ai_sdk_thinking_llm_max_tokens', None)
+                'temperature') is not None else self._config.ai_sdk_thinking_llm_temperature
+            thinking_tokens = thinking_prefs.get('max_tokens') or self._config.ai_sdk_thinking_llm_max_tokens
 
             thinking_llm_params = {}
             if thinking_provider:
@@ -339,8 +362,18 @@ class User(UserMixin):
                 active_csv_sources=self.active_csv_sources,
                 kb_collections=self.kb_collections_map,
                 timeout=self._config.chatbot_timeout,
+                context_window=self._chatbot_context_window(),
+                memory_enabled=is_memory_enabled(self.id, self._config.id),
+                share_general_memory=self._config.share_general_memory,
             )
         return self.chatbot
+
+    def _chatbot_context_window(self):
+        prefs = self.chatbot_llm_preferences or {}
+        value = prefs.get('context_window')
+        if value:
+            return int(value)
+        return self._config.llm_context_window
 
     def get_chatbot_llm(self):
         """Get LLM instance for chatbot based on user preferences or global defaults."""

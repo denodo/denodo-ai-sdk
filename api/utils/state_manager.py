@@ -11,10 +11,12 @@
 """
 import os
 import logging
+import threading
 
 from utils.langfuse import init_langfuse
 from utils.uniformLLM import UniformLLM
 from utils.uniformEmbeddings import UniformEmbeddings
+from utils.utils import get_api_data_dir
 from utils.uniformVectorStore import UniformVectorStore
 
 # --- State Dictionaries ---
@@ -22,6 +24,59 @@ from utils.uniformVectorStore import UniformVectorStore
 _llm_cache = {}
 _embedding_model_cache = {}
 _vector_store_cache = {}
+
+# --- Reasoning Detection State ---
+# reasoning_enabled results are shared per (provider, model) pair: the same
+# model string always enables/disables reasoning the same way, regardless of
+# the temperature/max_tokens variant that triggered the probe. Only completed
+# results are stored here; a failed probe leaves the pair Unknown (absent).
+_reasoning_enabled_cache = {}
+_reasoning_probes_in_flight = set()
+_reasoning_lock = threading.RLock()
+
+def _run_reasoning_probe(llm_instance, pair):
+    """Runs the reasoning probe for one (provider, model) pair in a daemon thread."""
+    try:
+        result = llm_instance.detect_reasoning_enabled()
+        if result is not None:
+            # Writing the cache and applying the result under the same lock
+            # used at instance creation guarantees no cached instance of
+            # this pair can miss the update.
+            with _reasoning_lock:
+                _reasoning_enabled_cache[pair] = result
+                for instance in list(_llm_cache.values()):
+                    if (instance.provider_name.lower(), instance.model_name) == pair:
+                        instance.reasoning_enabled = result
+    finally:
+        with _reasoning_lock:
+            _reasoning_probes_in_flight.discard(pair)
+
+def _start_reasoning_probe_if_needed(llm_instance):
+    """
+    Starts a non-blocking background reasoning probe for a (provider, model)
+    pair the first time it is seen. If the pair was already probed, copies the
+    cached result onto the instance instead. Never blocks the caller.
+    """
+    pair = (llm_instance.provider_name.lower(), llm_instance.model_name)
+    with _reasoning_lock:
+        if pair in _reasoning_enabled_cache:
+            llm_instance.reasoning_enabled = _reasoning_enabled_cache[pair]
+            return
+        if pair in _reasoning_probes_in_flight:
+            return
+        _reasoning_probes_in_flight.add(pair)
+
+    try:
+        threading.Thread(
+            target=_run_reasoning_probe,
+            args=(llm_instance, pair),
+            daemon=True,
+            name=f"reasoning-probe-{pair[0]}-{pair[1]}",
+        ).start()
+    except Exception as e:
+        logging.warning(f"Could not start reasoning probe for {pair[0]}/{pair[1]}: {e}")
+        with _reasoning_lock:
+            _reasoning_probes_in_flight.discard(pair)
 
 def get_embedding_model(provider_name, model_name):
     """
@@ -50,13 +105,21 @@ def get_llm(provider_name, model_name, temperature = 0.0, max_tokens = 4096):
 
     cache_key = (provider_name.lower(), model_name, temperature, max_tokens)
     if cache_key not in _llm_cache:
-        logging.info(f"Initializing new LLM: {provider_name}/{model_name} (temp={temperature}, max_tokens={max_tokens})")
-        _llm_cache[cache_key] = UniformLLM(
-            provider_name=provider_name,
-            model_name=model_name,
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
+        # Instance creation is the only probe trigger. This keeps a failed
+        # probe from being retried on every request, while a newly created
+        # instance of an already-probed pair picks up the cached result.
+        # Creation and the probe check happen under the reasoning lock so a
+        # finishing probe cannot miss the new instance.
+        with _reasoning_lock:
+            if cache_key not in _llm_cache:
+                logging.info(f"Initializing new LLM: {provider_name}/{model_name} (temp={temperature}, max_tokens={max_tokens})")
+                _llm_cache[cache_key] = UniformLLM(
+                    provider_name=provider_name,
+                    model_name=model_name,
+                    temperature=temperature,
+                    max_tokens=max_tokens
+                )
+                _start_reasoning_probe_if_needed(_llm_cache[cache_key])
     return _llm_cache[cache_key]
 
 def get_vector_store(
@@ -96,7 +159,8 @@ def get_vector_store(
             provider=provider,
             embeddings=embedding_model_instance.model,
             index_name=index_name,
-            rate_limit_rpm=rate_limit_rpm
+            rate_limit_rpm=rate_limit_rpm,
+            base_dir=get_api_data_dir(),
         )
 
     return _vector_store_cache[cache_key]

@@ -17,10 +17,11 @@ from dotenv import load_dotenv
 load_dotenv('api/utils/sdk_config.env')
 
 from api.utils.sdk_utils import check_env_variables, test_data_catalog_connection
-from utils.utils import normalize_root_path, format_comma_separated_list, validate_data_dir
+from utils.utils import normalize_root_path, format_comma_separated_list, validate_data_dir, get_api_data_dir
 from utils.version import AI_SDK_VERSION
 
-DATA_DIR = validate_data_dir()
+validate_data_dir()
+API_DATA_DIR = get_api_data_dir()
 
 required_vars = [
     "AI_SDK_DATA_MARKETPLACE_URL",
@@ -83,8 +84,12 @@ else:
 # Set this for the tokenizers
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-def log_ai_sdk_parameters():
-    """Validates configuration and logs the initialized SDK parameters."""
+def log_ai_sdk_parameters(log_output=True):
+    """
+    Validates configuration and logs the initialized SDK parameters.
+    With several workers, validation runs in all of them but only one passes
+    log_output=True so the parameters are printed once.
+    """
 
     check_env_variables(required_vars)
 
@@ -115,7 +120,7 @@ def log_ai_sdk_parameters():
         "AI SDK Port": AI_SDK_PORT,
         "AI SDK Root Path": AI_SDK_ROOT_PATH or "/",
         "AI SDK Version": AI_SDK_VERSION,
-        "AI SDK Data Dir (logs, cache, reports...)": DATA_DIR,
+        "AI SDK Data Dir (logs, cache, vector stores, agents...)": API_DATA_DIR,
         "AI SDK Workers": AI_SDK_WORKERS,
         "Using SSL": bool(AI_SDK_SSL_KEY and AI_SDK_SSL_CERT),
         "LLM Model": f"{AI_SDK_LLM_PROVIDER}/{AI_SDK_LLM_MODEL} (temp={AI_SDK_LLM_TEMPERATURE}, max_tokens={AI_SDK_LLM_MAX_TOKENS})",
@@ -150,11 +155,12 @@ def log_ai_sdk_parameters():
     else:
         ai_sdk_params["DeepQuery"] = "Disabled (no thinking model configured)"
 
-    logging.info("AI SDK parameters:")
-    for key, value in ai_sdk_params.items():
-        logging.info(f"    - {key}: {value}")
+    if log_output:
+        logging.info("AI SDK parameters:")
+        for key, value in ai_sdk_params.items():
+            logging.info(f"    - {key}: {value}")
 
-    if not ai_sdk_params["Data Marketplace Connection"]:
-        logging.warning("Could not establish connection to Data Marketplace. Please check your configuration.")
+        if not ai_sdk_params["Data Marketplace Connection"]:
+            logging.warning("Could not establish connection to Data Marketplace. Please check your configuration.")
 
     return ai_sdk_params["Data Marketplace Connection"]

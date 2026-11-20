@@ -10,7 +10,7 @@ You must break down complex tool calls into smaller, simpler tool calls."""
 ANALYSIS_INITIAL_PROMPT = """
 This is the analysis question: {user_input}
 
-First, think, in between <thinking></thinking> tags, exhaustively about the user's database schema provided in <database_schema> and how you are going to carry out the deep analysis.
+First, think exhaustively about the user's database schema provided in <database_schema> and how you are going to carry out the deep analysis.
 Apply your modus operandi and don't forget to think about:
 - First, focus on the user's database schema and write down all the tables and columns related to the analysis question.
 - What extra information do you need from the schema? For example, are there categorical columns that you need a list of all possible values for?
@@ -25,7 +25,6 @@ Apply your modus operandi and don't forget to think about:
 Then, provide your exhaustive, detailed plan on how to tackle this analysis in between <plan></plan> tags.
 Finally, execute the first actions of your plan in between <tools></tools> tags.
 Limit your response (don't use markdown in your response, except when calling the final_answer tool) to:
-- Sketch thinking in between <thinking></thinking> tags.
 - Provide the exhaustive, detailed plan in between <plan></plan> tags.
 - Execute the first actions of your plan in between <tools></tools> tags.
 """

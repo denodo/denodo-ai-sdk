@@ -1,5 +1,6 @@
 import React from "react";
-import { Modal, Button, Form } from "react-bootstrap";
+import { Form } from "react-bootstrap";
+import { BaseModal } from "../Common/Modal";
 
 const RenameChatModal = ({
   show,
@@ -8,33 +9,36 @@ const RenameChatModal = ({
   setNewChatName,
   onConfirm,
 }) => (
-  <Modal show={show} onHide={onHide} centered>
-    <Modal.Header closeButton data-bs-theme="light">
-      <Modal.Title>Rename Chat</Modal.Title>
-    </Modal.Header>
-    <Modal.Body>
-      <Form.Group>
-        <Form.Label>Chat Title</Form.Label>
-        <Form.Control
-          type="text"
-          value={newChatName}
-          onChange={(e) => setNewChatName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onConfirm();
-          }}
-          autoFocus
-        />
-      </Form.Group>
-    </Modal.Body>
-    <Modal.Footer className="border-0 pt-0">
-      <Button variant="light" onClick={onHide}>
-        Cancel
-      </Button>
-      <Button variant="primary" onClick={onConfirm}>
-        Save
-      </Button>
-    </Modal.Footer>
-  </Modal>
+  <BaseModal
+    show={show}
+    onHide={onHide}
+    title="Rename Chat"
+    size="sm"
+    scrollableBody
+    footer={
+      <>
+        <button type="button" className="rcc-ghost-btn" onClick={onHide}>
+          Cancel
+        </button>
+        <button type="button" className="rcc-primary-btn" onClick={onConfirm}>
+          Save
+        </button>
+      </>
+    }
+  >
+    <Form.Group>
+      <Form.Label className="small fw-semibold">Chat Title</Form.Label>
+      <Form.Control
+        type="text"
+        value={newChatName}
+        onChange={(e) => setNewChatName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onConfirm();
+        }}
+        autoFocus
+      />
+    </Form.Group>
+  </BaseModal>
 );
 
 export default RenameChatModal;

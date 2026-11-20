@@ -18,6 +18,12 @@ import threading
 from dotenv import dotenv_values, load_dotenv
 from rich.panel import Panel
 from rich.console import Console
+from utils.chatbot_env import (
+    LEGACY_ENV_WARNING_DETAIL,
+    LEGACY_ENV_WARNING_TITLE,
+    chatbot_env_startup_notice,
+    resolve_chatbot_env_path,
+)
 from utils.runner_migration import run_migration_tool
 from utils.runner_demo import load_demo_data
 from utils.runner_display import print_header, PANEL_WIDTH
@@ -26,15 +32,21 @@ from utils.runner_process import (
     wait_for_services,
     shutdown_gracefully,
     command_listener,
+    get_service_name,
+    abort_sibling_services,
 )
-from utils.utils import is_in_venv, validate_data_dir
+from utils.utils import is_in_venv, validate_data_dir, get_api_data_dir, get_chatbot_data_dir
 
 console = Console()
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Run the AI SDK API and/or sample chatbot with configurable timeout.")
-    parser.add_argument("mode", choices=["api", "sample_chatbot", "both"], help="Mode to run: api, sample_chatbot, or both")
-    parser.add_argument("--migrate", action="store_true", help="Run the migration tool before starting services")
+    parser.add_argument("mode", nargs="?", choices=["api", "sample_chatbot", "both"], help="Mode to run: api, sample_chatbot, or both. Not required with --migrate-only or --migrate-only-and-force")
+    _migrate = parser.add_mutually_exclusive_group()
+    _migrate.add_argument("--migrate", action="store_true", help="Run the interactive migration tool before starting services")
+    _migrate.add_argument("--migrate-only", action="store_true", help="Run the interactive migration tool and exit without starting services")
+    _migrate.add_argument("--migrate-force", action="store_true", help="Run the migration non-interactively and then start services. Unknown variables and duplicates are kept")
+    _migrate.add_argument("--migrate-only-and-force", action="store_true", help="Run the migration non-interactively and exit without starting services. Unknown variables and duplicates are kept")
     parser.add_argument("--timeout", type=int, default=30, help="Timeout in seconds (default: 30)")
     parser.add_argument("--host", default="localhost", help="GRPC host (default: localhost)")
     parser.add_argument("--grpc-port", type=int, default=9994, help="GRPC port (default: 9994)")
@@ -44,6 +56,7 @@ def parse_arguments():
     parser.add_argument("--dm-password", "--dc-password", dest="dc_password", metavar="DM_PASSWORD", default="admin", help="Data Marketplace password (default: admin)")
     parser.add_argument("--no-logs", action="store_true", help="Output logs to console instead of files (interactive mode only)")
     parser.add_argument("--max-log-size", type=int, default=1, help="Maximum log file size in MB before rotation (default: 1)")
+    parser.add_argument("--max-log-files", type=int, default=None, help="Maximum number of log files kept per application; the oldest are deleted (default: AI_SDK_LOG_MAX_FILES / CHATBOT_LOG_MAX_FILES env vars, else 5)")
     parser.add_argument("--production", action="store_true", help="Run in production mode")
     parser.add_argument("--background", action="store_true", help="Run processes in the background and exit after they start.")
     parser.add_argument("--log-level", choices=["DEBUG", "INFO"], default="INFO", help="Set the logging level (default: INFO)")
@@ -51,14 +64,22 @@ def parse_arguments():
     _demo = parser.add_mutually_exclusive_group()
     _demo.add_argument("--load-demo", action="store_true", help="Load demo data (only with mode 'both'). Prompts before overwriting samples_bank if it exists.")
     _demo.add_argument("--load-demo-overwrite", action="store_true", help="Load demo data (only with mode 'both') and drop existing samples_bank without prompting. For non-interactive runs. Cannot be combined with --load-demo.")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.mode is None and not (args.migrate_only or args.migrate_only_and_force):
+        parser.error("mode is required unless --migrate-only or --migrate-only-and-force is set")
+    return args
 
 
 if __name__ == "__main__":
     args = parse_arguments()
+    exit_code = 0
 
-    if args.migrate:
-        run_migration_tool()
+    force_migration = args.migrate_force or args.migrate_only_and_force
+    exit_after_migration = args.migrate_only or args.migrate_only_and_force
+    if args.migrate or args.migrate_only or force_migration:
+        migrated = run_migration_tool(force=force_migration)
+        if exit_after_migration or (force_migration and not migrated):
+            sys.exit(0 if migrated else 1)
         console.print("[dim]Continuing with startup...[/dim]\n")
 
     processes_to_run = []
@@ -70,14 +91,15 @@ if __name__ == "__main__":
     # The API configuration is listed first so that its values win when both
     # files define the same variable.
     config_files = []
+    chatbot_env_path = resolve_chatbot_env_path()
     if args.mode in ["api", "both"]:
         config_files.append('api/utils/sdk_config.env')
     if args.mode in ["sample_chatbot", "both"]:
-        config_files.append('sample_chatbot/chatbot_config.env')
+        config_files.append(chatbot_env_path)
 
     if args.mode == "both":
         dir_api = dotenv_values('api/utils/sdk_config.env').get("AI_SDK_DATA_DIR")
-        dir_chat = dotenv_values('sample_chatbot/chatbot_config.env').get("AI_SDK_DATA_DIR")
+        dir_chat = dotenv_values(chatbot_env_path).get("AI_SDK_DATA_DIR")
 
         if dir_api and dir_chat and dir_api != dir_chat:
             console.print(Panel(
@@ -100,13 +122,23 @@ if __name__ == "__main__":
 
     DATA_DIR = validate_data_dir()
 
-    # Check if running in a virtual environment
+    startup_warnings = []
     if not is_in_venv():
+        startup_warnings.append(
+            "[bold]Not running in virtual environment[/]. "
+            "The AI SDK was executed outside a virtual environment. "
+            "Please be aware that this may cause dependency conflicts. "
+            "You can ignore this warning if using a Denodo-provided image of the AI SDK."
+        )
+    if args.mode in ["sample_chatbot", "both"] and chatbot_env_startup_notice():
+        startup_warnings.append(
+            f"[bold]{LEGACY_ENV_WARNING_TITLE}[/]. {LEGACY_ENV_WARNING_DETAIL}"
+        )
+    if startup_warnings:
+        warning_lines = "\n\n".join(f"- {item}" for item in startup_warnings)
         console.print(Panel(
-            "[bold yellow]WARNING: Not running in virtual environment[/]\n"
-            "[yellow]This application is not running inside a virtual environment.\n"
-            "This may cause dependency conflicts in the AI SDK.\n"
-            "If using the provided image of the AI SDK, you can ignore this warning, as all dependencies are included already.",
+            warning_lines,
+            title="[bold]Warnings",
             border_style="yellow",
             width=PANEL_WIDTH
         ))
@@ -116,7 +148,7 @@ if __name__ == "__main__":
     # Set the tiktoken cache dir to be able to use the AI SDK in offline environments
     # The tiktoken dependency tries to download from the Internet the tokenizer model for the LLM if not
     # Comment out if you're fine with this behavior
-    os.environ["TIKTOKEN_CACHE_DIR"] = "./cache/tiktoken/"
+    os.environ["TIKTOKEN_CACHE_DIR"] = os.path.join(get_api_data_dir(), "cache", "tiktoken")
 
     # Configure MCP mode if enabled
     if args.mcp == "remote":
@@ -165,8 +197,6 @@ if __name__ == "__main__":
         if args.mode in ["sample_chatbot", "both"]:
             processes_to_run.append("sample_chatbot")
 
-        any_failures = False
-
         # Spawn all subprocesses concurrently so the API and the sample
         # chatbot can warm up in parallel
         specs = spawn_services(processes_to_run, args)
@@ -178,34 +208,43 @@ if __name__ == "__main__":
             if spec["log_thread"] is not None:
                 log_threads.append(spec["log_thread"])
 
-        for process_name, _spec in failed:
-            service_display_name = "AI SDK" if process_name == "api" else "Sample chatbot"
-            log_file_path = (
-                os.path.join(DATA_DIR, "logs", f"{process_name}.log")
-                if DATA_DIR != "." else f"logs/{process_name}.log"
-            )
-            debug_command = f"python -m {process_name}.main"
+        if failed:
+            for process_name, _spec in failed:
+                service_display_name = get_service_name(process_name)
+                if process_name == "api":
+                    log_dir = os.path.join(get_api_data_dir(), "logs")
+                else:
+                    log_dir = os.path.join(get_chatbot_data_dir(), "logs")
+                log_file_path = os.path.join(log_dir, f"{process_name}_<YYYYMMDD_HHMMSS>.log")
+                debug_command = f"python -m {process_name}.main"
 
-            console.print(Panel(
-                f"[bold red]{service_display_name} failed to start within {args.timeout} seconds[/]\n\n"
-                f"[white]Check the logs at [cyan]{log_file_path}[/cyan] for more details.[/]\n\n"
-                f"[white]If that doesn't give any details, you can also run the module directly to debug the startup error:[/]\n"
-                f"[yellow]{debug_command}[/]\n\n"
-                f"[italic]Reminder: You should only execute this way to debug, not for execution purposes.[/]",
-                title=f"[bold red]Startup Error - {service_display_name}[/]",
-                border_style="red",
-                width=PANEL_WIDTH
-            ))
-            any_failures = True
+                console.print(Panel(
+                    f"[bold red]{service_display_name} failed to start within {args.timeout} seconds[/]\n\n"
+                    f"[white]Check the logs at [cyan]{log_file_path}[/cyan] for more details.[/]\n\n"
+                    f"[white]If that doesn't give any details, you can also run the module directly to debug the startup error:[/]\n"
+                    f"[yellow]{debug_command}[/]\n\n"
+                    f"[italic]Reminder: You should only execute this way to debug, not for execution purposes.[/]",
+                    title=f"[bold red]Startup Error - {service_display_name}[/]",
+                    border_style="red",
+                    width=PANEL_WIDTH
+                ))
+
+            failed_types = {name for name, _ in failed}
+            for spec in specs:
+                if spec["process_type"] not in failed_types:
+                    if spec["log_thread"] is not None and spec["log_thread"] not in log_threads:
+                        log_threads.append(spec["log_thread"])
+                    if not any(p[1] == spec["process"] for p in processes):
+                        processes.append((display_name.get(spec["process_type"], spec["process_type"]), spec["process"]))
+
+            abort_sibling_services(processes_to_run, failed_types, processes)
+            console.print("\n[bold red]Startup aborted due to failures.[/]")
+            sys.exit(1)
 
         if args.background:
-            if any_failures:
-                console.print("\n[bold red]One or more services failed to start. Check the logs. Processes that started successfully are running in the background.[/]")
-                sys.exit(1)
-            else:
-                console.print("\n[bold green]All services started successfully in the background.[/]")
-                console.print("[bold cyan]Use stop.py to stop the services.[/bold cyan]")
-                sys.exit(0)
+            console.print("\n[bold green]All services started successfully in the background.[/]")
+            console.print("[bold cyan]Use stop.py to stop the services.[/bold cyan]")
+            sys.exit(0)
 
         if processes:
             if sys.stdin.isatty():
@@ -224,9 +263,17 @@ if __name__ == "__main__":
             for name, process in list(processes):
                 if process.poll() is not None:
                     if not getattr(shutdown_gracefully, 'called', False):
-                        console.print(f"[yellow]{name} process ended unexpectedly.[/]")
+                        console.print(f"[bold red]ERROR:[/] {name} process ended unexpectedly.")
+                        exit_code = 1
                     processes.remove((name, process))
             time.sleep(1)
+
+    except SystemExit as se:
+        if se.code is not None:
+            if isinstance(se.code, int):
+                exit_code = se.code
+            else:
+                exit_code = 1
 
     except KeyboardInterrupt:
         shutdown_gracefully(processes)
@@ -234,13 +281,15 @@ if __name__ == "__main__":
     except Exception as e:
         console.print(f"[bold red]Error:[/] {e}")
         shutdown_gracefully(processes)
-        sys.exit(1)
+        exit_code = 1
 
     finally:
         # Cleanup for interactive mode
         if not args.background:
             for thread in log_threads:
-                thread.join()
+                if thread.is_alive():
+                    thread.join()
 
             console.print("[bold green]Shutdown complete.[/]")
-            sys.exit(0)
+
+        sys.exit(exit_code)

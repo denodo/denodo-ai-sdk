@@ -74,7 +74,7 @@ async def get_relevant_tables(
     for table in vector_search:
         if "_" in table.id:
             have_chunks = True
-        _process_and_append_document(table, seen_view_ids, relevant_tables, security_policies_by_view)
+        _process_and_append_document(table, seen_view_ids, relevant_tables, security_policies_by_view, vector_store=vector_store)
 
     # Additional rounds due to chunk fragmentation
     have_multiple_chunks = have_chunks and len(vector_search) > vector_search_k
@@ -209,7 +209,7 @@ async def get_tables_by_name(
 
     requested_names = set(view_names_list)
     for doc in docs:
-        _process_and_append_document(doc, seen_view_ids, relevant_tables, security_policies_by_view)
+        _process_and_append_document(doc, seen_view_ids, relevant_tables, security_policies_by_view, vector_store=vector_store)
 
     relevant_tables = [table for table in relevant_tables if table["view_name"] in requested_names]
     found_names = {table["view_name"] for table in relevant_tables}
@@ -283,7 +283,7 @@ def _build_view_names_scope_error(docs, vdb_list, tag_list, filter_logic="OR"):
     )
 
 def _process_and_append_document(
-    doc, seen_view_ids, relevant_tables, security_policies_by_view, filter_associations=False, valid_view_ids=None
+    doc, seen_view_ids, relevant_tables, security_policies_by_view, filter_associations=False, valid_view_ids=None, vector_store=None
 ):
     """Parses a view document, applies security, and adds it to the results if not seen before."""
     view_id = doc.metadata.get("view_id")
@@ -294,9 +294,16 @@ def _process_and_append_document(
     seen_view_ids.add(view_id)
     security_info = security_policies_by_view.get(view_id, {})
 
-    parsed_doc = sdk_utils.parse_view_document(
-        doc, filter_associations=filter_associations, valid_view_ids=valid_view_ids, security_info=security_info
-    )
+    try:
+        parsed_doc = sdk_utils.parse_view_document(
+            doc, filter_associations=filter_associations, valid_view_ids=valid_view_ids, security_info=security_info, vector_store=vector_store
+        )
+    except ValueError as e:
+        # A single view with missing or corrupted metadata must not fail the
+        # whole retrieval, so it is skipped and the rest are still returned
+        logging.warning(f"Skipping view '{doc.metadata.get('view_name')}' (view_id: {view_id}): {e}")
+        return False
+
     relevant_tables.append(parsed_doc)
     return True
 
@@ -332,7 +339,7 @@ def _perform_additional_rounds(
             for table in new_search:
                 if len(relevant_tables) >= vector_search_k:
                     break
-                _process_and_append_document(table, seen_view_ids, relevant_tables, security_policies_by_view)
+                _process_and_append_document(table, seen_view_ids, relevant_tables, security_policies_by_view, vector_store=vector_store)
 
             current_round += 1
 
@@ -428,6 +435,7 @@ def _get_and_append_associations(
             security_policies_by_view=security_policies_by_view,
             filter_associations=True,
             valid_view_ids=valid_view_ids,
+            vector_store=vector_store,
         )
 
 def _fetch_sample_data(

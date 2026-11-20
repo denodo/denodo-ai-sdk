@@ -131,6 +131,28 @@ def deep_query(
 
     return response
 
+def generate_deepquery_report(
+    deepquery_metadata,
+    api_host,
+    auth,
+    color_palette='red',
+    language='English',
+    verify_ssl=False,
+    timeout=1200,
+    cancel_event=None,
+    **llm_params
+):
+    """Generate the HTML report of a DeepQuery analysis from its stored metadata."""
+    request_body = {
+        'deepquery_metadata': deepquery_metadata,
+        'color_palette': color_palette,
+        'language': language,
+    }
+    request_body.update(llm_params)
+
+    endpoint = f'{api_host}/generateDeepQueryReport'
+    return make_ai_sdk_request(endpoint, request_body, auth, verify_ssl=verify_ssl, timeout=timeout, cancel_event=cancel_event)
+
 def metadata_search(
     search_query,
     api_host,

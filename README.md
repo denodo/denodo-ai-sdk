@@ -34,8 +34,8 @@ To get started with the AI SDK:
 2. Create a new virtual environment (`python -m venv venv`) in the root of the AI SDK's path
 3. Activate the virtual environment (`source venv/bin/activate` for Linux/MacOS or `.\venv\Scripts\activate` for Windows)
 4. Install the requirements.txt (`python -m pip install -r requirements.txt`)
-5. Rename the configuration templates for both AI SDK (`api/utils/sdk_config.env.example` => `api/utils/sdk_config.env`) and the sample chatbot (`sample_chatbot/chatbot_config.env.example` => `sample_chatbot/chatbot_config.env`)
-5. Review the configuration files for both the AI SDK and the sample chatbot and configure your own LLM/embeddings providers
+5. Rename the configuration templates for both AI SDK (`api/utils/sdk_config.env.example` => `api/utils/sdk_config.env`) and the sample chatbot (`sample_chatbot/utils/chatbot_config.env.example` => `sample_chatbot/utils/chatbot_config.env`)
+6. Review the configuration files for both the AI SDK and the sample chatbot and configure your own LLM/embeddings providers
 
 ## Benchmarks
 
@@ -123,6 +123,56 @@ Where Bedrock refers to AWS Bedrock, NVIDIA refers to NVIDIA NIM and Google refe
 * GoogleAIStudio (gemini-embedding-exp-03-07)
 
 Where Bedrock refers to AWS Bedrock, NVIDIA refers to NVIDIA NIM and Google refers to Google Vertex AI.
+
+## Running as a Windows Service
+
+The Denodo AI SDK provides built-in support to run as a native Windows Service. This allows the API and sample chatbot to run continuously in the background, start automatically on system boot, and operate unattended without requiring an active user desktop session.
+
+All service-related files and scripts are located in the `bin/windows/` folder.
+
+### Prerequisites
+
+Ensure you have completed all steps in the [Installation](#installation) section beforehand.
+
+### Configuration (`service.env`)
+
+You can customize how the service behaves by creating a configuration file in `bin/windows/`:
+
+1. Copy or rename `bin/windows/service.env.example` to `bin/windows/service.env`.
+2. Adjust the settings as needed:
+
+| Setting | Default | Description |
+|---|---|---|
+| `DENODO_AI_SDK_SERVICE_STARTUP` | `manual` | Windows startup type: `auto` (starts on boot), `delayed` (delayed auto start), `manual`, or `disabled`. |
+| `DENODO_AI_SDK_SERVICE_MODE` | `both` | Components to run: `both` (FastAPI + Chatbot), `api`, or `sample_chatbot`. |
+| `DENODO_AI_SDK_SERVICE_VENV_DIR` | *(auto-detect)* | Virtual environment folder name or path (optional). If empty or not defined, it auto-detects `venv` and `.venv` in the project root. |
+| `DENODO_AI_SDK_SERVICE_MCP` | `0` | Set to `1` to enable remote MCP endpoint support. |
+| `DENODO_AI_SDK_SERVICE_LOG_LEVEL` | `INFO` | Output log level (`DEBUG`, `INFO`). |
+| `DENODO_AI_SDK_SERVICE_TIMEOUT` | *(SDK default)* | Seconds to wait for the API and chatbot to answer /health at startup. |
+| `DENODO_AI_SDK_SERVICE_MAX_LOG_SIZE` | `1` | Maximum file size in MB before rotating logs. |
+| `DENODO_AI_SDK_SERVICE_MAX_LOG_FILES` | `5` | Maximum number of log session files to retain in `<AI_SDK_DATA_DIR>/windows_service/logs/`. |
+| `DENODO_AI_SDK_SERVICE_PAUSE_ON_ERROR` | `0` | Console behavior on failure: `0` (disabled / exits immediately for unattended CI/CD pipelines), `1` (pauses console window on error for manual debugging). |
+| `AI_SDK_DATA_DIR` | `data/` | Data directory for logs, cache, vector stores, and other generated files. Relative (to project root) or absolute path. Shared with `sdk_config.env` and `chatbot_config.env`. |
+
+> **Note on Environment Variables:** Settings can be defined in `service.env` or passed as Windows system environment variables. If a setting is defined in both places, the value in `service.env` takes precedence.
+
+### How to Run
+
+Administrative Batch scripts are provided inside `bin/windows/` to manage the service lifecycle without manual command-line configuration (they will automatically request elevation via UAC if needed):
+
+1. **Install and start the service:** Run `install_service.bat`. This registers `DenodoAISDK` in the Windows Service Control Manager and launches the configured components.
+2. **Stop the service:** Run `stop_service.bat` to shut down the background processes and free network ports.
+3. **Start the service:** Run `start_service.bat` to launch it again after being stopped.
+4. **Remove the service:** Run `uninstall_service.bat` to unregister and completely remove the service from Windows.
+
+### Logs and Troubleshooting
+
+* **Log Files:** Output from the running application is captured under `<AI_SDK_DATA_DIR>/windows_service/logs/service_YYYYMMDD_HHMMSS.log` with automatic size rotation and cleanup based on your configuration.
+* **Windows Event Viewer:** Service lifecycle events (starts, stops, or unexpected termination) are recorded under `Windows Logs > Application` (Source: `DenodoAISDK`).
+* **Interactive Debugging:** To diagnose startup or dependency issues directly in your console, open an elevated prompt, navigate to `bin/windows/`, and run:
+  ```cmd
+  python service.py debug
+  ```
 
 # Licensing
 Please see the file called LICENSE.

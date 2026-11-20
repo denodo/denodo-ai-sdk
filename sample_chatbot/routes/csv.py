@@ -50,9 +50,9 @@ def check_csv_permissions():
     # Evaluate if the user is allowed to use the CSV
     if not config.is_unstructured_mode_allowed_for_user(
         username=user.id,
-        roles=getattr(user, 'roles', []),
-        is_admin=getattr(user, 'is_admin', False),
-        legacy_permissions_endpoint=getattr(user, 'legacy_permissions_endpoint', False)
+        roles=user.roles,
+        is_admin=user.is_admin,
+        legacy_permissions_endpoint=user.legacy_permissions_endpoint
     ):
         logger.warning(f"[Security] User '{user.id}' attempted to access '{request.path}' without CSV permissions.")
         return jsonify({"success": False, "error": "You do not have permission to use the CSV Knowledge Base."}), 403
@@ -79,9 +79,9 @@ def _resolve_agent_config(user, agent_id):
         raise KeyError(agent_id)
     if not config.is_user_allowed(
         username=user.id,
-        roles=getattr(user, 'roles', []),
-        is_admin=getattr(user, 'is_admin', False),
-        legacy_permissions_endpoint=getattr(user, 'legacy_permissions_endpoint', False),
+        roles=user.roles,
+        is_admin=user.is_admin,
+        legacy_permissions_endpoint=user.legacy_permissions_endpoint,
     ):
         raise PermissionError(agent_id)
     return config
@@ -128,7 +128,7 @@ def _present_source(meta, user, agent_id, can_toggle_collections=False, agent_de
     }
 
 def _is_admin(user):
-    return bool(getattr(user, "is_admin", False))
+    return user.is_admin
 
 def _is_visible_to(meta, user):
     """Public collections are visible to everyone; private ones to their owner
@@ -196,9 +196,9 @@ def list_csv_sources():
     collections = registry.list_collections()
     can_toggle_collections = agent_config.is_unstructured_mode_allowed_for_user(
         username=user.id,
-        roles=getattr(user, 'roles', []),
-        is_admin=getattr(user, 'is_admin', False),
-        legacy_permissions_endpoint=getattr(user, 'legacy_permissions_endpoint', False),
+        roles=user.roles,
+        is_admin=user.is_admin,
+        legacy_permissions_endpoint=user.legacy_permissions_endpoint,
     )
     agent_declares_kbs = bool(agent_config.knowledge_bases)
     sources = [
@@ -525,9 +525,9 @@ def activate_csv_sources():
         return jsonify({"success": False, "error": f"Source '{source_name}' not found"}), 404
     if not agent_config.is_unstructured_mode_allowed_for_user(
         username=user.id,
-        roles=getattr(user, 'roles', []),
-        is_admin=getattr(user, 'is_admin', False),
-        legacy_permissions_endpoint=getattr(user, 'legacy_permissions_endpoint', False),
+        roles=user.roles,
+        is_admin=user.is_admin,
+        legacy_permissions_endpoint=user.legacy_permissions_endpoint,
     ):
         return jsonify({
             "success": False,

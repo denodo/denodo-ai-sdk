@@ -1,10 +1,12 @@
+import logging
 import os
 
+from sample_chatbot.engine.context_window import MAX_CONTEXT_WINDOW, MIN_CONTEXT_WINDOW
 from sample_chatbot.engine.prompts import CHATBOT_SYSTEM_PROMPT
 from sample_chatbot.utils.helpers import get_config_value
 from sample_chatbot.utils.helpers import setup_directory, get_icon_as_base64
 from utils.uniformLLM import UniformLLM
-from utils.utils import normalize_root_path
+from utils.utils import normalize_root_path, get_chatbot_data_dir
 
 class ChatbotConfig:
     """
@@ -27,14 +29,25 @@ class ChatbotConfig:
         self.allowed_users = config_dict.get('allowed_users', None)
         self.allowed_roles = config_dict.get('allowed_roles', None)
 
-        # Centralized Data Directory
-        self.data_dir = os.getenv("AI_SDK_DATA_DIR", ".")
+        # Chatbot-specific Data Directory
+        self.chatbot_data_dir = get_chatbot_data_dir()
 
         # LLM Configuration
         self.llm_provider = get_config_value(settings, 'llm_provider', 'CHATBOT_LLM_PROVIDER')
         self.llm_model = get_config_value(settings, 'llm_model', 'CHATBOT_LLM_MODEL')
         self.llm_temperature = get_config_value(settings, 'llm_temperature', 'CHATBOT_LLM_TEMPERATURE', '0', float)
         self.llm_max_tokens = get_config_value(settings, 'llm_max_tokens', 'CHATBOT_LLM_MAX_TOKENS', '8192', int)
+        raw_context_window = get_config_value(settings, 'llm_context_window', 'CHATBOT_LLM_CONTEXT_WINDOW', '128000', int)
+        self.llm_context_window = min(MAX_CONTEXT_WINDOW, max(MIN_CONTEXT_WINDOW, raw_context_window))
+        if self.llm_context_window != raw_context_window:
+            logging.warning(
+                "Agent '%s' context window %s is outside %s-%s. Using %s.",
+                self.id,
+                raw_context_window,
+                MIN_CONTEXT_WINDOW,
+                MAX_CONTEXT_WINDOW,
+                self.llm_context_window,
+            )
         self.llm_response_rows_limit = get_config_value(settings, 'llm_response_rows_limit', 'CHATBOT_LLM_RESPONSE_ROWS_LIMIT', '15', int)
 
         # Initialize LLM
@@ -93,7 +106,7 @@ class ChatbotConfig:
         self.reporting_enabled = get_config_value(settings, 'reporting_enabled', 'CHATBOT_REPORTING', '0', bool)
         self.feedback_enabled = get_config_value(settings, 'feedback_enabled', 'CHATBOT_FEEDBACK', '0', bool)
         self.unstructured_mode = get_config_value(settings, 'unstructured_mode', 'CHATBOT_UNSTRUCTURED_MODE', '1', bool)
-        self.user_edit_llm = get_config_value(settings, 'user_edit_llm', 'CHATBOT_USER_EDIT_LLM', '0', bool)
+        self.user_edit_llm = get_config_value(settings, 'user_edit_llm', 'CHATBOT_USER_EDIT_LLM', '1', bool)
         self.auto_graph = get_config_value(settings, 'auto_graph', 'CHATBOT_AUTO_GRAPH', '1', bool)
         self.allow_sync = bool(int(os.getenv('CHATBOT_ALLOW_SYNC', '1')))
         self.filters_enabled = settings.get('filters_enabled', True)
@@ -143,6 +156,12 @@ class ChatbotConfig:
         # not user-toggleable, and not readable via the read_skill tool.
         self.disabled_skills = set() if self.deepquery_enabled else {"deepquery"}
 
+        # Whether a specialized agent may read the general agent's 'user'
+        # and 'user-metadata' memories. Metadata memories belong to the user
+        # and are visible to every agent. Declared in the agent YAML as
+        # settings.share_general_memory and on by default.
+        self.share_general_memory = settings.get('share_general_memory', True)
+
         # Knowledge base collection names declared by this agent's YAML
         # (like `skills`, a plain list of names). They are always active for
         # every user of the agent and must already exist in the vector store;
@@ -151,11 +170,7 @@ class ChatbotConfig:
         self.knowledge_bases = [str(name) for name in settings.get('knowledge_bases', []) or []]
 
         # Reporting Configuration
-        if self.data_dir != ".":
-            self.reports_folder = os.path.join(self.data_dir, "reports", self.id)
-        else:
-            self.reports_folder = f"reports/{self.id}"
-
+        self.reports_folder = os.path.join(self.chatbot_data_dir, "reports", self.id)
         self.report_max_size = get_config_value(settings, 'report_max_size', 'CHATBOT_REPORT_MAX_SIZE', '10', int)
         self.report_max_files = get_config_value(settings, 'report_max_files', 'CHATBOT_REPORT_MAX_FILES', '10', int)
 
@@ -296,7 +311,7 @@ class ChatbotConfig:
         """Log the current configuration."""
         logger.info(f"Chatbot parameters for agent: {self.name}")
         logger.info(
-            f"    - LLM Model: {self.llm_provider}/{self.llm_model} (temp={self.llm_temperature}, max_tokens={self.llm_max_tokens})")
+            f"    - LLM Model: {self.llm_provider}/{self.llm_model} (temp={self.llm_temperature}, max_tokens={self.llm_max_tokens}, context_window={self.llm_context_window})")
 
         # Log AI SDK LLM Settings if configured
         if self.ai_sdk_thinking_llm_model:
@@ -312,7 +327,7 @@ class ChatbotConfig:
         logger.info(f"    - Vector Store Provider: {self.vector_store_provider}")
         logger.info(f"    - Database Provider (History): {self.database_provider}")
         logger.info(f"    - AI SDK Host: {self.ai_sdk_host}")
-        logger.info(f"    - AI SDK Data Dir (logs, cache, reports...): {self.data_dir}")
+        logger.info(f"    - Chatbot Data Dir (logs, reports, skills, uploads...): {self.chatbot_data_dir}")
         logger.info(f"    - Chatbot Timeout: {self.chatbot_timeout}s")
         logger.info(f"    - Using SSL: {self.ssl_enabled}")
         logger.info(f"    - DeepQuery: {'enabled' if self.deepquery_enabled else 'disabled'}")
@@ -340,6 +355,8 @@ class ChatbotConfig:
 
         if self.knowledge_bases:
             logger.info(f"    - Agent Knowledge Bases (always active): {self.knowledge_bases}")
+
+        logger.info(f"    - Shares general chat agent memory: {self.share_general_memory}")
 
         if not self.unstructured_mode:
             logger.info("    - Unstructured Mode (CSV): Disabled globally")

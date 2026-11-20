@@ -9,6 +9,7 @@ from flask_login import LoginManager
 
 from utils.uniformEmbeddings import UniformEmbeddings
 from utils.uniformVectorStore import UniformVectorStore
+from utils.utils import get_chatbot_data_dir
 
 # Flask-Login setup
 login_manager = LoginManager()
@@ -40,5 +41,6 @@ def get_unstructured_vector_store(config):
             provider=config.vector_store_provider,
             embeddings=embeddings,
             index_name=UNSTRUCTURED_KB_INDEX_NAME,
+            base_dir=get_chatbot_data_dir(),
         )
         return _unstructured_store

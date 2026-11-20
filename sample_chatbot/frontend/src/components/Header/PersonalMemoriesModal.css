@@ -1,0 +1,231 @@
+.mem-filter-btn {
+  height: 32px;
+}
+
+.mem-filter-btn .rcc-filter-count {
+  margin-left: 0.1rem;
+}
+
+.mem-type-user { color: #1d4ed8; background: #dbeafe; }
+.mem-type-user-metadata { color: #b45309; background: #fef3c7; }
+.mem-type-metadata { color: #047857; background: #d1fae5; }
+
+.mem-link-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.7rem;
+}
+
+.mem-audience {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.mem-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.4;
+  color: #374151;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.mem-tag:hover {
+  color: #006699;
+  background: #e8f4fb;
+  border-color: #b9d7ea;
+}
+
+.mem-meta-link {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #006699;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  max-width: 100%;
+  font-size: inherit;
+}
+
+.mem-meta-link:hover {
+  text-decoration: none;
+}
+
+.mem-meta-link:hover .mem-meta-name {
+  text-decoration: underline;
+}
+
+.mem-meta-kind {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+.mem-meta-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mem-filter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 0.2rem;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.mem-filter-option {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0.28rem 0.4rem;
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: #111827;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.mem-filter-link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  min-width: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.mem-filter-kind {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+.mem-filter-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mem-filter-option input {
+  margin: 0;
+  accent-color: #111827;
+  flex-shrink: 0;
+}
+
+.mem-filter-option:hover,
+.mem-filter-option.is-active {
+  background: #f3f4f6;
+}
+
+.mem-filter-empty {
+  margin: 0.35rem 0.45rem;
+  font-size: 0.82rem;
+  color: #6b7280;
+}
+
+.mem-filter-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.mem-filter-quick {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-shrink: 0;
+}
+
+.mem-filter-quick button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #006699;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.mem-filter-quick button:hover {
+  text-decoration: underline;
+}
+
+.mem-filter-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.4rem;
+}
+
+.mem-filter-search i {
+  position: absolute;
+  left: 0.5rem;
+  font-size: 0.72rem;
+  color: #9ca3af;
+  pointer-events: none;
+}
+
+.mem-filter-search input {
+  width: 100%;
+  height: 28px;
+  padding: 0 0.5rem 0 1.55rem;
+  font-size: 0.8rem;
+  color: #111827;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  outline: none;
+}
+
+.mem-filter-search input:focus {
+  background: #fff;
+  border-color: #6b7280;
+}
+
+.mem-filter-popover {
+  min-width: 18rem;
+  max-width: 22rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+}
+
+.mem-filter-popover .popover-body {
+  padding: 0.9rem;
+}
+
+.mem-filter-popover .form-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #374151;
+}

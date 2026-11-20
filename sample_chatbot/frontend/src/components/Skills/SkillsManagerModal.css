@@ -1,0 +1,90 @@
+/* ==========================================================================
+   Skills Manager (shared split-view rules live in Common/Modal/Modal.css)
+   ========================================================================== */
+
+.skm-add-btn {
+  height: 32px;
+}
+
+.skm-row-name,
+.skm-detail-title {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.skm-ref-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.skm-content-section {
+  margin-bottom: 1.25rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid #eef1f4;
+}
+
+.skm-content-label {
+  margin-bottom: 0.5rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: #6b7280;
+}
+
+.skm-view-pre {
+  margin: 0;
+  padding: 0.9rem;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: #1e293b;
+  white-space: pre-wrap;
+  max-height: 13rem;
+  overflow-y: auto;
+}
+
+.rcc-split-detail .skm-mono-textarea,
+.skm-add-modal .skm-mono-textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.84rem;
+}
+
+.skm-add-modal .form-control {
+  font-size: 0.85rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.skm-add-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 1.1rem;
+}
+
+.skm-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 32px;
+  padding: 0 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: #374151;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.skm-mode-btn:hover:not(:disabled) {
+  background: #f8fafc;
+}
+
+.skm-mode-btn.is-active {
+  color: #006699;
+  background: #e8f4fb;
+  border-color: #b9d7ea;
+}

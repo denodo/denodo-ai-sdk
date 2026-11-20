@@ -7,9 +7,11 @@ __pycache__/
 embeddings/
 reports/
 uploads/
+data/
 .vscode/
 .agents/
 .claude/
+.claude
 skills/*
 !skills/deepquery/
 !skills/deepquery/**

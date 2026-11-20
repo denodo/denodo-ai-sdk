@@ -2,19 +2,47 @@ import os
 import sys
 import time
 import socket
+import logging
 import platform
 import threading
 import subprocess
 import requests
+from datetime import datetime
 import urllib3
 from rich.console import Console
-from utils.utils import normalize_root_path
+from utils.utils import normalize_root_path, get_api_data_dir, get_chatbot_data_dir
 from utils.version import AI_SDK_VERSION
 from utils.yaml.validate_and_parse import load_and_validate_agents
 from utils.runner_display import print_status
 from api.mcp.spaces import load_spaces
 
 console = Console()
+
+SERVICE_NAMES = {
+    "api": "AI SDK",
+    "sample_chatbot": "Sample chatbot",
+}
+
+def get_service_name(process_type):
+    return SERVICE_NAMES.get(process_type, process_type)
+
+def abort_sibling_services(requested_types, failed_types, running_processes, log_threads=None):
+    """
+    Notify and stop any sibling services when a companion service fails to start.
+    """
+    stopped_types = [p for p in requested_types if p not in failed_types]
+    if stopped_types:
+        stopped = ", ".join(get_service_name(p) for p in stopped_types)
+        failed = ", ".join(get_service_name(p) for p in failed_types)
+        console.print(f"\n[yellow]Stopping {stopped} because {failed} failed to start.[/]")
+
+    if running_processes:
+        shutdown_gracefully(running_processes)
+        running_processes.clear()
+
+    for thread in log_threads or []:
+        if thread.is_alive():
+            thread.join()
 
 # The readiness probe targets the service on loopback, so a self-signed
 # certificate is the norm rather than a problem worth warning about.
@@ -26,7 +54,23 @@ def spawn_services(process_types, args):
     so both API and chatbot can warm up concurrently. Returns the list of
     spec dicts which can be passed to `wait_for_services`.
     """
-    return [_spawn_service(p, args) for p in process_types]
+    specs = []
+    for p in process_types:
+        spec = _spawn_service(p, args)
+        if spec is not None:
+            specs.append(spec)
+
+    if len(specs) != len(process_types):
+        started_types = {s["process_type"] for s in specs}
+        failed_types = [p for p in process_types if p not in started_types]
+        running = [(s["process_type"], s["process"]) for s in specs]
+        threads = [s["log_thread"] for s in specs if s["log_thread"] is not None]
+
+        abort_sibling_services(process_types, failed_types, running, threads)
+        console.print("\n[bold red]Startup aborted due to failures.[/]")
+        sys.exit(1)
+
+    return specs
 
 def wait_for_services(specs, args):
     """
@@ -35,7 +79,8 @@ def wait_for_services(specs, args):
 
     The timeout budget is shared across all services from a single wall-clock
     deadline: services that boot quickly do not eat into the budget of
-    slower siblings.
+    slower siblings. If any service fails, checking stops immediately so the
+    caller can gracefully shut down all sibling processes together.
     """
     succeeded = []
     failed = []
@@ -49,6 +94,7 @@ def wait_for_services(specs, args):
                 root_path_prefix=spec["root_path"],
                 imported_agent_names=spec["imported_agent_names"],
                 imported_space_names=spec["imported_space_names"],
+                imported_skills=spec.get("imported_skills"),
             )
             succeeded.append((spec["process_type"], spec))
         else:
@@ -56,6 +102,8 @@ def wait_for_services(specs, args):
             if spec["log_thread"] is not None:
                 spec["log_thread"].join()
             failed.append((spec["process_type"], spec))
+            break
+
     return succeeded, failed
 
 def _wait_until_healthy(spec, deadline):
@@ -118,10 +166,20 @@ def _spawn_service(process_type, args):
     else:
         no_logs = args.no_logs
 
-    data_dir = env.get("AI_SDK_DATA_DIR", ".")
-    log_dir = os.path.join(data_dir, "logs") if data_dir != "." else "logs"
+    if process_type == "api":
+        log_dir = os.path.join(get_api_data_dir(), "logs")
+    elif process_type == "sample_chatbot":
+        log_dir = os.path.join(get_chatbot_data_dir(), "logs")
+    else:
+        log_dir = os.path.join(env.get("AI_SDK_DATA_DIR", "data/"), "logs")
     env['LOG_FILE_PATH'] = os.path.join(log_dir, f"{process_type}.log")
+    # One session id per launch: every worker of the service appends to the
+    # same <service>_<session id>.log file instead of creating its own.
+    env['LOG_SESSION_ID'] = datetime.now().strftime("%Y%m%d_%H%M%S")
     env['LOG_MAX_SIZE_MB'] = str(args.max_log_size)
+    # --max-log-files overrides AI_SDK_LOG_MAX_FILES / CHATBOT_LOG_MAX_FILES
+    if getattr(args, "max_log_files", None):
+        env['AI_SDK_LOG_MAX_FILES' if process_type == "api" else 'CHATBOT_LOG_MAX_FILES'] = str(args.max_log_files)
     env['NO_LOGS_TO_FILE'] = str(no_logs)
     env['LOG_LEVEL'] = args.log_level
 
@@ -143,6 +201,8 @@ def _spawn_service(process_type, args):
     # Settings are read from the environment, which run.py has already
     # populated from the service configuration files.
     if process_type == "api":
+        env_prefix = "AI_SDK"
+        config_file = "sdk_config.env"
         HOST = os.getenv("AI_SDK_HOST")
         PORT = os.getenv("AI_SDK_PORT")
         WORKERS = os.getenv("AI_SDK_WORKERS")
@@ -152,6 +212,8 @@ def _spawn_service(process_type, args):
         ROOT_PATH = normalize_root_path(os.getenv("AI_SDK_ROOT_PATH") or "")
 
     elif process_type == "sample_chatbot":
+        env_prefix = "CHATBOT"
+        config_file = "chatbot_config.env"
         HOST = os.getenv("CHATBOT_HOST")
         PORT = os.getenv("CHATBOT_PORT")
         WORKERS = os.getenv("CHATBOT_WORKERS")
@@ -160,24 +222,54 @@ def _spawn_service(process_type, args):
         TIMEOUT = os.getenv("CHATBOT_TIMEOUT")
         ROOT_PATH = normalize_root_path(os.getenv("CHATBOT_ROOT_PATH") or "")
 
+    missing_vars = []
+    if not HOST:
+        missing_vars.append(f"{env_prefix}_HOST")
+    if not PORT:
+        missing_vars.append(f"{env_prefix}_PORT")
+
+    if args.production:
+        if not WORKERS:
+            missing_vars.append(f"{env_prefix}_WORKERS")
+        if platform.system() != "Windows" and not TIMEOUT:
+            missing_vars.append(f"{env_prefix}_TIMEOUT")
+
+    if missing_vars:
+        console.print(
+            f"\n[bold red]ERROR:[/] Missing required environment variables for [bold]{process_type}[/].\n"
+            f"Please ensure the following variables are set and uncommented in your [cyan]{config_file}[/] file:\n"
+            f"[yellow]{', '.join(missing_vars)}[/]\n"
+        )
+        return None
+
     if not _port_is_free(HOST, PORT):
         console.print(
             f"[bold red]ERROR:[/] Port {PORT} on {HOST} is already in use ({process_type}).\n"
-            f"Stop the existing service first: [cyan]python stop.py {process_type}[/]"
+            f"Stop the existing service first: [cyan]python stop.py {process_type}[/]\n"
         )
-        sys.exit(1)
+        return None
 
     display_url, health_url = _build_service_urls(HOST, PORT, ROOT_PATH, bool(SSL_CERT and SSL_KEY))
 
     imported_agent_names = []
     imported_space_names = []
-    if process_type == "sample_chatbot":
-        imported_agent_names = [
-            agent_config.get("name") or agent_config.get("id", "Unnamed agent")
-            for agent_config in load_and_validate_agents()
-        ]
-    elif process_type == "api" and os.getenv("AI_SDK_MCP_MODE") == "remote":
-        imported_space_names = [f"/space/{name}/mcp" for name in sorted(load_spaces())]
+    imported_skills = []
+    # Collect status entries silently in the parent runner process; the
+    # spawned service subprocesses emit the validation logs to their log
+    # files (or to the console when `--no-logs` is active).
+    logging.disable(logging.CRITICAL)
+    try:
+        if process_type == "sample_chatbot":
+            load_and_validate_agents(report=imported_agent_names)
+            try:
+                from sample_chatbot.engine.skills import load_skills_report
+                load_skills_report(report=imported_skills)
+            except Exception:  # noqa: S110
+                pass
+        elif process_type == "api":
+            load_spaces(report=imported_space_names)
+    finally:
+        logging.disable(logging.NOTSET)
 
     with console.status(f"[bold blue]Starting {process_type}...", spinner="dots"):
         if args.production:
@@ -249,12 +341,11 @@ def _spawn_service(process_type, args):
         "root_path": ROOT_PATH,
         "imported_agent_names": imported_agent_names,
         "imported_space_names": imported_space_names,
+        "imported_skills": imported_skills,
     }
 
 def log_output(process):
-    """
-    Echo the service's output to the console. Only used with `--no-logs`.
-    """
+    """Echo the service's output to the console. Only used with `--no-logs`."""
     try:
         for line in process.stdout:
             sys.stdout.write(line)

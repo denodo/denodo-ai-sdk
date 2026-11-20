@@ -1,6 +1,8 @@
 import React from "react";
+import PropTypes from "prop-types";
 import OverlayTrigger from "react-bootstrap/OverlayTrigger";
 import Tooltip from "react-bootstrap/Tooltip";
+import CopyButton from "../CopyButton/CopyButton";
 
 const assetBaseUrl = import.meta.env.BASE_URL;
 
@@ -14,10 +16,12 @@ const ChatItemActions = ({
   onOpenInfo,
   onFeedback,
   resultsContainerRef,
+  copyText,
+  onError,
 }) => {
-  const tooltipText = result && result.isError ? "View error details" : "AI";
+  const isError = Boolean(result && result.isError);
 
-  const feedbackIcon = config.chatbot_feedback ? (
+  const feedbackIcon = !isError && config.chatbot_feedback ? (
     <OverlayTrigger
       placement="left"
       delay={{ show: 250, hide: 400 }}
@@ -35,13 +39,25 @@ const ChatItemActions = ({
     </OverlayTrigger>
   ) : null;
 
+  const copyIcon = copyText ? (
+    <CopyButton
+      text={copyText}
+      tooltipText={isError ? "Copy error" : "Copy response"}
+      placement="left"
+      container={resultsContainerRef && resultsContainerRef.current}
+      className={isError ? "" : "ms-2"}
+      onError={onError}
+    />
+  ) : null;
+
   const renderBaseIcon = () => {
-    // Always show AI icon as requested for the parent result object
+    if (isError) return null;
+
     return (
       <OverlayTrigger
         placement="left"
         delay={{ show: 250, hide: 400 }}
-        overlay={renderTooltip(tooltipText)}
+        overlay={renderTooltip("AI")}
         container={resultsContainerRef && resultsContainerRef.current}
       >
         <img
@@ -59,9 +75,24 @@ const ChatItemActions = ({
   return (
     <div className="d-flex flex-row align-items-center position-relative">
       {renderBaseIcon()}
+      {copyIcon}
       {feedbackIcon}
     </div>
   );
+};
+
+ChatItemActions.propTypes = {
+  result: PropTypes.shape({
+    isError: PropTypes.bool,
+  }),
+  config: PropTypes.shape({
+    chatbot_feedback: PropTypes.bool,
+  }),
+  onOpenInfo: PropTypes.func,
+  onFeedback: PropTypes.func,
+  resultsContainerRef: PropTypes.object,
+  copyText: PropTypes.string,
+  onError: PropTypes.func,
 };
 
 export default ChatItemActions;

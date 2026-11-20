@@ -24,7 +24,7 @@ from api import config
 
 from api.middleware import logging_context_middleware, RequestCancelledMiddleware
 from api.utils import state_manager
-from utils.logging_utils import get_logging_config
+from utils.logging_utils import setup_logging, run_once
 from utils.runtime_config import reconcile_runtime_config_with_cli
 from utils.version import AI_SDK_VERSION
 
@@ -49,8 +49,7 @@ from api.endpoints import (
     generateGraph,
 )
 
-log_config = get_logging_config()
-logging.config.dictConfig(log_config)
+setup_logging()
 reconcile_runtime_config_with_cli()
 
 # Ignore warnings
@@ -143,16 +142,19 @@ base_app.include_router(generateGraph.router)
 if config.THINKING_MODEL_AVAILABLE:
     base_app.include_router(deepQuery.router)
     base_app.include_router(generateDeepQueryReport.router)
-    logging.info("DeepQuery endpoints enabled (thinking model configured).")
+    if run_once("api.deepquery"):
+        logging.info("DeepQuery endpoints enabled (thinking model configured).")
 else:
-    logging.warning("Thinking LLM model not configured — DeepQuery endpoints disabled.")
+    if run_once("api.deepquery"):
+        logging.warning("Thinking LLM model not configured — DeepQuery endpoints disabled.")
 
-# Log parameters after setup
-config.log_ai_sdk_parameters()
+# Log parameters after setup (only once per launch, but validated in every worker)
+config.log_ai_sdk_parameters(log_output=run_once("api.parameters"))
 
 # MCP Server Logic
 if config.AI_SDK_MCP_MODE == "remote":
-    logging.info("MCP Remote mode enabled - loading MCP server")
+    if run_once("api.mcp_loading"):
+        logging.info("MCP Remote mode enabled - loading MCP server")
     from api.mcp.remote import get_mcp_app
 
     mcp_app = get_mcp_app(
@@ -184,10 +186,12 @@ if config.AI_SDK_MCP_MODE == "remote":
         lifespan=combined_lifespan,
         middleware=mcp_app.user_middleware + base_app.user_middleware,
     )
-    logging.info("MCP endpoints available at /mcp, /database/{database_name}/mcp, /tag/{tag_name}/mcp, /space/{space_name}/mcp")
+    if run_once("api.mcp_endpoints"):
+        logging.info("MCP endpoints available at /mcp, /database/{database_name}/mcp, /tag/{tag_name}/mcp, /space/{space_name}/mcp")
 else:
     app = base_app
-    logging.info("Running in standard mode without MCP")
+    if run_once("api.standard_mode"):
+        logging.info("Running in standard mode without MCP")
 
 if __name__ == "__main__":
     uvicorn.run(
@@ -196,6 +200,6 @@ if __name__ == "__main__":
         port=config.AI_SDK_PORT,
         ssl_keyfile=config.AI_SDK_SSL_KEY,
         ssl_certfile=config.AI_SDK_SSL_CERT,
-        log_config=log_config,
+        log_config=None,
         workers=config.AI_SDK_WORKERS
     )

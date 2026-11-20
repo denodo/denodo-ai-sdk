@@ -6,11 +6,12 @@ import Button from "react-bootstrap/Button";
 import Badge from "react-bootstrap/Badge";
 import Nav from "react-bootstrap/Nav";
 import NavDropdown from "react-bootstrap/NavDropdown";
-import VectorDBSyncModal from "./VectorDBSyncModal";
-import ProfileModal from "./ProfileModal";
-import CSVManagerModal from "./CSVManagerModal/CSVManagerModal";
-import SkillsManagerModal from "./SkillsManagerModal/SkillsManagerModal";
-import { useReport } from "../../contexts/ReportContext";
+import VectorDBManagerModal from "./VectorDBManagerModal/VectorDBManagerModal";
+import UserProfileModal from "./UserProfileModal";
+import KnowledgeBaseManagerModal from "../KnowledgeBase/KnowledgeBaseManagerModal";
+import SkillsManagerModal from "../Skills/SkillsManagerModal";
+import PersonalMemoriesModal from "./PersonalMemoriesModal";
+import { useReport, REPORT_STATUS } from "../../contexts/ReportContext";
 import { useConfig } from "../../contexts/ConfigContext";
 import api from "../../api/client";
 import "./Header.css";
@@ -33,17 +34,19 @@ const Header = ({
   toggleSidebar,
   isSidebarOpen,
   selectedChatbot,
+  chatbots = [],
   isSwitchingAgent,
   onOpenGeneralSettings,
 }) => {
   const [showVectorDBSync, setShowVectorDBSync] = useState(false);
   const [showSkillsManager, setShowSkillsManager] = useState(false);
+  const [showPersonalMemories, setShowPersonalMemories] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showToolsDropdown, setShowToolsDropdown] = useState(false);
   const [showAdminDropdown, setShowAdminDropdown] = useState(false);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
-  const { config } = useConfig();
-  const { reports, setIsModalOpen } = useReport();
+  const { config, clearProfile } = useConfig();
+  const { reports, activeCount, setIsModalOpen } = useReport();
 
   // Hover-delay timers for dropdowns
   const toolsTimerRef = useRef(null);
@@ -138,6 +141,7 @@ const Header = ({
     try {
       await api.post("logout");
       handleClearResults();
+      clearProfile();
       setIsAuthenticated(false);
     } catch (error) {
       console.error("Logout error:", error);
@@ -151,16 +155,20 @@ const Header = ({
       return { bg: "warning", text: "dark" };
     }
 
-    // Check the LAST report in the array
-    const lastReport = reports[reports.length - 1];
-    const status = lastReport?.status;
+    // Jobs still running take precedence
+    if (activeCount > 0) {
+      return { bg: "warning", text: "dark" };
+    }
 
-    if (status === "completed") {
+    // Reports are sorted newest first: the badge reflects the latest one
+    const status = reports[0]?.status;
+
+    if (status === REPORT_STATUS.COMPLETED) {
       return { bg: "success", text: "white" };
-    } else if (status === "failed") {
+    } else if (status === REPORT_STATUS.FAILED) {
       return { bg: "danger", text: "white" };
     } else {
-      return { bg: "warning", text: "dark" };
+      return { bg: "secondary", text: "white" };
     }
   };
 
@@ -260,7 +268,7 @@ const Header = ({
                     >
                       {showDeepQuery && (
                         <NavDropdown.Item onClick={() => setIsModalOpen(true)}>
-                          DeepQuery Reports
+                          DeepQuery Reports Manager
                           {reports.length > 0 && (
                             <Badge
                               bg={badgeProps.bg}
@@ -314,7 +322,7 @@ const Header = ({
                       }}
                     >
                       <NavDropdown.Item onClick={onOpenGeneralSettings}>
-                        General Chat Settings
+                        General chat settings
                       </NavDropdown.Item>
                     </NavDropdown>
                   )}
@@ -345,6 +353,9 @@ const Header = ({
                     <NavDropdown.Item onClick={() => setShowProfile(true)}>
                       Profile
                     </NavDropdown.Item>
+                    <NavDropdown.Item onClick={() => setShowPersonalMemories(true)}>
+                      Memories
+                    </NavDropdown.Item>
                     <NavDropdown.Divider />
                     <NavDropdown.Item
                       onClick={handleLogout}
@@ -360,20 +371,20 @@ const Header = ({
         </Navbar>
       </div>
 
-      <VectorDBSyncModal
+      <VectorDBManagerModal
         show={showVectorDBSync}
         handleClose={() => setShowVectorDBSync(false)}
         syncedResources={syncedResources}
         onResourcesUpdate={onResourcesUpdate}
         defaultTokenLimit={config?.embeddings_token_limit || 0}
       />
-      <ProfileModal
+      <UserProfileModal
         show={showProfile}
         handleClose={() => setShowProfile(false)}
         selectedChatbot={selectedChatbot}
       />
       {showCSVManager !== undefined && (
-        <CSVManagerModal
+        <KnowledgeBaseManagerModal
           show={showCSVManager}
           handleClose={() => setShowCSVManager(false)}
           hasActiveConversation={hasActiveConversation}
@@ -384,6 +395,12 @@ const Header = ({
         show={showSkillsManager}
         handleClose={() => setShowSkillsManager(false)}
         hasActiveConversation={hasActiveConversation}
+        selectedChatbot={selectedChatbot}
+      />
+      <PersonalMemoriesModal
+        show={showPersonalMemories}
+        handleClose={() => setShowPersonalMemories(false)}
+        chatbots={chatbots}
         selectedChatbot={selectedChatbot}
       />
     </>
@@ -406,6 +423,7 @@ Header.propTypes = {
   toggleSidebar: PropTypes.func,
   isSidebarOpen: PropTypes.bool,
   selectedChatbot: PropTypes.object,
+  chatbots: PropTypes.array,
   isSwitchingAgent: PropTypes.bool,
   onOpenGeneralSettings: PropTypes.func,
 };

@@ -182,6 +182,12 @@ def question():
 
         HistoryMetadata.save_new_chat(thread_id, user_obj.id, agent_id, query)
 
+    # The user memory index is baked into the system prompt when the engine
+    # is built. A new chat has an empty transcript, so rebuild the engine
+    # and load the memories saved since the previous chat.
+    if is_new_thread:
+        user_obj.chatbot = None
+
     config_obj = get_config(agent_id)
     chat_service = ChatService(config_obj)
 
@@ -250,6 +256,17 @@ def cancel_question():
             "chat_deleted": chat_deleted,
         })
     return jsonify({"success": False, "error": "No matching in-flight question"}), 404
+
+@chat_bp.route('/api/context_usage', methods=['GET'])
+@login_required
+def context_usage():
+    """Token breakdown of what the next chatbot turn would send for this thread."""
+    thread_id = request.args.get('thread_id') or None
+    if thread_id and not HistoryMetadata.verify_ownership(thread_id, current_user.id):
+        return jsonify({"error": "Access denied"}), 403
+
+    chatbot = current_user.get_or_create_chatbot()
+    return jsonify(chatbot.context_usage(thread_id))
 
 @chat_bp.route('/api/history', methods=['GET'])
 @login_required

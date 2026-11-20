@@ -1,0 +1,254 @@
+.context-composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  min-height: 32px;
+}
+
+.context-usage {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.context-usage-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px 0 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #fff;
+  color: #112533;
+  font-size: 0.84rem;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(17, 37, 51, 0.06);
+  cursor: pointer;
+}
+
+.context-usage-pill:hover {
+  border-color: #112533;
+}
+
+.context-usage-panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: 320px;
+  padding: 16px 16px 12px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  box-shadow: 0 8px 28px rgba(17, 37, 51, 0.12);
+  z-index: 30;
+  text-align: left;
+  color: #112533;
+}
+
+.context-usage-kicker {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.context-usage-percent {
+  font-size: 1.8rem;
+  font-weight: 700;
+  line-height: 1.1;
+  margin-top: 2px;
+}
+
+.context-usage-total {
+  color: #6b7280;
+  font-size: 0.82rem;
+  margin-bottom: 10px;
+}
+
+.context-usage-panel::selection,
+.context-usage-panel *::selection {
+  background-color: #112533;
+  color: #ffffff;
+}
+
+.context-usage-panel::-moz-selection,
+.context-usage-panel *::-moz-selection {
+  background-color: #112533;
+  color: #ffffff;
+}
+
+.context-usage-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #eef0f2;
+  margin-bottom: 12px;
+}
+
+.context-usage-bar span {
+  display: block;
+  height: 100%;
+}
+
+.context-usage-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.context-usage-legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.84rem;
+  padding: 3px 0;
+}
+
+.context-usage-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.context-usage-swatch-free {
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+}
+
+.context-usage-label {
+  flex: 1;
+}
+
+.context-usage-figures {
+  display: flex;
+  gap: 12px;
+  color: #374151;
+  font-variant-numeric: tabular-nums;
+}
+
+.context-usage-share {
+  width: 48px;
+  text-align: right;
+  color: #6b7280;
+}
+
+.context-usage-note,
+.context-usage-footnote {
+  margin: 8px 0 0;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: #6b7280;
+}
+
+.context-usage-note {
+  color: #92400e;
+}
+
+.context-usage-estimate {
+  margin: 10px 0 0;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: #e06a00;
+}
+
+.context-views {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.context-views-measure {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  display: flex;
+  gap: 8px;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.context-views-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.context-view-chip,
+.context-view-more-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #fff;
+  color: #112533;
+  font-size: 0.8rem;
+  text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  box-shadow: 0 1px 2px rgba(17, 37, 51, 0.04);
+}
+
+a.context-view-chip:hover,
+.context-view-more-chip:hover {
+  border-color: #112533;
+  color: #112533;
+}
+
+.context-view-tokens {
+  color: #6b7280;
+  font-variant-numeric: tabular-nums;
+}
+
+.context-view-chip-used {
+  background-color: #e6f4ea;
+  border-color: #5aa469;
+  color: #14532d;
+}
+
+a.context-view-chip-used:hover {
+  border-color: #14532d;
+  color: #14532d;
+}
+
+.context-view-chip-used .context-view-tokens {
+  color: #2e7d32;
+}
+
+.context-view-more-chip {
+  cursor: pointer;
+  color: #6b7280;
+  font-weight: 600;
+}
+
+.context-views-more {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.context-views-popover {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 360px;
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(17, 37, 51, 0.12);
+  z-index: 30;
+}

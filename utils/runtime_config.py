@@ -16,6 +16,7 @@ import tempfile
 import threading
 
 from utils.logging_utils import get_log_level, set_log_level
+from utils.utils import validate_data_dir
 
 # Workers are separate processes, so in-memory changes do not propagate.
 # This file is the shared source of truth for runtime-overridable settings.
@@ -29,9 +30,7 @@ _cached_config = None
 _last_stat = 0.0
 
 def _config_path():
-    data_dir = os.environ.get("AI_SDK_DATA_DIR", ".")
-    logs_dir = os.path.join(data_dir, "logs") if data_dir != "." else "logs"
-    return os.path.join(logs_dir, "runtime_config.json")
+    return os.path.join(validate_data_dir(), "runtime_config.json")
 
 def default_runtime_config():
     return {
@@ -102,7 +101,7 @@ def load_runtime_config():
 def save_runtime_config(config):
     """Atomically write the shared runtime config file."""
     path = _config_path()
-    directory = os.path.dirname(path) or "."
+    directory = os.path.dirname(path)
     os.makedirs(directory, exist_ok=True)
 
     fd, tmp_path = tempfile.mkstemp(dir=directory, prefix="runtime_config.", suffix=".tmp")

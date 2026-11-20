@@ -1,3 +1,50 @@
+version 1.5 - 20261120
+----------------------
+
+- Enabled AI_SDK_DATA_DIR=data/ by default and added automatic migration of legacy logs, vector stores, agents, skills, reports, uploads, and conversation history from the project root into api/, sample_chatbot/, and windows_service/ subdirectories. Setting AI_SDK_DATA_DIR to the project root is no longer allowed
+- Added --migrate-only, --migrate-force, and --migrate-only-and-force so the configuration migration tool can run without starting services or without an interactive terminal. Force mode keeps unknown variables and duplicates, and an active renamed value is kept when the new name is only commented out
+- Added startup validation for required environment variables (HOST and PORT, plus WORKERS and TIMEOUT in production mode) and stopped sibling services when one of them fails to start
+- Fixed the query fixer so it receives the same views that were sent to VQL generation, previously it only received the views used in the generated VQL
+- Tightened metric view VQL rules so metrics are projected only with EVALUATE_METRIC and further calculations are applied in an outer query
+- Clarified LLM function usage in VQL generation prompts
+- Updated text VQL function signatures in generation prompts to match the Denodo documentation
+- Updated sample chatbot answering guidelines so the message after the last tool call is a complete answer, because earlier steps are collapsed in the UI
+- Fixed tooltips appearing behind modals in the sample chatbot
+- Updated pysqlite3-binary to 0.5.4.post2 for x86_64 Linux
+
+version 1.5-beta - 20261113
+----------------------
+
+- Added durable per-user memory support to the sample chatbot across three scopes (About you, Data preferences, and Data facts), with a Memories manager in the user menu, per-agent Memory formation toggles, and a share_general_memory setting for specialized agents
+- Added automatic context-window management to the sample chatbot (CHATBOT_LLM_CONTEXT_WINDOW), deduplicating repeated view schemas in context, trimming older turns when approaching output capacity, and displaying context usage and active views in the UI
+- Made DeepQuery execution asynchronous in the sample chatbot, adding multi-language report generation, background job tracking and cancellation, an interactive report viewer and data explorer in the DeepQuery Reports Manager, and CHATBOT_MAX_REPORTS_PER_USER (default 20)
+- Added native Windows Service support under bin/windows/ with service.env configuration and lifecycle batch scripts, documented in the README
+- Persisted sample chatbot user profile settings, input method, number formatting, custom instructions, and LLM overrides across server restarts
+- Upgraded MCP server dependencies (fastmcp and mcp) to support the stateless 2026-07-28 MCP protocol
+- Upgraded Anthropic and AWS Bedrock libraries and added reasoning effort suffixes (low, medium, high, xhigh, max) for Claude models on native Anthropic and AWS Bedrock
+- Improved the logging system using Loguru with shared per-launch log files across worker processes, deduplicated startup parameter banners, and configurable log file retention via AI_SDK_LOG_MAX_FILES, CHATBOT_LOG_MAX_FILES, and --max-log-files
+- Added configurable security headers to sample chatbot responses (CHATBOT_STRICT_TRANSPORT_SECURITY, CHATBOT_CONTENT_SECURITY_POLICY, CHATBOT_PERMISSIONS_POLICY, and CHATBOT_X_CONTENT_TYPE_OPTIONS)
+- Added PGVECTOR_AUTOCREATE_EXTENSION to allow disabling automatic PgVector extension creation during vector store initialization
+- Updated view chunking to store view_json only in the first chunk and skip views with missing metadata during retrieval instead of failing the entire search
+- Listed detected skills alongside specialized agents and AI Spaces at startup with OK, WARNING, and ERROR validation statuses
+- Displayed generate_graph SVG charts inline within sample chatbot responses
+- Added a VQL tab with copy support to the Graph View modal in the sample chatbot
+- Auto-collapsed intermediate tool call steps after response streaming finishes in the sample chatbot and updated prompts to show brief status updates before tool calls
+- Added copy buttons for both user questions and assistant responses in the sample chatbot
+- Updated and unified sample chatbot modal styles to match the DeepQuery Reports Manager
+- Enabled sample chatbot LLM editing by default (CHATBOT_USER_EDIT_LLM=1) and updated chatbot_config.env.example to show active defaults
+- Moved sample chatbot configuration files into sample_chatbot/utils/ (keeping fallback support for sample_chatbot/ with a startup warning and an interactive move prompt in --migrate)
+- Included the request transaction_id in Langfuse trace metadata
+- Added non-blocking background reasoning detection during LLM initialization to determine and log whether configured models emit reasoning tokens
+- Upgraded dependencies in requirements.txt for Python 3.14 compatibility
+- Updated requirements.txt to remediate routine dependency CVEs
+- Fixed SambaNova LLM provider compatibility with langchain-sambanova 1.0.0
+- Fixed the sample chatbot Additional Information modal displaying VQL from the wrong tool call when multiple tool calls ran in the same turn
+- Fixed sample chatbot login failing with a 500 error in FIPS-enabled environments
+- Updated DeepQuery analysis prompts to remove explicit <thinking> tag instructions
+- Fixed typos, VQL function syntax, and identifier quoting across VQL generation rule prompts
+- Clarified supported Oracle Database versions (>= 23.4), connection string format (<host>:<port>/<database>), and schema behavior in the example configuration files
+
 version 1.4 - 20261001
 ----------------------
 

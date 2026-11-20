@@ -33,14 +33,11 @@ export const useChatLimits = (dispatch) => {
         payload: { resultIndex: limitModal.pendingData.resultIndex },
       });
     }
-    setLimitModal({
+    setLimitModal((prev) => ({
+      ...prev,
       show: false,
-      type: null,
       pendingData: null,
-      limit: 0,
-      current: 0,
-      targetsToDelete: [],
-    });
+    }));
   };
 
   return {

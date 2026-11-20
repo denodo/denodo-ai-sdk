@@ -5,6 +5,11 @@ import logging
 from utils.utils import RefreshableBotoSession, get_custom_headers_from_env
 
 class UniformLLM:
+    # Trivial prompt used only to detect whether this configuration actually
+    # produces reasoning tokens. Verified live to trigger reasoning tokens on
+    # every reasoning-enabled provider tested while staying cheap.
+    REASONING_PROBE_PROMPT = "Solve 13*197 thinking step by step. Give the final answer."
+
     VALID_PROVIDERS = [
         "openai",
         "azure",
@@ -26,6 +31,10 @@ class UniformLLM:
         self.llm = None
         self.temperature = temperature # NOTE: Temperature in OpenAI goes from 0 to 2
         self.max_tokens = max_tokens
+        # Whether this (provider, model) configuration produces reasoning
+        # tokens, shared across temperature/max_tokens variants of the pair.
+        # None = Unknown (not probed yet, or the probe failed).
+        self.reasoning_enabled = None
         self.tokens = {
             'input_tokens': 0,
             'output_tokens': 0,
@@ -34,7 +43,7 @@ class UniformLLM:
         self.effort_suffix_profiles = {
             "openai": ["none", "minimal", "low", "medium", "high", "xhigh"],
             "google_gemini": ["low", "medium", "high"],
-            "google_anthropic": ["low", "medium", "high", "xhigh", "max"],
+            "anthropic": ["low", "medium", "high", "xhigh", "max"],
         }
 
         if self.provider_name.lower() == "openai":
@@ -78,6 +87,62 @@ class UniformLLM:
             logging.info(f"- {self.provider_name.upper()}_PROXY (optional)")
             logging.info(f"- {self.provider_name.upper()}_RESPONSES_API (optional, defaults to 0)")
             self.setup_custom()
+
+    @staticmethod
+    def _response_uses_reasoning(response):
+        """
+        Detects whether a LangChain response actually used reasoning.
+
+        LangChain normalizes reasoning token counts into
+        usage_metadata["output_token_details"]["reasoning"] for most
+        providers (OpenAI, Azure, Anthropic, Google, OpenRouter, Groq).
+        Bedrock does not populate that field, but returns "thinking" content
+        blocks when reasoning is used, so those are checked as a fallback.
+        Visible step-by-step text is NOT a signal: non-reasoning models
+        produce it too when asked to think step by step.
+        """
+        usage_metadata = response.usage_metadata or {}
+        output_token_details = usage_metadata.get("output_token_details") or {}
+        if output_token_details.get("reasoning"):
+            return True
+
+        content = response.content
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") in ("thinking", "reasoning"):
+                    return True
+
+        additional_kwargs = response.additional_kwargs or {}
+        if additional_kwargs.get("reasoning_content"):
+            return True
+
+        return False
+
+    def detect_reasoning_enabled(self):
+        """
+        Probes this LLM once and sets self.reasoning_enabled accordingly.
+
+        Returns True/False on success. On any error, leaves
+        self.reasoning_enabled as None (Unknown) and returns None, so a
+        transient failure is never cached as "not a reasoning model".
+        Intended to run in a background thread; never raises.
+        """
+        try:
+            response = self.llm.invoke(self.REASONING_PROBE_PROMPT)
+            reasoning_enabled = self._response_uses_reasoning(response)
+        except Exception as e:
+            logging.warning(
+                f"LLM reasoning detection failed for {self.provider_name}/{self.model_name}: "
+                f"{type(e).__name__}: {e}. reasoning_enabled stays Unknown."
+            )
+            return None
+
+        self.reasoning_enabled = reasoning_enabled
+        logging.info(
+            f"LLM reasoning detection: {self.provider_name}/{self.model_name} "
+            f"reasoning_enabled={self.reasoning_enabled}"
+        )
+        return self.reasoning_enabled
 
     def _get_use_responses_api(self, provider_prefix, default='0'):
         use_responses_api = os.getenv(f'{provider_prefix}_RESPONSES_API', default) == '1'
@@ -161,7 +226,7 @@ class UniformLLM:
         self.llm = ChatOpenAI(**kwargs)
 
     def setup_sambanova(self):
-        from langchain_sambanova import ChatSambaNovaCloud
+        from langchain_sambanova import ChatSambaNova
 
         api_key = os.getenv('SAMBANOVA_API_KEY')
         if api_key is None:
@@ -169,13 +234,13 @@ class UniformLLM:
 
         sambanova_kwargs = {
             "model": self.model_name,
-            "sambanova_api_key": api_key,
+            "api_key": api_key,
             "max_tokens": self.max_tokens,
         }
         if self.temperature != -1:
             sambanova_kwargs["temperature"] = self.temperature
 
-        self.llm = ChatSambaNovaCloud(**sambanova_kwargs)
+        self.llm = ChatSambaNova(**sambanova_kwargs)
 
     def setup_google_ai_studio(self):
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -239,12 +304,20 @@ class UniformLLM:
         if api_key is None:
             raise ValueError("ANTHROPIC_API_KEY environment variable not set.")
 
+        model, effort = self._parse_effort_suffix("anthropic")
+
         kwargs = {
-            "model_name": self.model_name,
+            "model_name": model,
             "api_key": api_key,
             "max_tokens": self.max_tokens,
         }
-        if self.temperature != -1:
+        # Effort is forwarded as adaptive thinking + output_config.effort. Temperature
+        # is omitted, matching the OpenAI reasoning path: several Claude models reject
+        # a non-default temperature while thinking is active.
+        if effort:
+            kwargs["thinking"] = {"type": "adaptive"}
+            kwargs["output_config"] = {"effort": effort}
+        elif self.temperature != -1:
             kwargs["temperature"] = self.temperature
 
         if base_url is not None:
@@ -297,7 +370,7 @@ class UniformLLM:
         if google_anthropic_deployment:
             from langchain_google_vertexai.model_garden import ChatAnthropicVertex
 
-            model, effort = self._parse_effort_suffix("google_anthropic")
+            model, effort = self._parse_effort_suffix("anthropic")
 
             params = {
                 "model_name": model,
@@ -516,11 +589,13 @@ class UniformLLM:
         AWS_CLAUDE_THINKING_TOKENS = os.getenv("AWS_CLAUDE_THINKING_TOKENS", "2000")
         AWS_CUSTOM_URL = os.getenv("AWS_CUSTOM_URL")
 
-        model = self.model_name
+        model, effort = self._parse_effort_suffix("anthropic")
         provider = None
         enable_thinking = False
 
-        if model.endswith("-enablethinking"):
+        # Legacy token-budget thinking for Claude models that do not accept
+        # adaptive thinking.
+        if not effort and model.endswith("-enablethinking"):
             model = model.replace("-enablethinking", "")
             enable_thinking = True
             logging.info(f"Attempting to activate thinking mode on model ID: {model} on provider: {self.provider_name}")
@@ -556,11 +631,18 @@ class UniformLLM:
 
         client = session.client(**client_kwargs)
 
-        # Prepare ChatBedrock initialization parameters
+        # Prepare ChatBedrock initialization parameters.
+        # Effort suffixes use adaptive thinking. Temperature is omitted in that case,
+        # same as the legacy budget path, because Claude rejects it while thinking.
         model_kwargs = {
             "max_tokens": self.max_tokens
         }
-        if self.temperature != -1:
+        if effort:
+            model_kwargs["thinking"] = {"type": "adaptive"}
+            model_kwargs["output_config"] = {"effort": effort}
+        elif enable_thinking:
+            model_kwargs["thinking"] = {"type": "enabled", "budget_tokens": int(AWS_CLAUDE_THINKING_TOKENS)}
+        elif self.temperature != -1:
             model_kwargs["temperature"] = self.temperature
 
         bedrock_kwargs = {
@@ -571,12 +653,6 @@ class UniformLLM:
 
         if provider:
             bedrock_kwargs["provider"] = provider
-
-        if enable_thinking:
-            bedrock_kwargs["model_kwargs"] = {
-                "thinking": {"type": "enabled", "budget_tokens": int(AWS_CLAUDE_THINKING_TOKENS)},
-                "max_tokens": self.max_tokens,
-            }
 
         self.llm = ChatBedrock(**bedrock_kwargs)
 

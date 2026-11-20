@@ -12,7 +12,8 @@ from sample_chatbot.routes.metadata import metadata_bp
 from sample_chatbot.routes.settings import settings_bp
 from sample_chatbot.routes.reporting import reporting_bp
 from sample_chatbot.routes.skills import skills_bp
-from sample_chatbot.routes.deepquery import deepquery_bp
+from sample_chatbot.routes.memory import memory_bp
+from sample_chatbot.routes.reports import reports_bp
 from sample_chatbot.routes.frontend import frontend_bp
 
 def register_blueprints(app, url_prefix=""):
@@ -35,7 +36,8 @@ def register_blueprints(app, url_prefix=""):
     chatbot_bp.register_blueprint(settings_bp)
     chatbot_bp.register_blueprint(reporting_bp)
     chatbot_bp.register_blueprint(skills_bp)
-    chatbot_bp.register_blueprint(deepquery_bp)
+    chatbot_bp.register_blueprint(memory_bp)
+    chatbot_bp.register_blueprint(reports_bp)
     chatbot_bp.register_blueprint(frontend_bp)
 
     # Register transaction ID middleware on the main blueprint

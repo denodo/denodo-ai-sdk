@@ -1,0 +1,548 @@
+/* DeepQuery Reports Manager (shared modal rules live in Common/Modal/Modal.css) */
+
+/* ---------- List view ---------- */
+.rcc-list-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.rcc-list-scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 0.75rem 1.25rem 1.25rem;
+  overflow-y: auto;
+}
+
+.rcc-flat-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- Rows ---------- */
+.rcc-row {
+  padding: 0.85rem 0.6rem;
+  background-color: #ffffff;
+  border-radius: 0;
+  border-bottom: 1px solid #e5e7eb;
+  transition: border-color 0.15s;
+}
+
+.rcc-row:last-child {
+  border-bottom-color: transparent;
+}
+
+.rcc-row-main {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.rcc-dot {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  background: #9ca3af;
+  border-radius: 50%;
+}
+
+.rcc-st-completed .rcc-dot { background: #10b981; }
+.rcc-st-failed .rcc-dot { background: #ef4444; }
+.rcc-st-pending .rcc-dot { background: #f59e0b; }
+.rcc-st-processing .rcc-dot { background: #3b82f6; animation: rcc-pulse 1.4s ease-in-out infinite; }
+
+.rcc-row-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.rcc-row-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #111827;
+  cursor: default;
+}
+
+.rcc-row-sub {
+  margin-top: 0.15rem;
+  font-size: 0.8rem;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rcc-row-meta {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.rcc-lang {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #374151;
+  background: #f3f4f6;
+  border-radius: 6px;
+  white-space: nowrap;
+  width: 90px;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rcc-status-wrapper {
+  width: 90px;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.rcc-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 5.5rem;
+  padding: 0.15rem 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.rcc-status.rcc-st-completed { color: #047857; background: #d1fae5; }
+.rcc-status.rcc-st-failed { color: #b91c1c; background: #fee2e2; }
+.rcc-status.rcc-st-pending { color: #b45309; background: #fef3c7; }
+.rcc-status.rcc-st-processing { color: #1d4ed8; background: #dbeafe; }
+.rcc-status.rcc-st-cancelled { color: #4b5563; background: #e5e7eb; }
+
+.rcc-time {
+  width: 75px;
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: #9ca3af;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.rcc-row-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  width: 200px;
+  flex-shrink: 0;
+}
+
+/* Running rows: shimmering progress bar + stage label */
+.rcc-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.rcc-progress-bar {
+  position: relative;
+  flex: 0 1 220px;
+  width: 220px;
+  height: 5px;
+  overflow: hidden;
+  background: #e5e7eb;
+  border-radius: 999px;
+}
+
+.rcc-progress-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, #3b82f6, #8b5cf6, transparent);
+  transform: translateX(-100%);
+  animation: rcc-shimmer 1.4s ease-in-out infinite;
+}
+
+.rcc-stage {
+  font-size: 0.78rem;
+  color: #6b7280;
+}
+
+.rcc-error {
+  margin-top: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.8rem;
+  color: #b91c1c;
+  background: #fef2f2;
+  border-radius: 8px;
+  word-break: break-word;
+}
+
+/* ---------- Buttons ---------- */
+.rcc-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 1rem;
+  color: #4b5563;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.rcc-icon-btn:hover:not(:disabled),
+.rcc-icon-btn.is-active {
+  color: #111827;
+  background: #e5e7eb;
+}
+
+.rcc-icon-btn-accent:hover:not(:disabled) { color: #1d4ed8; background: #dbeafe; }
+.rcc-icon-btn-danger:hover:not(:disabled) { color: #b91c1c; background: #fee2e2; }
+
+.rcc-icon-btn:focus-visible,
+.rcc-ghost-btn:focus-visible,
+.rcc-filter:focus-visible,
+.rcc-primary-btn:focus-visible,
+.rcc-chip:focus-visible,
+.rcc-chip-btn:focus-visible,
+.rcp-back:focus-visible,
+.rcp-crumb-link:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+.rcc-icon-btn:disabled {
+  opacity: 0.4;
+}
+
+.rcc-ghost-btn,
+.rcc-primary-btn,
+.rcc-soft-btn,
+.rcc-solid-btn {
+  height: 32px;
+  padding: 0 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  border-radius: 8px;
+}
+
+.rcc-ghost-btn {
+  color: #ffffff;
+  background: #006699;
+  border: 1px solid #006699;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.rcc-ghost-btn:hover:not(:disabled) {
+  color: #ffffff;
+  background: #005580;
+  border-color: #005580;
+}
+
+.rcc-ghost-danger {
+  color: #ffffff;
+  background: #2d3f4b;
+  border: 1px solid #2d3f4b;
+}
+
+.rcc-ghost-danger:hover:not(:disabled) {
+  color: #ffffff;
+  background: #1a2b34;
+  border-color: #1a2b34;
+}
+
+.rcc-primary-btn {
+  color: #ffffff;
+  background: #2d3f4b;
+  border: 1px solid #2d3f4b;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.rcc-primary-btn:hover:not(:disabled) {
+  background: #1a2b34;
+  border-color: #1a2b34;
+}
+
+.rcc-primary-btn:disabled {
+  opacity: 0.5;
+}
+
+.rcc-soft-btn.btn {
+  color: #1f2937;
+  background: #f1f3f5;
+  border: 0;
+  display: inline-flex;
+  align-items: center;
+}
+
+.rcc-soft-btn.btn:hover,
+.rcc-soft-btn.btn.show {
+  background: #e5e7eb;
+}
+
+.rcc-solid-btn.btn {
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+}
+
+.rcc-chip,
+.rcc-chip-btn {
+  padding: 0.15rem 0.65rem;
+  font-size: 0.78rem;
+  color: #374151;
+  background: #f3f4f6;
+  border: 0;
+  border-radius: 999px;
+  transition: background 0.15s;
+}
+
+.rcc-chip:hover,
+.rcc-chip-btn:hover {
+  background: #e5e7eb;
+}
+
+.rcc-chip-btn {
+  padding: 0.3rem 0.8rem;
+  font-weight: 500;
+}
+
+/* ---------- Inline variant form ---------- */
+.rcc-variant-form {
+  margin: 0.6rem 0 0.2rem 1.4rem;
+  padding: 0.75rem 0.9rem;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+
+.rcc-variant-label {
+  margin-bottom: 0.5rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.rcc-variant-label .text-muted {
+  font-weight: 400;
+}
+
+.rcc-variant-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.rcc-language-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+/* Full-title popover: width-limited and scrollable */
+.rcc-title-popover {
+  max-width: 420px;
+}
+
+.rcc-title-popover .popover-body {
+  max-height: 40vh;
+  overflow-y: auto;
+  font-size: 0.85rem;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---------- Empty state ---------- */
+.rcc-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  padding: 3rem 1rem;
+  text-align: center;
+}
+
+.rcc-empty i {
+  margin-bottom: 0.75rem;
+  font-size: 2.5rem;
+  color: #d1d5db;
+}
+
+.rcc-empty-small {
+  padding: 2rem 1rem;
+}
+
+/* ---------- In-place panels (explorer / viewer) ---------- */
+.rcp-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.rcp-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.6rem 1.25rem;
+  background: #fff;
+  border-bottom: 1px solid #eef1f4;
+}
+
+.rcp-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 32px;
+  padding: 0 0.8rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #1f2937;
+  background: #f1f3f5;
+  border: 0;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+
+.rcp-back:hover {
+  background: #e5e7eb;
+}
+
+.rcp-crumbs {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  font-size: 0.85rem;
+  overflow: hidden;
+}
+
+.rcp-crumb {
+  max-width: 320px;
+  padding: 0;
+  color: #6b7280;
+  background: none;
+  border: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rcp-crumb-link:hover {
+  color: #111827;
+  text-decoration: underline;
+}
+
+.rcp-crumb-current {
+  font-weight: 600;
+  color: #111827;
+}
+
+.rcp-crumb-sep {
+  flex: 0 0 auto;
+  font-size: 0.65rem;
+  color: #9ca3af;
+}
+
+.rcp-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.rcp-content {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: #fff;
+}
+
+.rcp-content-scroll {
+  padding: 1.25rem;
+  overflow-y: auto;
+}
+
+/* ---------- Explorer ---------- */
+.rcx-summary {
+  margin-bottom: 1rem;
+  padding: 0.9rem 1rem;
+  background: #f8fafc;
+  border-radius: 10px;
+}
+
+.rcx-source {
+  margin-bottom: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid #eef1f4;
+  border-radius: 10px;
+}
+
+.rcx-source-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-right: 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #fff;
+  background: #1f2937;
+  border-radius: 50%;
+}
+
+.rcx-detail-head {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+/* ---------- Animations ---------- */
+@keyframes rcc-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+@keyframes rcc-shimmer {
+  to { transform: translateX(100%); }
+}
+
+@media (max-width: 991px) {
+  .rcc-row-main {
+    flex-wrap: wrap;
+  }
+
+  .rcc-row-meta {
+    order: 3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rcc-live-dot,
+  .rcc-st-processing .rcc-dot,
+  .rcc-progress-bar::after {
+    animation: none;
+  }
+
+  .rcc-progress-bar::after {
+    transform: none;
+    background: #3b82f6;
+    opacity: 0.6;
+  }
+}

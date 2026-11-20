@@ -114,12 +114,19 @@ async def similaritySearch(
         view_id = str(doc.metadata.get("view_id", ""))
         security_info = security_policies_by_view.get(view_id, {})
 
-        view_dict = parse_view_document(
-            doc=doc,
-            filter_associations=True, 
-            valid_view_ids=valid_view_ids,
-            security_info=security_info
-        )
+        try:
+            view_dict = parse_view_document(
+                doc=doc,
+                filter_associations=True, 
+                valid_view_ids=valid_view_ids,
+                security_info=security_info,
+                vector_store=vector_store
+            )
+        except ValueError as e:
+            # A single view with missing or corrupted metadata must not fail
+            # the whole search, so it is skipped and the rest are still returned
+            logging.warning(f"Skipping view '{doc.metadata.get('view_name')}' (view_id: {view_id}): {e}")
+            continue
 
         view_dict["database_name"] = doc.metadata.get("database_name", "")
 

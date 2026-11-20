@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { actionTypes } from "../reducers/chatReducer";
 import { buildApiUrl } from "../api/client";
 
-const useSDK = (dispatch, onRequestComplete, currentThreadId, onThreadIdUpdate, onLimitReached, autoOverwriteAccepted) => {
+const useSDK = (dispatch, onRequestComplete, currentThreadId, onThreadIdUpdate, onLimitReached, autoOverwriteAccepted, onContextUsage) => {
   const [isLoading, setLoading] = useState(false);
   const [runningRequests, setRunningRequests] = useState(new Set());
   const activeControllers = useRef(new Map()); // Map of requestId -> { controller, resultIndex }
@@ -159,6 +159,9 @@ const useSDK = (dispatch, onRequestComplete, currentThreadId, onThreadIdUpdate, 
             payload: { resultIndex, toolName: tool_name, toolCallId: tool_call_id, content, artifact }
         });
       } else if (type === 'done') {
+        if (payload.context_usage && onContextUsage) {
+          onContextUsage(payload.context_usage);
+        }
         dispatch({
             type: actionTypes.COMPLETE_CHAT_ITEM,
             payload: { resultIndex, payload }

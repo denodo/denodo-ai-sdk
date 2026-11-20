@@ -3,7 +3,7 @@ import httpx
 import logging
 
 from langchain_classic.storage import LocalFileStore
-from utils.utils import RefreshableBotoSession, get_custom_headers_from_env
+from utils.utils import RefreshableBotoSession, get_custom_headers_from_env, get_api_data_dir
 from langchain_classic.embeddings import CacheBackedEmbeddings
 
 class UniformEmbeddings:
@@ -23,11 +23,7 @@ class UniformEmbeddings:
         self.provider_name = provider_name
         self.model_name = model_name
         self.model = None
-        data_dir = os.getenv("AI_SDK_DATA_DIR", ".")
-        if data_dir != ".":
-            cache_path = os.path.join(data_dir, "cache", "embeddings")
-        else:
-            cache_path = "./cache/embeddings/"
+        cache_path = os.path.join(get_api_data_dir(), "cache", "embeddings")
 
         self.store = LocalFileStore(cache_path)
         self.base_embeddings = None

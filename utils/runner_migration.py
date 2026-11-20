@@ -11,6 +11,13 @@ from rich.text import Text
 from rich.table import Table
 from rich.prompt import Confirm
 from dotenv import parser as dotenv_parser
+from utils.chatbot_env import (
+    CANONICAL_CHATBOT_ENV,
+    CANONICAL_CHATBOT_EXAMPLE,
+    list_legacy_chatbot_env_files,
+    move_legacy_chatbot_env_files,
+    resolve_chatbot_env_path,
+)
 from utils.version import AI_SDK_VERSION
 
 console = Console()
@@ -22,8 +29,7 @@ PANEL_WIDTH = 60
 
 SDK_ENV_PATH = os.path.join(".", "api", "utils", "sdk_config.env")
 SDK_EXAMPLE_PATH = SDK_ENV_PATH + ".example"
-CHATBOT_ENV_PATH = os.path.join(".", "sample_chatbot", "chatbot_config.env")
-CHATBOT_EXAMPLE_PATH = CHATBOT_ENV_PATH + ".example"
+CHATBOT_EXAMPLE_PATH = CANONICAL_CHATBOT_EXAMPLE
 
 # ---------------------------------------------------------------------------
 # Rename rules  (applied in order — first match wins per variable)
@@ -304,6 +310,30 @@ def _apply_renames(variables, rename_rules):
 
     return renamed, rename_log, conflicts
 
+def _prefer_active_rename_source(user_vars, rename_log, conflicts):
+    """Keep the active old value when the new name is only commented out.
+
+    The commented value is returned so it can be written on the next line.
+    """
+    kept = []
+    displaced = []
+    for conflict in conflicts:
+        current = user_vars.get(conflict["new"])
+        incoming = conflict["info"]
+        if current and incoming.get("active") and not current.get("active"):
+            user_vars[conflict["new"]] = incoming
+            rename_log.append((conflict["old"], conflict["new"]))
+            displaced.append({
+                "var_name": conflict["new"],
+                "active": False,
+                "value": current.get("value", ""),
+                "clean_value": current.get("clean_value", ""),
+                "export": current.get("export", False),
+            })
+            continue
+        kept.append(conflict)
+    return kept, displaced
+
 def _apply_renames_to_duplicates(duplicates, rename_rules):
     """Apply rename rules to duplicate variable names."""
     renamed = []
@@ -377,7 +407,13 @@ def _analyze(example_path, env_path, rename_rules, provider_keys, known_provider
     template_lines, example_vars = _parse_example_template(example_path)
     user_vars_raw, duplicates_raw, parse_error = _parse_env_variables(env_path)
     user_vars, rename_log, rename_conflicts = _apply_renames(user_vars_raw, rename_rules)
+    rename_conflicts, displaced = _prefer_active_rename_source(
+        user_vars, rename_log, rename_conflicts,
+    )
     duplicates = _apply_renames_to_duplicates(duplicates_raw, rename_rules)
+    commented_previous = {}
+    for item in displaced:
+        commented_previous.setdefault(item["var_name"], []).append(item)
 
     example_names = set(example_vars)
     user_names = set(user_vars)
@@ -413,6 +449,7 @@ def _analyze(example_path, env_path, rename_rules, provider_keys, known_provider
         "extra_classified": extra_classified,
         "duplicates": duplicates,
         "rename_conflicts": rename_conflicts,
+        "commented_previous": commented_previous,
         "parse_error": parse_error,
     }
 
@@ -594,6 +631,10 @@ def _render_sections(analysis, kept_indices=None, title=None):
         console.print(table)
         console.print()
 
+def _default_kept_indices(deprecated_count, duplicate_count=0):
+    """Duplicates are kept. Deprecated variables are removed."""
+    return set(range(deprecated_count + 1, deprecated_count + duplicate_count + 1))
+
 def _prompt_deprecated_selection(deprecated_count, duplicate_count=0):
     """Ask which deprecated/duplicate vars to keep. Returns a set of 1-based indices.
 
@@ -604,7 +645,7 @@ def _prompt_deprecated_selection(deprecated_count, duplicate_count=0):
     if total == 0:
         return set()
 
-    default_kept = set(range(deprecated_count + 1, total + 1))
+    default_kept = _default_kept_indices(deprecated_count, duplicate_count)
 
     if default_kept:
         default_str = ",".join(str(i) for i in sorted(default_kept))
@@ -672,6 +713,8 @@ def _build_migrated_content(analysis, kept_deprecated_names, kept_duplicates=Non
         var = tl["var_name"]
         if var and var in user_vars and tl.get("substitute", True):
             out.append(_format_assignment(var, user_vars[var]))
+            for previous in analysis.get("commented_previous", {}).get(var, []):
+                out.append(_format_assignment(var, {**previous, "active": False}))
         else:
             out.append(tl["raw"])
 
@@ -708,6 +751,25 @@ def _build_migrated_content(analysis, kept_deprecated_names, kept_duplicates=Non
                 out.append(_format_assignment(dup["var_name"], {**dup, "active": False}))
 
     return "\n".join(out) + "\n"
+
+_MIGRATION_DATE_LINE = re.compile(r"^## Date: \d{4}-\d{2}-\d{2}$")
+
+def _without_migration_date(text):
+    """Drop the preserved-variables date line.
+
+    That line is a comment, and it changes every day, so two copies of a file
+    can differ there and still hold the same configuration.
+    """
+    kept = []
+    for line in text.splitlines(keepends=True):
+        if _MIGRATION_DATE_LINE.match(line.rstrip("\r\n")):
+            continue
+        kept.append(line)
+    return "".join(kept)
+
+def _migration_unchanged(original_text, new_text):
+    """True when writing new_text would only refresh the migration date."""
+    return _without_migration_date(original_text) == _without_migration_date(new_text)
 
 # ---------------------------------------------------------------------------
 # Check that the migrated file still holds the same configuration
@@ -773,21 +835,75 @@ def _create_backup(filepath):
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def run_migration_tool():
-    if not sys.stdin.isatty():
+def _offer_to_move_legacy_chatbot_files(force=False):
+    """Ask to move sample_chatbot/ env files into sample_chatbot/utils/."""
+    legacy_files = list_legacy_chatbot_env_files()
+    if not legacy_files:
+        return
+
+    listing = "\n".join(f"  • {os.path.basename(path)}" for path in legacy_files)
+    console.print(Panel(
+        Text.assemble(
+            ("Sample chatbot configuration now lives in ", ""),
+            ("sample_chatbot/utils/", "bold cyan"),
+            (".\n\n", ""),
+            ("Version 1.5 still reads ", ""),
+            ("sample_chatbot/chatbot_config.env", "bold white"),
+            (" when that utils file is missing.\n", ""),
+            ("The fallback is deprecated in 1.6.\n", "yellow"),
+            ("Files already present in sample_chatbot/utils/ are not overwritten.\n\n", ""),
+            ("These files are still in sample_chatbot/:\n", ""),
+            (listing, "bold white"),
+        ),
+        border_style="yellow", width=PANEL_WIDTH, padding=(1, 2),
+    ))
+    if force:
+        console.print("  [dim]Force mode: moving these files.[/]")
+    elif not Confirm.ask("[bold yellow]Move these files to sample_chatbot/utils/?[/]"):
+        if os.path.isfile(CANONICAL_CHATBOT_ENV):
+            console.print(
+                "  [yellow]Left in sample_chatbot/.[/] "
+                "sample_chatbot/utils/chatbot_config.env is the file in use. "
+                "The old location is deprecated in 1.6.\n"
+            )
+        else:
+            console.print(
+                "  [yellow]Left in sample_chatbot/.[/] "
+                "Version 1.5 will keep reading sample_chatbot/chatbot_config.env. "
+                "That fallback is deprecated in 1.6.\n"
+            )
+        return
+
+    moved, skipped = move_legacy_chatbot_env_files(legacy_files)
+    for dest in moved:
+        console.print(f"  -> [bold green]{os.path.basename(dest)}[/] moved to sample_chatbot/utils/")
+    for src in skipped:
+        console.print(
+            f"  [yellow]{os.path.basename(src)} already exists in sample_chatbot/utils/. "
+            "Left the sample_chatbot/ copy in place.[/]"
+        )
+    console.print()
+
+def run_migration_tool(force=False):
+    if not force and not sys.stdin.isatty():
         console.print(Panel(
             Text.assemble(
-                ("--migrate needs an interactive terminal.\n\n", "bold yellow"),
+                ("--migrate and --migrate-only need an interactive terminal.\n\n", "bold yellow"),
                 ("The migration tool asks which deprecated and duplicate variables to "
                  "keep before rewriting your .env files, so it will not run "
-                 "unattended. No files were modified. Re-run it from a terminal.",
-                 "yellow"),
+                 "unattended. No files were modified.\n\n", "yellow"),
+                ("Re-run it from a terminal, or pass ", "yellow"),
+                ("--migrate-force", "bold cyan"),
+                (" to migrate and start the services, or ", "yellow"),
+                ("--migrate-only-and-force", "bold cyan"),
+                (" to migrate and exit. Unknown variables and duplicates are kept.", "yellow"),
             ),
             border_style="yellow", width=PANEL_WIDTH, padding=(1, 2),
         ))
         return False
 
     _print_migration_header()
+    _offer_to_move_legacy_chatbot_files(force=force)
     known_providers = _get_known_providers()
 
     configs = [
@@ -799,7 +915,7 @@ def run_migration_tool():
             "label": "sdk_config.env",
         },
         {
-            "env_path": CHATBOT_ENV_PATH,
+            "env_path": resolve_chatbot_env_path(),
             "example_path": CHATBOT_EXAMPLE_PATH,
             "rename_rules": CHATBOT_RENAME_RULES,
             "provider_keys": CHATBOT_PROVIDER_KEYS,
@@ -809,6 +925,7 @@ def run_migration_tool():
 
     # Phase 1 — Analyze each file, show sections, prompt for deprecated selection
     file_plans = []
+    parse_failures = 0
 
     for cfg in configs:
         env_path = cfg["env_path"]
@@ -832,6 +949,7 @@ def run_migration_tool():
                 f"  [bold red]{filename} could not be parsed correctly.[/] "
                 f"[red]It was left unchanged.[/]\n"
             )
+            parse_failures += 1
             continue
 
         has_work = (
@@ -841,8 +959,9 @@ def run_migration_tool():
             or analysis["duplicates"]
         )
 
-        with console.status(f"[bold cyan]Analyzing {filename}…[/]", spinner="dots"):
-            time.sleep(2)
+        if not force:
+            with console.status(f"[bold cyan]Analyzing {filename}…[/]", spinner="dots"):
+                time.sleep(2)
 
         console.print(Panel(
             Text(f"  {filename}", style="bold white"),
@@ -854,14 +973,22 @@ def run_migration_tool():
             console.print(f"  [green]Up to date — no migration needed.[/]\n")
             continue
 
-        _render_sections(analysis)
-
         deprecated_items = analysis["extra_classified"]["deprecated"]
         duplicate_items = analysis["duplicates"]
         n_dep = len(deprecated_items)
         n_dup = len(duplicate_items)
 
-        kept_indices = _prompt_deprecated_selection(n_dep, n_dup)
+        if force:
+            kept_indices = _default_kept_indices(n_dep, n_dup)
+            kept_indices.update(range(1, n_dep + 1))
+            _render_sections(analysis, kept_indices=kept_indices)
+            if n_dep or n_dup:
+                console.print(
+                    "  [dim]Force mode: unknown variables and duplicates are kept.[/]"
+                )
+        else:
+            _render_sections(analysis)
+            kept_indices = _prompt_deprecated_selection(n_dep, n_dup)
 
         kept_dep_indices = {i for i in kept_indices if i <= n_dep}
         kept_dup_indices = {i - n_dep for i in kept_indices if i > n_dep}
@@ -883,18 +1010,30 @@ def run_migration_tool():
         })
 
     if not file_plans:
+        if parse_failures:
+            console.print(
+                f"[bold red]Migration finished with {parse_failures} error(s).[/]"
+            )
+            return False
         console.print("[green]All configuration files are up to date.[/]")
         return True
 
     # Phase 2 — Final summary (deprecated + duplicate selections)
     summary_title = Text("Migration summary\n", style="bold white", justify="center")
-    summary_body = Text.assemble(
-        ("Please review the deprecated/unknown and duplicate variables that\n", ""),
-        ("will be kept or removed. When in doubt, keep the variable. If you\n", ""),
-        ("want to change anything, exit now and re-run with the ", ""),
-        ("--migrate", "bold cyan"),
-        (" flag.", ""),
-    )
+    if force:
+        summary_body = Text(
+            "Force mode is writing the files.\n"
+            "Unknown variables and duplicates are kept.\n"
+            "A backup is created first.",
+        )
+    else:
+        summary_body = Text.assemble(
+            ("Please review the deprecated/unknown and duplicate variables that\n", ""),
+            ("will be kept or removed. When in doubt, keep the variable. If you\n", ""),
+            ("want to change anything, exit now and re-run with the ", ""),
+            ("--migrate", "bold cyan"),
+            (" flag.", ""),
+        )
     console.print(Panel(
         Group(summary_title, summary_body),
         border_style="green", width=PANEL_WIDTH, padding=(1, 2),
@@ -933,7 +1072,9 @@ def run_migration_tool():
         else:
             console.print("  [dim]No deprecated or duplicate variables.[/]\n")
 
-    if not Confirm.ask("[bold yellow]Apply the migration(s) shown above?[/]"):
+    if force:
+        console.print("[dim]Force mode: applying the migration.[/]")
+    elif not Confirm.ask("[bold yellow]Apply the migration(s) shown above?[/]"):
         console.print("\n[bold red]Migration cancelled by user.[/]")
         return False
 
@@ -947,8 +1088,9 @@ def run_migration_tool():
             plan.get("kept_duplicates", []),
         )
         try:
+            original_text = _read_text(filepath)
             problems = _verify_migration(
-                _read_text(filepath), content, plan["analysis"],
+                original_text, content, plan["analysis"],
                 plan["kept_deprecated_names"],
             )
             if problems:
@@ -964,6 +1106,12 @@ def run_migration_tool():
                 errors += 1
                 continue
 
+            if _migration_unchanged(original_text, content):
+                console.print(
+                    f"  -> [green]{filename} already matches. Left unchanged.[/]"
+                )
+                continue
+
             backup = _create_backup(filepath)
             console.print(f"  -> Backup created: [dim]{backup}[/]")
             with open(filepath, "w", encoding="utf-8") as f:
@@ -974,8 +1122,10 @@ def run_migration_tool():
             errors += 1
 
     console.print()
-    if errors:
-        console.print(f"[bold red]Migration finished with {errors} error(s).[/]")
+    if errors or parse_failures:
+        console.print(
+            f"[bold red]Migration finished with {errors + parse_failures} error(s).[/]"
+        )
         return False
 
     console.print(f"[bold green]Migration to {AI_SDK_VERSION} completed successfully.[/]")

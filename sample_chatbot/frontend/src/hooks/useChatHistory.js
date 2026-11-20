@@ -222,6 +222,14 @@ export const useChatHistory = (
               });
             }
 
+            if (Array.isArray(artifact.related_tables)) {
+              artifact.related_tables.forEach((entry) => {
+                const table = entry && entry.view_name;
+                if (table && !currentInteraction.combinedTablesUsed.includes(table))
+                  currentInteraction.combinedTablesUsed.push(table);
+              });
+            }
+
             if (artifact.vql) {
               currentInteraction.combinedVqls +=
                 (currentInteraction.combinedVqls ? "\n\n" : "") + artifact.vql;

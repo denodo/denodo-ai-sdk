@@ -1,5 +1,5 @@
 // Number formats the user can pick in the User Profile modal.
-// The key is both the label shown in the dropdown and the value saved in localStorage.
+// The key is both the label shown in the dropdown and the value stored for that user.
 export const NUMBER_FORMATS = {
   '1,234.56': { thousands: ',', decimal: '.' },
   '1.234,56': { thousands: '.', decimal: ',' },
@@ -20,16 +20,7 @@ export const inferNumberFormat = () => {
   }
 };
 
-// Returns the number format saved in the User Profile modal, if any
-export const getSavedNumberFormat = (username) => {
-  const user = username || localStorage.getItem('current_user');
-  const saved = user && localStorage.getItem(`${user}_number_format`);
-  return Object.keys(NUMBER_FORMATS).includes(saved) ? saved : null;
-};
-
-export const getNumberFormat = (username) => {
-  return getSavedNumberFormat(username) || inferNumberFormat();
-};
+export const getNumberFormat = () => inferNumberFormat();
 
 // Formats a number with the thousands and decimal separators of the given number format.
 // Returns null when the value is not a number so callers can show their own fallback.

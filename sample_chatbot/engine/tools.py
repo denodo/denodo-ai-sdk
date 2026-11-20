@@ -8,9 +8,16 @@ import traceback
 
 from utils import denodo_tools
 from langchain.tools import ToolRuntime, tool
+from sample_chatbot.engine import memory
 from sample_chatbot.engine import skills
 from sample_chatbot.engine.context import UserContext
+from sample_chatbot.services.report_jobs import ReportJobContext, report_job_manager
 from utils.denodo_tools import create_basic_auth_header, format_generate_vql_output, format_execute_vql_output, format_generate_graph_output, format_metadata_search_output
+
+def _inline_graph_reference(tool_call_id):
+    if not tool_call_id:
+        return ""
+    return f"\n\nTo show this graph in your answer, paste this markdown code block exactly where the chart should appear:\n```graph\n{tool_call_id}\n```"
 
 # =============================================================================
 # Knowledge Query Implementation
@@ -175,38 +182,55 @@ def generate_graph(
         **extra_params,
     )
 
-    return format_generate_graph_output(response)
+    content, artifact = format_generate_graph_output(response)
+    raw_graph = artifact.get("raw_graph", "")
+    if raw_graph.startswith("data:image/svg+xml;base64,"):
+        content += _inline_graph_reference(runtime.tool_call_id)
+    return content, artifact
 
 @tool(response_format="content_and_artifact")
 def deep_query(
     runtime: ToolRuntime[UserContext],
     analysis_request: str,
+    languages: list[str] | None = None,
 ):
-    """Request an advanced analysis to the DeepQuery agent, who has access to the user's data in Denodo.
+    """Launch an advanced DeepQuery analysis on the user's data in Denodo as a BACKGROUND job and return immediately.
+
+    The analysis and the HTML report take minutes and run asynchronously: this tool never returns the analysis
+    results, only a confirmation that the job started. The user follows the progress and opens the finished
+    reports from the DeepQuery Reports Manager. Never claim the analysis or report is finished, and do not invent findings.
 
     Args:
         analysis_request: Detailed analysis request to perform.
+        languages: Languages to generate the report in, one report per language, for example ['English', 'French']. If the user did not ask for specific languages, pass a single-item list with the language the user is writing in during the conversation (for example ['Spanish']).
     """
 
-    auth = create_basic_auth_header(runtime.context.username, runtime.context.password)
+    try:
+        job_context = ReportJobContext.from_user_context(runtime.context)
+        analysis_id, reports = report_job_manager.submit(job_context, analysis_request, languages)
+    except ValueError as e:
+        return (str(e), {"error": str(e), "status": "rejected"})
+    except Exception as e:
+        logging.error("Could not start the DeepQuery background job", exc_info=True)
+        return (
+            f"The DeepQuery background job could not be started: {e}",
+            {"error": str(e), "status": "rejected"},
+        )
 
-    response = denodo_tools.deep_query(
-        analysis_request=analysis_request,
-        api_host=runtime.context.api_host,
-        auth=auth,
-        verify_ssl=runtime.context.verify_ssl,
-        timeout=runtime.context.timeout,
-        cancel_event=runtime.context.cancel_event,
-        **(runtime.context.ai_sdk_params or {}),
+    report_languages = [report["language"] for report in reports]
+    report_word = "report" if len(reports) == 1 else "reports"
+    content = (
+        f"Background job started: {len(reports)} {report_word} queued ({', '.join(report_languages)}). "
+        "The analysis is running in the background and is NOT finished. Tell the user they can follow "
+        "the progress and open the report from the DeepQuery Reports Manager in the header."
     )
-
-    if "answer" in response:
-        content = response["answer"]
-    else:
-        error_detail = response.get("detail") or response.get("error")
-        content = str(error_detail) if error_detail else "DeepQuery analysis failed, please check the additional information modal."
-
-    return (content, response)
+    artifact = {
+        "analysis_id": analysis_id,
+        "report_ids": [report["report_id"] for report in reports],
+        "languages": report_languages,
+        "status": "queued",
+    }
+    return (content, artifact)
 
 @tool(response_format="content_and_artifact")
 def metadata_search(
@@ -216,6 +240,7 @@ def metadata_search(
 ):
     """This tool runs a similarity search in the database and returns the schema of the n_results (stick to the default of 5 if not specified) most similar views.
         For example, it can be helpful to answer questions like what views do we have related to X topic.
+        If a view's schema was already returned earlier in the conversation, it will not be repeated in this tool's response.
 
     Args:
         search_query: Natural language query to search for the metadata of the views in the user's Denodo instance. For example, 'views related to loans'.
@@ -236,7 +261,18 @@ def metadata_search(
         cancel_event=runtime.context.cancel_event,
     )
 
-    return format_metadata_search_output(response)
+    content, artifact = format_metadata_search_output(response)
+    if runtime.context.memory_enabled:
+        try:
+            content += memory.render_metadata_memories_section(
+                runtime.context.username,
+                runtime.context.agent_id,
+                response,
+                runtime.context.share_general_memory,
+            )
+        except Exception:
+            logging.exception("Failed to attach metadata memories to metadata_search")
+    return content, artifact
 
 @tool(response_format="content_and_artifact")
 def knowledge_query(runtime: ToolRuntime[UserContext], search_query: str, collection: str, k: int = 5):
@@ -471,3 +507,159 @@ def create_skill_reference(runtime: ToolRuntime[UserContext], skill_name: str, r
         )
     except skills.SkillError as e:
         return (str(e), {"error": str(e), "skill": skill_name, "reference": reference_name})
+
+# =============================================================================
+# Memory Tools
+# =============================================================================
+
+def _memory_scope(runtime):
+    context = runtime.context
+    return (
+        context.agent_id or "global",
+        context.share_general_memory,
+    )
+
+def _memory_call(action):
+    try:
+        return action()
+    except memory.MemoryError as exc:
+        return (str(exc), {"error": str(exc)})
+
+def _stored_index_text(records):
+    rendered = memory.format_index(records)
+    if not rendered:
+        return ""
+    return f"{rendered}\n"
+
+@tool(response_format="content_and_artifact")
+def read_memory(runtime: ToolRuntime[UserContext], name: str):
+    """Read a specific memory's contents.
+
+    The name is unique for this user, so the type is not needed.
+
+    Args:
+        name: Memory name, without the .md extension. For example, 'prefers-eur'.
+    """
+    def _read():
+        agent_id, share_general = _memory_scope(runtime)
+        record = memory.find_memory(runtime.context.username, name, agent_id, share_general)
+        return (record.get("content") or record.get("body") or "", record)
+    return _memory_call(_read)
+
+@tool(response_format="content_and_artifact")
+def list_memories(
+    runtime: ToolRuntime[UserContext],
+    memory_type: str = "",
+    link_kind: str = "",
+    link_name: str = "",
+):
+    """List memory index lines for this user on this agent.
+
+    Use this to see 'user-metadata' or 'metadata' memories, or 'user'
+    memories that fell past the portion of the index loaded into the
+    system prompt. Leave a filter empty when you do not want to apply it.
+
+    Args:
+        memory_type: 'user', 'user-metadata', 'metadata', or empty for all.
+        link_kind: Optional filter: 'view', 'database', 'tag', or 'none'.
+            A memory matches when any of its links has this kind.
+        link_name: Optional link name. For a view, use database.view_name.
+            A memory matches when any of its links has this name.
+    """
+    def _list():
+        agent_id, share_general = _memory_scope(runtime)
+        records = memory.list_memories(
+            runtime.context.username,
+            memory_type=memory_type or None,
+            link_kind=link_kind,
+            link_name=link_name,
+            agent_id=agent_id,
+            include_shared_general=share_general,
+        )
+        content = memory.format_index(records) or "No memories match."
+        if not memory_type or memory_type == "user":
+            user_records = memory.list_memories(
+                runtime.context.username, memory_type="user",
+                agent_id=agent_id, include_shared_general=share_general,
+            )
+            notice = memory.index_limit_notice("user", _stored_index_text(user_records))
+            if notice:
+                content = f"{content}\n\n{notice}"
+        return (content, {"memories": records})
+    return _memory_call(_list)
+
+@tool(response_format="content_and_artifact")
+def write_memory(
+    runtime: ToolRuntime[UserContext],
+    memory_type: str,
+    name: str,
+    description: str,
+    body: str,
+    links: str = "",
+):
+    """Save or replace a memory for this user.
+
+    Pick the memory type by what it represents:
+    - 'user': a fact or preference about the person, with no link to any specific metadata. For
+      example, a personal preference: that they like to be called Jamie instead of James or
+      a workflow preference that applies always: James likes to show all currency fields converted to EUR.
+    - 'user-metadata': a personal preference about specific metadata. It
+      must be linked to at least one view, database, or tag. For example,
+      that Jamie likes salary in samples_bank.loan to show the currency
+      sign. The same preference with no link belongs in 'user'.
+    - 'metadata': an objective fact about the metadata that the metadata
+      itself does not say, linked to at least one view, database, or tag.
+      For example, that the currency of salary in samples_bank.loan is USD.
+      The logic is that a 'metadata' memory is a fact that is applicable to any user, not just the one you are talking to.
+
+    One linked memory can be linked to several views, databases, and tags.
+    Pass every link the memory should keep.
+
+    Name: max 64 characters, lowercase letters, numbers, and hyphens, and it
+    must not start or end with a hyphen.
+
+    Args:
+        memory_type: 'user', 'user-metadata', or 'metadata'.
+        name: Filename stem. For example, 'revenue-means-net'.
+        description: One-line title shown in the memory index.
+        body: The note to reuse later. State the fact plainly.
+        links: One link per line, as kind:name. kind is view, database, or tag.
+            A view name is database.view_name. Example:
+            view:sales.orders
+            view:finance.invoices
+            database:sales
+            tag:revenue
+            Leave empty for a 'user' memory; required otherwise.
+    """
+    def _write():
+        agent_id, share_general = _memory_scope(runtime)
+        result = memory.write_memory(
+            runtime.context.username,
+            memory_type,
+            name,
+            description,
+            body,
+            links=links,
+            agent_id=agent_id,
+            include_shared_general=share_general,
+        )
+        return (result["message"], result)
+    return _memory_call(_write)
+
+@tool(response_format="content_and_artifact")
+def delete_memory(runtime: ToolRuntime[UserContext], name: str):
+    """Delete one memory this user owns.
+
+    The name is unique for this user, so the type is not needed.
+
+    Args:
+        name: Memory name, without the .md extension. For example, 'prefers-eur'.
+    """
+    def _delete():
+        agent_id, share_general = _memory_scope(runtime)
+        record = memory.find_memory(runtime.context.username, name, agent_id, share_general)
+        result = memory.delete_memory(
+            runtime.context.username, record["type"], name, agent_id, share_general,
+        )
+        return (result["message"], result)
+    return _memory_call(_delete)

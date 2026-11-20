@@ -1,8 +1,32 @@
+.tool-blocks-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+}
+
 .toolbox-container {
-  margin-bottom: 0.5rem;
+  margin: 0 !important;
   padding: 0.4rem;
   border: 1px solid #2D3E4B;
   border-radius: 0.25rem;
+}
+
+.intermediate-message p:last-child {
+  margin-bottom: 0 !important;
+}
+
+.intermediate-message {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.intermediate-message p {
+  margin: 0 !important;
+}
+
+.intermediate-message p + p {
+  margin-top: 0.5rem !important;
 }
 
 .toolbox-header-main {
@@ -41,66 +65,202 @@
   line-height: 1;
 }
 
-.report-palette-popup {
-  position: absolute;
-  top: 120%;
-  right: 0;
-  z-index: 20;
-  color: #112533;
-  width: 230px;
-  height: 230px;
-  padding: 16px;
-  background: #fff !important;
-  border: 2px solid #dee2e6;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+.deepquery-status {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.report-palette-label {
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+  padding: 0.3rem 0.5rem;
   font-size: 0.85rem;
-  font-weight: 600;
-  margin: 0;
+  border-radius: 0.25rem;
+  background: rgba(255, 255, 255, 0.06);
 }
 
-.report-palette-select:focus,
-.report-palette-select:hover {
-  border-color: #84b5ce !important;
-  box-shadow: 0 0 0 0.25rem rgba(132, 181, 206, 0.25) !important;
-  outline: 0 !important;
+.deepquery-status-active i {
+  color: #f0ad4e;
 }
 
-.report-palette-popup .btn-dark {
-  background-color: #2d3f4b !important;
-  border-color: #2d3f4b !important;
+.deepquery-status-completed i {
+  color: #28a745;
 }
 
-.report-palette-popup .btn-dark:hover:not(:disabled) {
-  background-color: #1a2b34 !important;
+.deepquery-status-failed i {
+  color: #dc3545;
 }
 
-.report-palette-popup .dropdown-toggle {
-  background-color: #ffffff !important;
-  border: 1px solid #dee2e6 !important;
-  color: #212529 !important;
-  text-align: left;
+.deepquery-status-muted {
+  color: #9aa8b0;
 }
 
-.report-palette-popup .dropdown-toggle::after {
+.deepquery-status-link {
   margin-left: auto;
+  padding: 0.2rem 0.9rem;
+  border: 1px solid #ED342A;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ED342A 0%, #413581 100%);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
-.report-dropdown-item:hover,
-.report-dropdown-item:focus {
-  background-color: #f5f5f5 !important; 
-  color: #84b5ce !important; 
+.deepquery-status-link:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(237, 52, 42, 0.45);
 }
 
-.report-dropdown-item.active,
-.report-dropdown-item:active {
-  background-color: #f5f5f5 !important;
-  color: #2d3f4b !important;
-  font-weight: 600;
+.deepquery-caption {
+  font-size: 0.78rem;
+  color: #9aa8b0;
+}
+
+/* DeepQuery "magic": animated glow + sweeping light while the analysis is running */
+.deepquery-magic {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(132, 181, 206, 0.35);
+  background: linear-gradient(120deg, rgba(132, 181, 206, 0.10), rgba(167, 139, 250, 0.14), rgba(132, 181, 206, 0.10));
+  background-size: 200% 100%;
+  box-shadow: 0 0 12px rgba(132, 181, 206, 0.25);
+  animation: deepquery-glow 3s ease-in-out infinite;
+}
+
+.deepquery-magic::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.16), transparent);
+  transform: translateX(-120%);
+  animation: deepquery-sweep 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.deepquery-magic i {
+  color: #c4b5fd;
+  animation: deepquery-sparkle 1.6s ease-in-out infinite;
+}
+
+@keyframes deepquery-glow {
+  0%, 100% { background-position: 0% 0; box-shadow: 0 0 8px rgba(132, 181, 206, 0.2); }
+  50% { background-position: 100% 0; box-shadow: 0 0 16px rgba(167, 139, 250, 0.35); }
+}
+
+@keyframes deepquery-sweep {
+  to { transform: translateX(350%); }
+}
+
+@keyframes deepquery-sparkle {
+  0%, 100% { transform: scale(1) rotate(0deg); opacity: 1; }
+  50% { transform: scale(1.25) rotate(12deg); opacity: 0.7; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deepquery-magic,
+  .deepquery-magic::after,
+  .deepquery-magic i {
+    animation: none;
+  }
+
+  .deepquery-magic::after {
+    display: none;
+  }
+}
+
+.deepquery-regenerate-btn {
+  margin-left: auto;
+  padding: 0.15rem 0.7rem;
+  font-size: 0.8rem;
+  color: #112533;
+  background: #fff;
+  border: 1px solid #d0d7de;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.deepquery-regenerate-btn:hover:not(:disabled) {
+  background: #f3f4f6;
+}
+
+.deepquery-regenerate-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.deepquery-regenerate-btn + .deepquery-status-link {
+  margin-left: 0;
+}
+
+/* Legacy tool calls (generated before background reports existed) */
+.deepquery-legacy-btn {
+  margin-left: auto;
+  padding: 0.15rem 0.7rem;
+  font-size: 0.8rem;
+  color: #fff;
+  background: linear-gradient(135deg, #ED342A 0%, #413581 100%);
+  border: 1px solid #ED342A;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.deepquery-legacy-btn:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(237, 52, 42, 0.45);
+}
+
+.deepquery-legacy-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.deepquery-legacy-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+
+.deepquery-legacy-input {
+  height: 28px;
+  padding: 0 0.6rem;
+  font-size: 0.82rem;
+  color: #212529;
+  background: #fff;
+  border: 1px solid #ced4da;
+  border-radius: 6px;
+  outline: none;
+}
+
+.deepquery-legacy-input:focus {
+  border-color: #84b5ce;
+}
+
+.deepquery-legacy-chip {
+  padding: 0.1rem 0.55rem;
+  font-size: 0.75rem;
+  color: #212529;
+  background: #e9ecef;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.deepquery-legacy-chip:hover {
+  background: #dee2e6;
+}
+
+.deepquery-legacy-go {
+  height: 28px;
+  padding: 0 0.8rem;
+  font-size: 0.8rem;
+  color: #fff;
+  background: #212529;
+  border: 0;
+  border-radius: 6px;
+}
+
+.deepquery-legacy-go:disabled {
+  opacity: 0.5;
 }

@@ -2,29 +2,50 @@ from rich.text import Text
 from rich.panel import Panel
 from rich.console import Console
 
+from utils.status import Status
+
 console = Console()
 
 PANEL_WIDTH = 60
+STATUS_STYLES = {
+    Status.OK: "green",
+    Status.WARNING: "yellow",
+    Status.ERROR: "red",
+}
 
-def _ok_list_segments(title, names):
-    if not names:
+def _status_list_segments(title, items):
+    if not items:
         return []
 
     segments = [
         ("\n\n", ""),
         (f"{title}\n", "bold white"),
     ]
-    for index, name in enumerate(names):
+
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            item = {"name": item, "status": Status.OK}
+
+        raw_status = item.get("status", Status.OK)
+        try:
+            status = Status(str(raw_status).upper())
+        except ValueError:
+            status = Status.ERROR
+
+        style = STATUS_STYLES.get(status, "white")
+
         segments.extend([
-            ("[OK] ", "green"),
-            (name, "white"),
+            (f"[{status}] ", style),
+            (str(item.get("name")), "white"),
         ])
-        if index < len(names) - 1:
+
+        if index < len(items) - 1:
             segments.append(("\n", ""))
     return segments
 
-def _build_chatbot_segments(urls, root_path_prefix="", imported_agent_names=None):
+def _build_chatbot_segments(urls, root_path_prefix="", imported_agent_names=None, imported_skills=None):
     imported_agent_names = imported_agent_names or []
+    imported_skills = imported_skills or []
     segments = []
 
     for i, url in enumerate(urls):
@@ -37,7 +58,8 @@ def _build_chatbot_segments(urls, root_path_prefix="", imported_agent_names=None
         if i < len(urls) - 1:
             segments.append(("\n", ""))
 
-    segments.extend(_ok_list_segments("Imported specialized agents:", imported_agent_names))
+    segments.extend(_status_list_segments("Specialized agents:", imported_agent_names))
+    segments.extend(_status_list_segments("Skills:", imported_skills))
     return segments
 
 def print_header():
@@ -48,11 +70,20 @@ def print_header():
         width=PANEL_WIDTH
     ))
 
-def print_status(process_type, urls, version=None, root_path_prefix="", imported_agent_names=None, imported_space_names=None):
+def print_status(
+    process_type,
+    urls,
+    version=None,
+    root_path_prefix="",
+    imported_agent_names=None,
+    imported_space_names=None,
+    imported_skills=None,
+):
     server_url = urls[0]
-    full_url = server_url.rstrip('/') + root_path_prefix
+    full_url = server_url.rstrip("/") + root_path_prefix
     imported_agent_names = imported_agent_names or []
     imported_space_names = imported_space_names or []
+    imported_skills = imported_skills or []
 
     if process_type == "api":
         segments = [
@@ -64,7 +95,7 @@ def print_status(process_type, urls, version=None, root_path_prefix="", imported
             ("AI SDK version: ", "bold white"),
             (f"{version or 'Unknown'}", "yellow"),
         ]
-        segments.extend(_ok_list_segments("Imported AI Spaces:", imported_space_names))
+        segments.extend(_status_list_segments("AI Spaces:", imported_space_names))
         panel = Panel(
             Text.assemble(*segments),
             title="[bold]API status",
@@ -73,7 +104,7 @@ def print_status(process_type, urls, version=None, root_path_prefix="", imported
         )
     else:
         panel = Panel(
-            Text.assemble(*_build_chatbot_segments(urls, root_path_prefix, imported_agent_names)),
+            Text.assemble(*_build_chatbot_segments(urls, root_path_prefix, imported_agent_names, imported_skills)),
             title="[bold]Chatbot status",
             border_style="blue",
             width=PANEL_WIDTH

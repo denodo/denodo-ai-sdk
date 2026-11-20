@@ -1,18 +1,19 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useConfig, useNumberFormat } from "../../contexts/ConfigContext";
+import { useReport, REPORT_STATUS } from "../../contexts/ReportContext";
 import Card from "react-bootstrap/Card";
-import Dropdown from "react-bootstrap/Dropdown";
 import Badge from "react-bootstrap/Badge";
 import Spinner from "react-bootstrap/Spinner";
 import OverlayTrigger from "react-bootstrap/OverlayTrigger";
 import Tooltip from "react-bootstrap/Tooltip";
-import Button from "react-bootstrap/Button";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CSVLink } from "react-csv";
 import ExcelJS from "exceljs";
 import "./ToolBlocks.css";
 import { markdownComponents } from "./markdownComponents";
+import { isInlineGraphSource, replaceGraphFences } from "./inlineGraphs";
+import CopyButton from "../CopyButton/CopyButton";
 
 const assetBaseUrl = import.meta.env.BASE_URL;
 
@@ -23,17 +24,118 @@ const formatToolDuration = (seconds, formatNumber) => {
   return formatNumber(value, 2);
 };
 
+const hasLegacyMetadata = (artifact) =>
+  Boolean(artifact?.deepquery_metadata) &&
+  typeof artifact.deepquery_metadata === "object" &&
+  Object.keys(artifact.deepquery_metadata).length > 0;
+
+// Reports regenerated from legacy tool calls are remembered per tool call (browser only)
+const REGENERATED_STORAGE_KEY = "deepquery-regenerated-reports";
+const loadRegenerated = () => {
+  try {
+    return JSON.parse(localStorage.getItem(REGENERATED_STORAGE_KEY) || "{}") || {};
+  } catch {
+    return {};
+  }
+};
+
+const LEGACY_LANGUAGES = ["English", "Spanish", "French", "German", "Italian", "Portuguese"];
+
+// Summarises the background reports launched by a deep_query call for the tool block
+const summarizeDeepQuery = (artifact, reports, reportsLoaded, regeneratedIds = []) => {
+  if (artifact?.status === "rejected") {
+    return { icon: "bi-x-circle", className: "deepquery-status-failed", text: artifact.error || "The analysis could not be started." };
+  }
+  // A regenerated analysis replaces the reports launched by the original tool call
+  const ids = regeneratedIds.length > 0
+    ? regeneratedIds
+    : Array.isArray(artifact?.report_ids) ? artifact.report_ids : [];
+  const missing = { missing: true, icon: "bi-arrow-repeat", className: "deepquery-status-muted", text: "" };
+  const matched = reports.filter((report) => ids.includes(report.id));
+  const running = { icon: "bi-stars", className: "deepquery-status-active deepquery-magic", text: "Analysis running in background..." };
+
+  // Tool calls stored before background reports existed carry the old synchronous artifact
+  if (ids.length === 0 && artifact && typeof artifact === "object" && !Array.isArray(artifact.report_ids)) {
+    if (!hasLegacyMetadata(artifact)) return missing;
+    return {
+      legacy: true,
+      hasMetadata: true,
+      icon: "bi-clock-history",
+      className: "deepquery-status-muted",
+      text: "Legacy analysis (not run in background).",
+    };
+  }
+
+  if (matched.length === 0) {
+    if (reportsLoaded && ids.length > 0) return missing;
+    return running;
+  }
+
+  const count = (status) => matched.filter((report) => report.status === status).length;
+  if (matched.some((report) => report.status === REPORT_STATUS.PENDING || report.status === REPORT_STATUS.PROCESSING)) {
+    const generating = matched.some((report) => report.stage === "generating_html");
+    return { ...running, caption: generating ? "Generating report..." : "Extracting data..." };
+  }
+  const completed = count(REPORT_STATUS.COMPLETED);
+  if (completed > 0) {
+    const failed = count(REPORT_STATUS.FAILED);
+    const cancelled = matched.length - completed - failed;
+    if (failed + cancelled > 0) {
+      // Partial success: some languages were generated and others did not finish
+      const notReady = [
+        failed > 0 ? `${failed} failed` : null,
+        cancelled > 0 ? `${cancelled} cancelled` : null,
+      ].filter(Boolean).join(", ");
+      return {
+        regenerable: true,
+        icon: "bi-exclamation-triangle",
+        className: failed > 0 ? "deepquery-status-failed" : "deepquery-status-muted",
+        text: `${completed} of ${matched.length} reports ready (${notReady}).`,
+      };
+    }
+    return {
+      regenerable: true,
+      icon: "bi-check-circle",
+      className: "deepquery-status-completed",
+      text: completed === 1 ? "Report ready." : `${completed} reports ready.`,
+    };
+  }
+  if (count(REPORT_STATUS.FAILED) > 0) {
+    return { regenerable: true, icon: "bi-x-circle", className: "deepquery-status-failed", text: "Analysis failed." };
+  }
+  return { regenerable: true, icon: "bi-slash-circle", className: "deepquery-status-muted", text: "Analysis cancelled." };
+};
+
+// deep_query report ids that already triggered a status refresh (one fetch per new launch)
+const refreshedReportLaunches = new Set();
+
 const ToolBlocks = ({
   blocks,
-  result,
-  onGenerateReport,
   resultsContainerRef,
   onOpenGraph,
   onOpenTable,
   onToolIconClick,
+  receivedToolOutputs,
+  onClipboardError,
 }) => {
   const { config } = useConfig();
   const formatNumber = useNumberFormat();
+  const { reports, reportsLoaded, setIsModalOpen, refreshReports, regenerateLegacy, regenerateFromQuestion } = useReport();
+
+  // A new deep_query result: fetch the report status once so the badge and block update right away
+  useEffect(() => {
+    if (!Array.isArray(blocks)) return;
+    blocks.forEach((toolCall) => {
+      const ids = toolCall?.type === "tool" && toolCall.toolName === "deep_query" && Array.isArray(toolCall.artifact?.report_ids)
+        ? toolCall.artifact.report_ids
+        : [];
+      if (ids.length === 0) return;
+      const key = ids.join(",");
+      if (refreshedReportLaunches.has(key) || ids.every((id) => reports.some((report) => report.id === id))) return;
+      refreshedReportLaunches.add(key);
+      refreshReports();
+    });
+  }, [blocks, reports, refreshReports]);
   const toolPublicTextKeys = useMemo(() => {
     const map = {};
     const tools = Array.isArray(config?.chatbot_tools) ? config.chatbot_tools : [];
@@ -46,21 +148,53 @@ const ToolBlocks = ({
   }, [config?.chatbot_tools]);
 
   const [expandedTools, setExpandedTools] = useState({});
-  const [paletteSelectorOpenId, setPaletteSelectorOpenId] = useState(null);
-  const [selectedPalette, setSelectedPalette] = useState("");
-  const [selectedLanguage, setSelectedLanguage] = useState("English");
-  const [copiedId, setCopiedId] = useState(null);
-  const paletteOptions = ["red", "blue", "green", "black"];
+  const [regenerated, setRegenerated] = useState(loadRegenerated); // toolCallId -> [report ids]
+  const [legacyPicker, setLegacyPicker] = useState(null); // toolCallId with the language picker open
+  const [legacyLanguage, setLegacyLanguage] = useState("");
+  const [legacyBusy, setLegacyBusy] = useState(false);
+
+  const rememberRegenerated = (toolCallId, reportIds) => {
+    setRegenerated((prev) => {
+      const next = { ...prev, [toolCallId]: reportIds };
+      try {
+        localStorage.setItem(REGENERATED_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // Storage full or unavailable: the mapping just lasts for this page view
+      }
+      return next;
+    });
+  };
+
+  // The report of this tool call is gone: run its analysis again from the original question
+  const handleRegenerateMissing = async (toolCall) => {
+    const question = toolCall.args?.analysis_request;
+    if (!question || legacyBusy) return;
+    const languages = Array.isArray(toolCall.artifact?.languages) ? toolCall.artifact.languages : undefined;
+    setLegacyBusy(true);
+    const reportIds = await regenerateFromQuestion({ question, languages });
+    setLegacyBusy(false);
+    if (reportIds.length > 0) rememberRegenerated(toolCall.toolCallId, reportIds);
+  };
+
+  const handleRegenerate = async (toolCall, language) => {
+    const metadata = toolCall.artifact?.deepquery_metadata;
+    const cleaned = language.trim();
+    if (!metadata || !cleaned || legacyBusy) return;
+    setLegacyBusy(true);
+    const reportId = await regenerateLegacy({
+      question: toolCall.args?.analysis_request || "",
+      deepqueryMetadata: metadata,
+      language: cleaned,
+    });
+    setLegacyBusy(false);
+    if (!reportId) return;
+    rememberRegenerated(toolCall.toolCallId, [...(regenerated[toolCall.toolCallId] || []), reportId]);
+    setLegacyPicker(null);
+    setLegacyLanguage("");
+  };
 
   const toggleToolExpand = (toolCallId) => {
     setExpandedTools((prev) => ({ ...prev, [toolCallId]: !prev[toolCallId] }));
-  };
-
-  const handleCopy = (text, id) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopiedId(id);
-      setTimeout(() => setCopiedId(null), 2000);
-    });
   };
 
   const renderTooltip = (props, content) => (
@@ -120,6 +254,7 @@ const ToolBlocks = ({
     const handleToolClick = (extra = {}) => {
       onToolIconClick({
         modalTool: toolCall.toolName || "",
+        modalToolCallId: toolCall.toolCallId,
         modalArtifact: artifact || {},
         error: artifact.error,
         error_message: artifact.error_message || (typeof artifact.error === "string" ? artifact.error : null),
@@ -232,9 +367,7 @@ const ToolBlocks = ({
       if (
         // data_agent: backwards compatibility — old chats stored the graph on the data_agent artifact
         (toolCall.toolName === "generate_graph" || toolCall.toolName === "data_agent") &&
-        artifact.raw_graph &&
-        artifact.raw_graph.startsWith("data:image") &&
-        artifact.raw_graph.length > 300
+        isInlineGraphSource(artifact.raw_graph)
       ) {
         icons.push(
           <OverlayTrigger
@@ -250,7 +383,7 @@ const ToolBlocks = ({
               width="20"
               height="20"
               className="ms-2 cursor-pointer"
-              onClick={() => onOpenGraph(artifact.raw_graph)}
+              onClick={() => onOpenGraph({ src: artifact.raw_graph, vql: artifact.vql || toolCall.args?.vql || "" })}
             />
           </OverlayTrigger>
         );
@@ -293,100 +426,10 @@ const ToolBlocks = ({
             width="20"
             height="20"
             className="cursor-pointer"
-            onClick={() =>
-              handleToolClick({
-                deepquery_metadata: artifact.deepquery_metadata,
-                total_execution_time: artifact.total_execution_time,
-              })
-            }
+            onClick={() => handleToolClick({})}
           />
         </OverlayTrigger>
       );
-
-      if (artifact.deepquery_metadata) {
-        const deepQueryResult = { ...result, deepquery_metadata: artifact.deepquery_metadata };
-        const isPaletteOpen = paletteSelectorOpenId === toolCall.toolCallId;
-
-        icons.push(
-          <div key="pdf-wrapper" className="position-relative d-flex align-items-center">
-            <OverlayTrigger
-              placement="left"
-              delay={{ show: 250, hide: 400 }}
-              overlay={(props) =>
-                renderTooltip(props, "Generate PDF Report")
-              }
-              container={resultsContainerRef?.current}
-            >
-              <img
-                src={`${assetBaseUrl}tools/deep_query/deepquery_pdf.svg`}
-                alt="Generate PDF Report"
-                width="20"
-                height="20"
-                className="ms-2 cursor-pointer"
-                onClick={() => {
-                  setPaletteSelectorOpenId((prev) => (prev === toolCall.toolCallId ? null : toolCall.toolCallId));
-                }}
-              />
-            </OverlayTrigger>
-            {isPaletteOpen && (
-              <div className="report-palette-popup">
-                <span className="report-palette-label">Color palette:</span>
-                <Dropdown className="w-100">
-                  <Dropdown.Toggle 
-                    variant="light" 
-                    size="sm" 
-                    className="w-100 report-palette-select d-flex justify-content-between align-items-center"
-                  >
-                    {selectedPalette ? selectedPalette.charAt(0).toUpperCase() + selectedPalette.slice(1) : "Select..."}
-                  </Dropdown.Toggle>
-
-                  <Dropdown.Menu className="w-100">
-                    {paletteOptions.map((palette) => (
-                      <Dropdown.Item 
-                        key={palette}
-                        active={selectedPalette === palette}
-                        onClick={() => setSelectedPalette(palette)}
-                        className="report-dropdown-item"
-                      >
-                        {palette.charAt(0).toUpperCase() + palette.slice(1)}
-                      </Dropdown.Item>
-                    ))}
-                  </Dropdown.Menu>
-                </Dropdown>
-
-                <span className="report-palette-label mt-2 d-block">Language:</span>
-                <input
-                  type="text"
-                  className="form-control form-control-sm report-palette-select"
-                  placeholder="e.g., English, Spanish..."
-                  value={selectedLanguage}
-                  maxLength={30}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (/^[a-zA-Z\u00C0-\u024F\s-]*$/.test(val)) {
-                      setSelectedLanguage(val);
-                    }
-                  }}
-                />
-
-                <Button
-                  variant="dark"
-                  size="sm"
-                  className="mt-3 w-100"
-                  disabled={!selectedPalette || !selectedLanguage.trim()}
-                  onClick={() => {
-                    if (!selectedPalette || !selectedLanguage.trim()) return;
-                    setPaletteSelectorOpenId(null);
-                    onGenerateReport(deepQueryResult, selectedPalette, selectedLanguage.trim());
-                  }}
-                >
-                  Generate
-                </Button>
-              </div>
-            )}
-          </div>
-        );
-      }
     }
 
     if (toolCall.toolName === "knowledge_query") {
@@ -441,11 +484,16 @@ const ToolBlocks = ({
   const renderToolBox = (toolCall) => {
     const isExpanded = !!expandedTools[toolCall.toolCallId];
     const argPreview = getToolArgPreview(toolCall);
-    const toolOutput = toolCall.contentToLLM;
+    const receivedContent = receivedToolOutputs?.[toolCall.toolCallId];
+    const toolOutput = receivedContent != null ? receivedContent : toolCall.contentToLLM;
     const outputString = toolOutput 
       ? (typeof toolOutput === 'object' ? JSON.stringify(toolOutput, null, 2) : String(toolOutput))
       : "";
     const formattedDuration = formatToolDuration(toolCall.artifact?.tool_duration, formatNumber);
+    const isDeepQuery = toolCall.toolName === "deep_query";
+    const deepQueryStatus = isDeepQuery && toolCall.status !== "error"
+      ? summarizeDeepQuery(toolCall.artifact, reports, reportsLoaded, regenerated[toolCall.toolCallId])
+      : null;
 
     return (
       <div
@@ -456,7 +504,7 @@ const ToolBlocks = ({
       >
         <div className="d-flex align-items-center justify-content-between">
           <div className="d-flex align-items-center toolbox-header-main">
-            {toolCall.status === "running" && <Spinner size="sm" animation="border" />}
+            {toolCall.status === "running" && !isDeepQuery && <Spinner size="sm" animation="border" />}
             <Badge bg="secondary" className="flex-shrink-0">{toolCall.toolName}</Badge>
             {argPreview && (
               <span className="toolbox-arg-preview" title={argPreview}>
@@ -476,6 +524,75 @@ const ToolBlocks = ({
             />
           </div>
         </div>
+        {deepQueryStatus && (
+          <>
+            <div className={`deepquery-status ${deepQueryStatus.className}`}>
+              {!deepQueryStatus.missing && <i className={`bi ${deepQueryStatus.icon}`} />}
+              {deepQueryStatus.text && <span>{deepQueryStatus.text}</span>}
+              {deepQueryStatus.caption && <span className="deepquery-caption">{deepQueryStatus.caption}</span>}
+              {deepQueryStatus.legacy && deepQueryStatus.hasMetadata && (
+                <button
+                  type="button"
+                  className="deepquery-legacy-btn"
+                  onClick={() => setLegacyPicker(legacyPicker === toolCall.toolCallId ? null : toolCall.toolCallId)}
+                >
+                  <i className="bi bi-arrow-repeat me-1" />
+                  Generate report
+                </button>
+              )}
+              {(deepQueryStatus.missing || deepQueryStatus.regenerable) && toolCall.args?.analysis_request && (
+                <button
+                  type="button"
+                  className="deepquery-regenerate-btn"
+                  disabled={legacyBusy}
+                  title={deepQueryStatus.regenerable ? "Run the analysis again from the original question" : undefined}
+                  onClick={() => handleRegenerateMissing(toolCall)}
+                >
+                  <i className="bi bi-arrow-repeat me-1" />
+                  {legacyBusy ? "Regenerating..." : "Regenerate"}
+                </button>
+              )}
+              {!deepQueryStatus.legacy && !deepQueryStatus.missing && (
+                <button
+                  type="button"
+                  className="deepquery-status-link"
+                  onClick={() => setIsModalOpen(true)}
+                >
+                  Open DeepQuery Reports Manager
+                </button>
+              )}
+            </div>
+            {deepQueryStatus.legacy && legacyPicker === toolCall.toolCallId && (
+              <form
+                className="deepquery-legacy-form"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleRegenerate(toolCall, legacyLanguage);
+                }}
+              >
+                <input
+                  type="text"
+                  className="deepquery-legacy-input"
+                  placeholder="Language, e.g. English"
+                  value={legacyLanguage}
+                  maxLength={30}
+                  autoFocus
+                  onChange={(e) => {
+                    if (/^[a-zA-Z\u00C0-\u024F\s-]*$/.test(e.target.value)) setLegacyLanguage(e.target.value);
+                  }}
+                />
+                {LEGACY_LANGUAGES.map((option) => (
+                  <button type="button" key={option} className="deepquery-legacy-chip" onClick={() => setLegacyLanguage(option)}>
+                    {option}
+                  </button>
+                ))}
+                <button type="submit" className="deepquery-legacy-go" disabled={!legacyLanguage.trim() || legacyBusy}>
+                  {legacyBusy ? "Queuing..." : "Generate"}
+                </button>
+              </form>
+            )}
+          </>
+        )}
         {isExpanded && (
           <div className="mt-2 border-top pt-2">
             <div className="mb-3">
@@ -506,18 +623,13 @@ const ToolBlocks = ({
                   <div className="d-flex justify-content-between align-items-start mb-1">
                     <span className="arg-key">result</span>
                     {outputString && (
-                      <OverlayTrigger
+                      <CopyButton
+                        text={outputString}
+                        tooltipText="Copy to clipboard"
                         placement="top"
-                        overlay={(props) => (
-                          <Tooltip {...props}>{copiedId === toolCall.toolCallId ? "Copied!" : "Copy to clipboard"}</Tooltip>
-                        )}
-                      >
-                        <i 
-                          className={`bi bi-${copiedId === toolCall.toolCallId ? 'check-lg text-success' : 'copy'} cursor-pointer ms-2`}
-                          onClick={() => handleCopy(outputString, toolCall.toolCallId)}
-                          style={{ fontSize: '0.9rem' }}
-                        />
-                      </OverlayTrigger>
+                        className="ms-2"
+                        onError={onClipboardError}
+                      />
                     )}
                   </div>
                   <div className="arg-value w-100">
@@ -537,23 +649,24 @@ const ToolBlocks = ({
   if (!blocks || !blocks.length) return null;
 
   return (
-    <div className="mt-2">
-      {blocks.map((b, idx) =>
-        b.type === "tool" ? (
-          renderToolBox(b)
-        ) : (
-          <Card.Text as="div" key={`msg-${idx}`}>
+    <div className="tool-blocks-container">
+      {blocks.map((b, idx) => {
+        if (b.type === "tool") {
+          return renderToolBox(b);
+        }
+        return (
+          <div key={`msg-${idx}`} className="intermediate-message">
             <div className="markdown-container">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={markdownComponents}
               >
-                {b.content}
+                {replaceGraphFences(b.content)}
               </ReactMarkdown>
             </div>
-          </Card.Text>
-        )
-      )}
+          </div>
+        );
+      })}
     </div>
   );
 };

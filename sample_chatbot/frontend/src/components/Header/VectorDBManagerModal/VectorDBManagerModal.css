@@ -1,0 +1,32 @@
+/* Vector DB Manager: resource list specifics (shared modal rules live in Common/Modal/Modal.css) */
+.rcc-modal.vdbsync-modal .modal-dialog.rcc-dialog {
+  max-width: min(720px, 96vw);
+}
+
+.resource-list-container {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid #eef1f4;
+  border-radius: 8px;
+}
+
+.resource-list-container .list-group-item {
+  padding: 0.65rem 0.85rem;
+  font-size: 0.82rem;
+  border-color: #f1f5f9;
+}
+
+.resource-name-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #0f172a;
+  background: #f1f5f9;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+}
+
+.resource-timestamp {
+  font-size: 0.75rem;
+  color: #64748b;
+}

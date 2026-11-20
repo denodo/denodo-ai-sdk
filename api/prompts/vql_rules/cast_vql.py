@@ -1,5 +1,5 @@
 CAST_VQL = """
-When working with converting data types, you can use the following VQL functions:
+When converting between data types, you can use the following VQL functions:
 - CAST(<data type>, <value>). Converts a value to a different data type.
 
 Example:
@@ -36,7 +36,7 @@ Casting a boolean value to an integer returns 1 for true, 0 for false.
 
 - ARRAY_TO_STRING. Converts an array field to a string that contains the elements of the array separated by a character. Signatures:
     1. ARRAY_TO_STRING(<separator:text>, <array value:array>):text.
-    2. ARRAY_TO_STRING(<separator:text>, <array begin delimiter:text>, <array end delimiter:text>, <register begin delimiter:text>,<register end delimiter:text>, <array value:array> ):text
+    2. ARRAY_TO_STRING(<separator:text>, <array begin delimiter:text>, <array end delimiter:text>, <register begin delimiter:text>, <register end delimiter:text>, <array value:array>):text
 - CREATETYPEFROMXML(<new type name:text>, <xml value:{xml|text}>):text. Creates a register or an array type from XML data. If the type is created correctly, it returns the name of the new type.
 
 Example:
@@ -51,13 +51,13 @@ SELECT CREATETYPEFROMXML('title_type',
 
 - REGISTER(<field name:any type> [, <field name:any type> ]*):register. Creates a register with the values of the fields of a view.
 
-Example of a register: Register {1, A, Register {hello , how're you}}
+Example of a register: Register {1, A, Register {hello, how're you}}
 
 - UNNEST is not a valid VQL function. Instead use FLATTEN.
 
 - FLATTEN <view identifier> AS <alias:identifier> ( <alias> [. <register field> ]* . <array field> ). Projects the array elements as fields.
 
-Example of a valid FLATTEN on a "iv_tmdb" view with a "genre_array" array field associated with the register of field names "genre".
+Example of a valid FLATTEN on an "iv_tmdb" view with a "genre_array" array field associated with the register of field names "genre".
 
 <vql>
 SELECT
@@ -88,12 +88,12 @@ Suppose the view "sales"."products" has a field "tags" of type string that store
 To get one row per tag, first build an array field from that string inside a CTE, and then FLATTEN that array field:
 
 <vql>
-WITH tags_array AS (
-    SELECT SPLIT(',', tags) AS tag_list
+WITH "tags_array" AS (
+    SELECT SPLIT(',', "tags") AS "tag_list"
     FROM "sales"."products"
 )
-SELECT string AS tag
-FROM FLATTEN tags_array AS t (t.tag_list);
+SELECT "string" AS "tag"
+FROM FLATTEN "tags_array" AS "t" ("t"."tag_list");
 </vql>
 
 In this example:

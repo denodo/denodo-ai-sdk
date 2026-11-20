@@ -152,13 +152,13 @@ async def resolve_query(
         seed = static.seed if static is not None else None
         conversation = make_fixer_conversation(
             question=request.question,
-            query=vql_query,
             vector_search_tables=vector_search_tables,
             query_explanation=gen.explanation,
             sample_data=sample_data,
             vector_search_sample_data_k=k,
             can_use_llm=can_use_llm,
             seed=seed,
+            filtered_tables=gen.filtered_tables,
         )
         if seed:
             attempts += 1

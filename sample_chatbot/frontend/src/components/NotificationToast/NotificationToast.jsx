@@ -1,6 +1,8 @@
-import React, { useState } from "react";
+import React from "react";
+import PropTypes from "prop-types";
 import Toast from "react-bootstrap/Toast";
 import ToastContainer from "react-bootstrap/ToastContainer";
+import CopyButton from "../CopyButton/CopyButton";
 import "./NotificationToast.css"; 
 
 const NotificationToast = ({ 
@@ -8,21 +10,12 @@ const NotificationToast = ({
   message, 
   variant = 'info', 
   title = 'Notification', 
-  onClose, 
+  onClose,
   duration = 5000,
-  autoHide = true
+  autoHide = true,
+  showCopyButton = true,
+  onError = null,
 }) => {
-
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    if (message) {
-      navigator.clipboard.writeText(message);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000); 
-    }
-  };
-
   const renderIcon = () => {
     switch (variant) {
       case 'success':
@@ -54,7 +47,7 @@ const NotificationToast = ({
   };
 
   return (
-    <ToastContainer position="bottom-end" className="p-3" style={{ zIndex: 1060 }}>
+    <ToastContainer position="bottom-end" className="p-3" style={{ zIndex: 1130 }}>
       <Toast
         show={show}
         onClose={onClose}
@@ -81,22 +74,32 @@ const NotificationToast = ({
             >
               {message}
             </div>
-            <button
-              onClick={handleCopy}
-              className="btn btn-sm btn-link p-0 text-secondary border-0"
-              title="Copy to clipboard"
-              style={{ marginTop: '-2px', flexShrink: 0 }}
-            >
-              <i 
-                className={`bi bi-${copied ? 'check-lg text-success' : 'copy'} cursor-pointer ms-2`} 
-                style={{ fontSize: '1.2em' }}
-              ></i>
-            </button>
+            {message && showCopyButton && (
+              <CopyButton
+                text={message}
+                tooltipText="Copy to clipboard"
+                placement="top"
+                className="ms-2 flex-shrink-0"
+                onError={onError}
+              />
+            )}
           </div>
         </Toast.Body>
       </Toast>
     </ToastContainer>
   );
+};
+
+NotificationToast.propTypes = {
+  show: PropTypes.bool,
+  message: PropTypes.string,
+  variant: PropTypes.string,
+  title: PropTypes.string,
+  onClose: PropTypes.func,
+  duration: PropTypes.number,
+  autoHide: PropTypes.bool,
+  showCopyButton: PropTypes.bool,
+  onError: PropTypes.func,
 };
 
 export default NotificationToast;

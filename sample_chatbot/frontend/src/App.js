@@ -1,21 +1,22 @@
-import React, { useState, useReducer, useEffect } from "react";
+import React, { useState, useReducer, useEffect, useRef, useCallback } from "react";
 import "./App.css";
-import "./Modal.css";
+import "./components/Common/Modal/Modal.css";
 
 import Header from "./components/Header/Header";
 import Chat from "./components/Chat/Chat";
 import QuestionForm from "./components/QuestionForm/QuestionForm";
-import ReportManagementModal from "./components/Header/ReportManagementModal";
+import ReportsManagerModal from "./components/Reports/ReportsManagerModal";
 import Sidebar from "./components/Sidebar/Sidebar";
 import LoginPage from "./components/LoginPage/LoginPage";
 import { Spinner } from "react-bootstrap";
 import NotificationToast from "./components/NotificationToast/NotificationToast";
-import SettingsModal from "./components/Header/SettingsModal";
+import AgentSettingsModal from "./components/Header/AgentSettingsModal/AgentSettingsModal";
 
 import { chatReducer, actionTypes } from "./reducers/chatReducer";
-import { useConfig, getSavedInputMethod } from "./contexts/ConfigContext";
+import { useConfig } from "./contexts/ConfigContext";
+import { useReport } from "./contexts/ReportContext";
 import { getNumberFormat } from "./utils/numberFormat";
-import api from "./api/client";
+import api, { AUTH_EXPIRED_EVENT } from "./api/client";
 import useSDK from "./hooks/useSDK";
 
 // Abstracted Hooks & Feature-based Components
@@ -24,7 +25,7 @@ import { useChatHistory } from "./hooks/useChatHistory";
 import { useChatLimits } from "./hooks/useChatLimits";
 import DeleteChatModal from "./components/Sidebar/DeleteChatModal";
 import RenameChatModal from "./components/Sidebar/RenameChatModal";
-import LimitWarningModal from "./components/Chat/LimitWarningModal";
+import LimitReachedModal from "./components/Chat/Modals/LimitReachedModal";
 import WelcomeScreen from "./components/WelcomeScreen/WelcomeScreen";
 
 const assetBaseUrl = import.meta.env.BASE_URL;
@@ -40,8 +41,18 @@ const App = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [username, setUsername] = useState("");
   const [settingsAgent, setSettingsAgent] = useState(null);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [contextUsage, setContextUsage] = useState(null);
+  const contextUsageRequest = useRef(0);
 
-  const { updateConfig } = useConfig();
+  const handleContextUsage = (usage) => {
+    if (!usage) return;
+    contextUsageRequest.current += 1;
+    setContextUsage(usage);
+  };
+
+  const { updateConfig, updateProfile, clearProfile } = useConfig();
+  const { setPollingEnabled } = useReport();
 
   // Business logic Custom Hooks
   const agentManager = useAgentManager(updateConfig);
@@ -66,7 +77,34 @@ const App = () => {
     history.setCurrentThreadId,
     limits.handleLimitReached,
     limits.autoOverwriteAccepted,
+    handleContextUsage,
   );
+
+  const contextAgentKey = agentManager.selectedChatbot
+    ? agentManager.selectedChatbot.isGlobal
+      ? "global"
+      : agentManager.selectedChatbot.id
+    : null;
+
+  const refreshContextUsage = useCallback(() => {
+    if (!isAuthenticated) {
+      setContextUsage(null);
+      return;
+    }
+    const requestId = ++contextUsageRequest.current;
+    const params = history.currentThreadId ? { thread_id: history.currentThreadId } : {};
+    api.get("context_usage", { params })
+      .then((response) => {
+        if (contextUsageRequest.current === requestId) {
+          setContextUsage(response.data);
+        }
+      })
+      .catch(() => {});
+  }, [isAuthenticated, history.currentThreadId]);
+
+  useEffect(() => {
+    refreshContextUsage();
+  }, [refreshContextUsage, contextAgentKey]);
 
   useEffect(() => {
     const img = new Image();
@@ -92,6 +130,21 @@ const App = () => {
     agentManager.selectedChatbot,
     agentManager.activeChatbot,
   ]);
+
+  // Any 401 from the API means the session is gone: go back to the login screen
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      clearProfile();
+      setIsAuthenticated(false);
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+  }, []);
+
+  // DeepQuery reports are polled only while a user is logged in
+  useEffect(() => {
+    setPollingEnabled(isAuthenticated);
+  }, [isAuthenticated, setPollingEnabled]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -134,34 +187,13 @@ const App = () => {
           response.data.userSyncPermissions !== false,
         );
 
-        if (response.data.config) updateConfig(response.data.config);
-
-        // Re-apply User Profile preferences for this user
-        const savedInputMethod = getSavedInputMethod(userInformation.username);
-        if (savedInputMethod) updateConfig({ input_method: savedInputMethod });
-        updateConfig({ number_format: getNumberFormat(userInformation.username) });
-
-        const dictString = localStorage.getItem(
-          `${userInformation.username}_custom_instructions_dict`,
-        );
-        if (dictString) {
-          try {
-            const dict = JSON.parse(dictString);
-            const validKeys = response.data.agents
-              ? response.data.agents.map((a) => a.id)
-              : [];
-            if (response.data.globalEnabled) validKeys.push("global");
-
-            const cleanDict = {};
-            for (const key of Object.keys(dict)) {
-              if (validKeys.includes(key)) cleanDict[key] = dict[key];
-            }
-            localStorage.setItem(
-              `${userInformation.username}_custom_instructions_dict`,
-              JSON.stringify(cleanDict),
-            );
-          } catch (e) {}
-        }
+        updateConfig(response.data.config || {});
+        const savedProfile = response.data.profile || {};
+        updateProfile({
+          user_details: savedProfile.user_details || "",
+          input_method: savedProfile.input_method || "enter",
+          number_format: savedProfile.number_format || getNumberFormat(),
+        });
       } else {
         alert(response.data.message || "Invalid credentials.");
       }
@@ -194,6 +226,7 @@ const App = () => {
     } catch (error) {
       console.error("Error applying new settings to backend:", error);
     }
+    refreshContextUsage();
   };
 
   const handleNewChat = () => {
@@ -217,14 +250,11 @@ const App = () => {
 
   const handleAcceptLimit = () => {
     const { pendingData, type } = limits.limitModal;
-    limits.setLimitModal({
+    limits.setLimitModal((prev) => ({
+      ...prev,
       show: false,
-      type: null,
       pendingData: null,
-      limit: 0,
-      current: 0,
-      targetsToDelete: [],
-    });
+    }));
 
     if (pendingData) {
       if (pendingData.type === "import") {
@@ -297,7 +327,10 @@ const App = () => {
         onPinChat={history.handlePinChat}
         searchQuery={history.searchQuery}
         onSearchChange={history.setSearchQuery}
-        onOpenSettings={(bot) => setSettingsAgent(bot)}
+        onOpenSettings={(bot) => {
+          setSettingsAgent(bot);
+          setShowSettingsModal(true);
+        }}
       />
 
       <div className="main-content-area">
@@ -312,7 +345,6 @@ const App = () => {
           renderLogo={renderLogo}
           showBrandAsk={customLogoState === "absent"}
           syncedResources={agentManager.syncedResources}
-          partialResources={agentManager.partialResources}
           userSyncPermissions={agentManager.userSyncPermissions}
           onResourcesUpdate={(data) => {
             if (data.syncedResources)
@@ -324,11 +356,13 @@ const App = () => {
           toggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
           isSidebarOpen={isSidebarOpen}
           selectedChatbot={agentManager.selectedChatbot}
+          chatbots={agentManager.chatbots}
           isSwitchingAgent={agentManager.isSwitchingAgent}
           onOpenGeneralSettings={() => {
             const globalBot = agentManager.chatbots.find((bot) => bot.isGlobal || bot.id === "global");
             if (globalBot) {
               setSettingsAgent(globalBot);
+              setShowSettingsModal(true);
             }
           }}
         />
@@ -388,6 +422,7 @@ const App = () => {
                     dispatch={dispatch}
                     setCurrentQuestion={setCurrentQuestion}
                     setQuestionType={setQuestionType}
+                    contextUsage={contextUsage}
                   />
                 )}
               </div>
@@ -409,6 +444,8 @@ const App = () => {
                   syncedResources={agentManager.syncedResources}
                   partialResources={agentManager.partialResources}
                   selectedChatbot={agentManager.activeChatbot}
+                  contextUsage={contextUsage}
+                  showContextUsage={Boolean(agentManager.selectedChatbot) || results.length > 0}
                 />
               </div>
               <div
@@ -423,7 +460,7 @@ const App = () => {
         )}
       </div>
 
-      <ReportManagementModal />
+      <ReportsManagerModal />
       <DeleteChatModal
         show={!!history.chatToDelete}
         onHide={() => history.setChatToDelete(null)}
@@ -436,17 +473,22 @@ const App = () => {
         setNewChatName={history.setNewChatName}
         onConfirm={history.handleRenameSubmit}
       />
-      <LimitWarningModal
+      <LimitReachedModal
         modalState={limits.limitModal}
         onClose={limits.closeLimitModal}
         onAccept={handleAcceptLimit}
       />
-      <SettingsModal
-        show={settingsAgent !== null}
-        handleClose={() => setSettingsAgent(null)}
+      <AgentSettingsModal
+        show={showSettingsModal}
+        handleClose={() => setShowSettingsModal(false)}
         selectedChatbot={settingsAgent}
         onSettingsApplied={handleSettingsApplied}
-        title={settingsAgent ? `${settingsAgent.name} Settings` : ""}
+        onSkillsChanged={refreshContextUsage}
+        title={
+          settingsAgent
+            ? (settingsAgent.isGlobal ? "General chat settings" : `${settingsAgent.name} settings`)
+            : ""
+        }
         isCurrentAgent={
           settingsAgent ? agentKeyOf(settingsAgent) === currentAgentKey : true
         }

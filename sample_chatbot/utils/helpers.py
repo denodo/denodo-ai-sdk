@@ -8,7 +8,8 @@ import logging
 from io import BytesIO
 from PIL import Image, UnidentifiedImageError
 from utils import langfuse
-from utils.utils import custom_tag_parser
+from utils.logging_utils import run_once
+from utils.utils import custom_tag_parser, get_agents_icons_dir
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from sample_chatbot.engine.prompts import CONV_HISTORY_TITLE_GENERATION_PROMPT
@@ -63,7 +64,9 @@ def check_env_variables(required_vars):
             error_msg += f"- {var}\n"
         error_msg += "Please set these variables before starting the Chatbot application."
 
-        logging.error(error_msg)
+        # Every worker exits, but only one logs the error
+        if run_once("missing_env_variables"):
+            logging.error(error_msg)
         sys.exit(1)
 
 def setup_directories(upload_folder="uploads", report_folder="reports"):
@@ -105,7 +108,7 @@ def get_icon_as_base64(filename, max_size=(256, 256)):
     if filename is None:
         return None
 
-    base_path = "api/agents/custom/icons"
+    base_path = get_agents_icons_dir()
     file_path = os.path.join(base_path, filename)
 
     # 1. Check if file exists

@@ -3,15 +3,16 @@ import json
 import time
 import logging
 import concurrent.futures
-from utils.utils import log_params, prepare_last_update_vector, timed
+from utils.utils import log_params, prepare_last_update_vector, timed, get_api_data_dir
 from utils.schema_catalog.helpers import encode_tag
 
 class UniformVectorStore:
-    def __init__(self, provider, embeddings, index_name = "ai_sdk_vector_store", rate_limit_rpm = None, chunk_factor = 5):
+    def __init__(self, provider, embeddings, index_name = "ai_sdk_vector_store", rate_limit_rpm = None, chunk_factor = 5, base_dir = None):
         self.provider = provider.lower()
         self.embeddings = embeddings
         self.index_name = index_name
         self.rate_limit_rpm = rate_limit_rpm
+        self.base_dir = base_dir if base_dir is not None else get_api_data_dir()
         self.client = None
         self.search_vector = self.embeddings.embed_query("tables")
         self.dimensions = len(self.search_vector)
@@ -51,8 +52,7 @@ class UniformVectorStore:
             self._ensure_modern_sqlite()
             from chromadb.config import Settings
             from langchain_chroma import Chroma
-            data_dir = os.getenv("AI_SDK_DATA_DIR", ".")
-            persist_dir = os.path.join(data_dir, self.index_name)
+            persist_dir = os.path.join(self.base_dir, self.index_name)
 
             self.client = Chroma(
                 collection_name=self.index_name,
@@ -78,6 +78,10 @@ class UniformVectorStore:
             if not PGVECTOR_CONNECTION_STRING:
                 raise ValueError("PGVECTOR_CONNECTION_STRING environment variable not set.")
 
+            raw_autocreate_extension = os.getenv("PGVECTOR_AUTOCREATE_EXTENSION", "1")
+            if raw_autocreate_extension not in ("0", "1"):
+                raise ValueError("PGVECTOR_AUTOCREATE_EXTENSION must be 0 or 1.")
+
             engine = create_engine(
                 PGVECTOR_CONNECTION_STRING,
                 pool_pre_ping=True, # Test connection before use to handle dropped connections
@@ -89,6 +93,7 @@ class UniformVectorStore:
                 connection=engine,
                 collection_name=self.index_name,
                 use_jsonb=True,
+                create_extension=raw_autocreate_extension == "1",
             )
         elif self.provider == "opensearch":
             from langchain_community.vectorstores import OpenSearchVectorSearch
@@ -378,14 +383,15 @@ class UniformVectorStore:
     @log_params
     @timed
     def search_by_vector(self, vector, k=3, view_ids=None, database_names=None, tag_names=None, view_names=None,
-                         scores=False, filter_logic='OR'):
+                         scores=False, filter_logic='OR', document_ids=None):
         # If view_ids is provided and it's empty, return empty list
         if view_ids is not None and len(view_ids) == 0:
             return []
         # Build search filter if view_ids has values
         elif view_ids is not None:
             search_filter = self._build_search_filter(
-                view_ids, database_names, tag_names, view_names, filter_logic=filter_logic
+                view_ids, database_names, tag_names, view_names, filter_logic=filter_logic,
+                document_ids=document_ids,
             )
         elif not view_names and ((database_names and len(database_names) > 0) or (tag_names and len(tag_names) > 0)):
             search_filter = self._build_metadata_search_filter(
@@ -490,13 +496,22 @@ class UniformVectorStore:
 
     @log_params
     def _build_search_filter(self, view_ids, database_names=None, tag_names=None, view_names=None,
-                             filter_logic='OR'):
+                             filter_logic='OR', document_ids=None):
         if self.provider == "opensearch":
             clauses = [{"terms": {"metadata.view_id": view_ids}}]
         elif self.provider in ['chroma', 'pgvector', 'oracle', 'sqlserver']:
             clauses = [{"view_id": {"$in": view_ids}}]
         else:
             return None
+
+        # document_id is a hard restriction, like view_ids. Chunk ids contain '_',
+        # so OpenSearch must hit the keyword field the same way view names do.
+        document_ids = [document_id for document_id in (document_ids or []) if document_id]
+        if document_ids:
+            if self.provider == "opensearch":
+                clauses.append({"terms": {"metadata.document_id.keyword": document_ids}})
+            else:
+                clauses.append({"document_id": {"$in": document_ids}})
 
         # view_names is a hard restriction, like view_ids. filter_logic only governs databases and tags.
         view_names = [name for name in (view_names or []) if name]
@@ -661,17 +676,16 @@ class UniformVectorStore:
         if len(view_ids) == 0:
             return []
 
-        views = self.search_by_vector(self.search_vector, k=len(view_ids) * self.chunk_factor, view_ids=view_ids)
-
-        # Create a dictionary to keep only unique views based on view_name
-        # Necessary because now there might be chunks of the same view
-        unique_views = {}
-        for view in views:
-            view_name = view.metadata['view_name']
-            if view_name not in unique_views:
-                unique_views[view_name] = view
-
-        return list(unique_views.values())
+        view_ids = [str(view_id) for view_id in view_ids]
+        # An unchunked view is stored as {view_id}. A chunked view stores view_json on {view_id}_0.
+        # Either id already exists in indexes written before this change.
+        document_ids = [f"{view_id}_0" for view_id in view_ids] + view_ids
+        return self.search_by_vector(
+            self.search_vector,
+            k=len(view_ids),
+            view_ids=view_ids,
+            document_ids=document_ids,
+        )
 
     @log_params
     def delete_views(self, view_names):

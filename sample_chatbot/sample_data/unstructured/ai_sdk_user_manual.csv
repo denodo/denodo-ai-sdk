@@ -3,50 +3,50 @@
 
 By automating the complexities of Retrieval-Augmented Generation (RAG) and VQL query generation, the SDK ensures AI responses are grounded in real-time, factual enterprise context.
 
-Key features
+**Key features**
 
-* Text-to-VQL: Automatically translates natural language questions into Denodo Virtual Query Language (VQL), allowing AI agents to query the Denodo Platform directly without manual SQL/VQL coding.
-* Metadata Search (RAG): Uses vectorization to index and search through your technical and business metadata. This enables agents to find the right data assets instantly using semantic search.
-* DeepQuery Agent: A sophisticated research agent that orchestrates complex tasks. It crafts a multi-step execution plan and carries it out by combining metadata discovery with live VQL data extraction.
-* Model & Vector Store Agnostic: Provides a flexible architecture to configure and switch between various LLMs and Vector Databases depending on your performance and privacy requirements.
+* **Text-to-VQL**: Automatically translates natural language questions into Denodo Virtual Query Language (VQL), allowing AI agents to query the Denodo Platform directly without manual SQL/VQL coding.  
+* **Metadata Search (RAG):** Uses vectorization to index and search through your technical and business metadata. This enables agents to find the right data assets instantly using semantic search.  
+* **DeepQuery Agent**: A sophisticated research agent that orchestrates complex tasks. It crafts a multi-step execution plan and carries it out by combining metadata discovery with live VQL data extraction.  
+* **Model & Vector Store Agnostic**: Provides a flexible architecture to configure and switch between various LLMs and Vector Databases depending on your performance and privacy requirements.
 
 To showcase the AI SDK’s capabilities, a sample chatbot application is included."
 "How to obtain the Denodo AI SDK","### Downloading the source code from GitHub
 
-The AI SDK and sample chatbot source code is available in the following public Github repository.
+The AI SDK and sample chatbot source code is available in the following public [Github repository](https://github.com/denodo/denodo-ai-sdk).
 
 ### Downloading the Denodo AI SDK container image
 
 If you want to use the Denodo AI SDK container image with a Denodo Platform installation, you can obtain the AI SDK container image from DenodoConnects via:
 
-* Support site. You will find it in the DenodoConnects section.
-* Harbor:
-* If you have an Enterprise Plus license you can find it here.
-* If you have an Express license you can find it here.
+* **Support site**. You will find it in the DenodoConnects section.  
+* **Harbor**:   
+  * If you have an Enterprise Plus license you can find it [here](https://harbor.open.denodo.com/harbor/projects/13/repositories).  
+  * If you have an Express license you can find it [here](https://harbor.open.denodo.com/harbor/projects/35/repositories).
 
-NOTE: If downloading the image directly from Harbor, you will need to also obtain the example configuration files from Github: sdk\_config.env.example, chatbot\_config.env.example. If you obtain the AI SDK container image from the support site, these files will be already included in the downloaded .zip file.
+**NOTE:** If downloading the image directly from Harbor, you will need to also obtain the example configuration files from Github: [sdk\_config.env.example](https://github.com/denodo/denodo-ai-sdk/blob/public/9/dev/api/utils/sdk_config_example.env), [chatbot\_config.env.example](https://github.com/denodo/denodo-ai-sdk/blob/public/9/dev/sample_chatbot/chatbot_config_example.env). If you obtain the AI SDK container image from the support site, these files will be already included in the downloaded .zip file.
 
-For a quickstart guide explaining how to use the AI SDK container image together with the Denodo Express container image you can follow this tutorial.
+For a quickstart guide explaining how to use the AI SDK container image together with the Denodo Express container image you can follow [this tutorial](https://community.denodo.com/tutorials/browse/chatbot/index#2).
 
 ### Installing Denodo Express
 
-The AI SDK is also included as part of the Denodo Express installer."
-"Installing the environment","NOTE: This is only necessary if you obtained the AI SDK from Github or as part of the Denodo Express installer. The container from DenodoConnects comes with the environment already set up.
+The AI SDK is also included as part of the [Denodo Express](https://community.denodo.com/express/download) installer."
+"Installing the environment","**NOTE:** This is only necessary if you obtained the AI SDK from Github or as part of the Denodo Express installer. The container from DenodoConnects comes with the environment already set up.
 
-To execute the AI SDK, you will need the following environment setup:
+*To execute the AI SDK, you will need the following environment setup:*
 
-* Python 3.11/3.12/3.13
-* A Denodo 9.0.5 or higher (either Express or Enterprise Plus license is required) instance, with cache enabled.
-* A minimum of 2 cores
-* A minimum of 2GB RAM
-* A minimum of 5GB in disk space
+* **Python 3.11/3.12/3.13**  
+* A **Denodo 9.0.5 or higher** (either Express or Enterprise Plus license is required) instance, **with cache enabled**.  
+* A minimum of **2 cores**  
+* A minimum of **2GB RAM**  
+* A minimum of **5GB in disk space**
 
 On top of that, you will also need, at minimum:
 
-* An LLM provider, with access to an LLM with tool calling capabilities
+* An LLM provider, with access to an LLM **with tool calling capabilities**  
 * An embeddings model provider
 
-Make sure to have an extra 2 cores/2GB RAM/5GB disk space freely available for the AI SDK to use if deploying it on the same machine as the Denodo Platform. Also, take into account that as the number of concurrent users increases, so will the required number of cores/GB of RAM.
+Make sure to have an extra 2 cores/2GB RAM/5GB disk space freely available for the AI SDK to use **if deploying it on the same machine as the Denodo Platform**. Also, take into account that as the number of concurrent users increases, so will the required number of cores/GB of RAM.
 
 Once you have installed the correct environment, you will proceed by creating the Python virtual environment and installing the required dependencies. The steps are the same for both Windows and Linux, unless otherwise specified.
 
@@ -60,111 +60,115 @@ python \-m venv venv
 
 This will create a venv folder inside our AI SDK folder where all the specific dependencies for this project will be installed. We now need to activate the virtual environment.
 
-Activating the virtual environment differs depending on the OS. Please check the FAQ for common problems when installing on Windows/Linux.
+Activating the virtual environment differs depending on the OS. Please check the [FAQ](#frequently-asked-questions-\(faq\)) for common problems when installing on Windows/Linux.
 
-Windows
+**Windows**
 
-.\\venv\\Scripts\\activate
-
-Linux/MacOS
-
+.\\venv\\Scripts\\activate  
+**Linux/MacOS**  
 source venv/bin/activate
 
 Once inside the virtual environment, you now can install the required dependencies.
 
-python -m pip install -r requirements.txt
+python \-m pip install \-r requirements.txt
 
-NOTE: If you scan the requirements.txt, you will notice some packages are OS-dependent. The pip install will already take the distinction into account, installing only the required packages for each operating system.
+**NOTE**: If you scan the requirements.txt, you will notice some packages are OS-dependent. The pip install will already take the distinction into account, installing only the required packages for each operating system.
 
 The required environment for the AI SDK is now correctly set up."
 "Basic configuration","### Virtual DataPort and Data Marketplace
 
-The AI SDK must be able to connect to the Data Marketplace to retrieve the data and execute queries against it. For this reason, the Virtual DataPort server and the Data Marketplace of your Denodo instance must always be running while executing the AI SDK. 
+The AI SDK must be able to connect to the Data Marketplace to retrieve the data and execute queries against it. For this reason, the Virtual DataPort server and the Data Marketplace of your Denodo instance **must always be running while executing the AI SDK**. 
 
-NOTE: With the AI SDK there is a sample banking demo data to get started with the AI SDK. If you plan on using it, you can skip the following Virtual DataPort and Data Marketplace configuration steps and jump to the AI SDK configuration section.
+**NOTE:** With the AI SDK there is a sample banking demo data to get started with the AI SDK. If you plan on using it, you can skip the following Virtual DataPort and Data Marketplace configuration steps and jump to the [AI SDK configuration section](#ai-sdk).
 
 #### Enable cache in Virtual DataPort
 
-Cache is needed to retrieve data samples of each view. You can disable this (and remove the need of having cache enabled) by setting examples\_per\_table = 0 in the getMetadata endpoint.
+Cache is needed to retrieve data samples of each view. You can disable this (and remove the need of having cache enabled) by setting *examples\_per\_table \= 0* in the [getMetadata endpoint](#/getmetadata).
 
 #### Choose the databases you want to expose to the AI SDK
 
-In the AI SDK getMetadata endpoint you will be asked to select which databases (or tags) are exposed to the AI SDK through the vdp\_database\_names (vdp\_tag\_names) variable (more on the AI SDK’s configuration later on).
+In the AI SDK getMetadata endpoint you will be asked to select which databases (or tags) are exposed to the AI SDK through the *vdp\_database\_names (vdp\_tag\_names)* variable (more on the AI SDK’s configuration later on).
 
-NOTE: Remember to synchronize the Data Marketplace with VDP before executing the AI SDK.
+**NOTE:** Remember to synchronize the Data Marketplace with VDP before executing the AI SDK.
 
 #### Configure users with the correct permissions
 
 If you plan on using your own data, we recommend you create two users with specific permissions to work with:
 
-* Metadata Sync User. This is the user account used to run the synchronization (through the getMetadata endpoint) to vectorize the Denodo Metadata so it is available for the LLM. This user should have the privileges to access all the assets that will be available via the Denodo AI SDK. This will be typically a service account used for this particular purpose. See: Create a new User for the Creating Users — Virtual DataPort Administration Guide.
-* End User(s). These are the users that will be interacting with the AI SDK to run their questions over the data and metadata exposed in Denodo.
-
-The same access privileges and data protections applied to the users in Denodo will apply when the End users interact via the AI SDK.
+* **Metadata Sync User**. This is the user account used to run the synchronization (through the getMetadata endpoint) to vectorize the Denodo Metadata so it is available for the LLM. This user should have the privileges to access all the assets that will be available via the Denodo AI SDK. This will be typically a service account used for this particular purpose. See: Create a new User for the  [Creating Users — Virtual DataPort Administration Guide](https://community.denodo.com/docs/html/browse/latest/en/vdp/administration/databases_users_and_access_rights_in_virtual_dataport/administration_of_databases_users_roles_and_their_access_rights/creating_users).  
+    
+* **End User(s)**. These are the users that will be interacting with the AI SDK to run their questions over the data and metadata exposed in Denodo.  
+  The same access privileges and data protections applied to the users in Denodo will apply when the End users interact via the AI SDK.
 
 #### How to configure users in the AI SDK
 
-Credentials are passed directly through the authentication method of your choice (HTTP Basic or OAuth) when calling the endpoint. The credentials sent will be passed to the Denodo instance to authenticate.
+**Credentials are passed directly** through the authentication method of your choice (**HTTP Basic or OAuth**) when calling the endpoint. The credentials sent will be passed to the Denodo instance to authenticate.
 
-The recommended procedure is to call the getMetadata endpoint with Metadata Sync User permissions to load the vector store for all users. Then, end users will call the answerQuestion endpoints with their own credentials, and permissions will be applied.
+The recommended procedure is to call the *getMetadata* endpoint with Metadata Sync User permissions to load the vector store for all users. Then, end users will call the answerQuestion endpoints with their own credentials, and permissions will be applied.
 
-If you load the vector store with the End Users credentials directly, the vector store will be limited to just that user’s permissions, and the vector store may not contain the necessary views for other users to be able to query the vector store at the same time.
+If you load the vector store with the *End Users* credentials directly, the vector store will be limited to just that user’s permissions, and the vector store may not contain the necessary views for other users to be able to query the vector store at the same time.
 
 #### User privileges
 
 ##### How to grant privileges for users in Denodo
 
-1. To set user privileges in Denodo Design Studio go to: Administration > User Management
+1. To set user privileges in Denodo Design Studio go to: Administration \> User Management  
 2. Select Edit Privileges
 
 ##### General Requirement: Connection URL
 
-If the VDP server URL configured in the Data Marketplace includes a specific database (e.g., //localhost:9999/db\_name), the users must have Connect privilege on that specific database (which we will call URL Database).
+If the VDP server URL configured in the Data Marketplace includes a specific database (e.g., //localhost:9999/**db\_name**), the users must have **Connect** privilege on that specific database (which we will call **URL Database**).
 
 ##### Metadata Sync User privileges
 
-This user performs the vectorization process. The required privileges depend on the inclusion of sample data, which is highly recommended to help the LLM better understand your schema.
+This user performs the vectorization process. The required privileges depend on the inclusion of **sample data**, which is highly recommended to help the LLM better understand your schema.
 
-###### Scenario A: Including Sample Data (Recommended)
+###### *Scenario A: Including Sample Data (Recommended)*
 
-The vectorization process requires privileges to obtain both metadata and some sample data from Denodo. To do this, the AI SDK uses the database where the VDP cache is configured (which we will call VDP Cache Database), admin by default. Therefore the required privileges for this user are:
+The vectorization process requires privileges to obtain both metadata and some sample data from Denodo. To do this, the AI SDK uses the **database where the VDP cache is configured** (which we will call **VDP Cache Database**), **admin** by default. Therefore the required privileges for this user are:
 
-* Connect privilege on the VDP Cache Database within Denodo.
-* Create view privilege on the VDP Cache Database within Denodo.
-* Connect privilege on your target database within Denodo.
-* Metadata privilege on your target database within Denodo.
-* Execute privilege on your target database within Denodo.
+* **Connect** privilege on the **VDP Cache Database** within Denodo.  
+* **Create view** privilege on the **VDP Cache Database** within Denodo.  
+* **Connect** privilege on your **target database** within Denodo.  
+* **Metadata** privilege on your **target database** within Denodo.  
+* **Execute** privilege on your **target database** within Denodo.
 
-###### Scenario B: Excluding Sample Data
+![][image1]
+
+###### *Scenario B: Excluding Sample Data*
 
 If sample data is not required, the required privileges are:
 
-* Connect privilege on your target database within Denodo.
-* Metadata privilege on your target database within Denodo.
+* **Connect** privilege on your **target database** within Denodo.  
+* **Metadata** privilege on your **target database** within Denodo.
+
+![][image2]
 
 ##### End User privileges
 
 For a user to execute and interact with the AI SDK, it must have:
 
-* Connect privilege on your target database within Denodo.
-* Metadata privilege on your target database within Denodo.
-* Execute privilege on your target database within Denodo.
+* **Connect** privilege on your **target database** within Denodo.  
+* **Metadata** privilege on your **target database** within Denodo.  
+* **Execute** privilege on your **target database** within Denodo.
 
-### AI SDK
+![][image3]
 
-The AI SDK is configured via a .env file located in api/utils/sdk\_config.env. With this file you will be able to configure many parameters related to the AI SDK’s behavior.
+### AI SDK {#ai-sdk}
 
-NOTE: If using the container images, you will find the sdk\_config.env.example in the .zip (if you downloaded the container image from the support site) or you will have to download it from Github here (if you obtain the image through Harbor).
+The AI SDK is configured via a .env file located in *api/utils/sdk\_config.env*. With this file you will be able to configure many parameters related to the AI SDK’s behavior.
 
-There is a sample file named sdk\_config.env.example in api/utils/ that you can rename to sdk\_config.env. This file is already populated with the default values that will work for most cases. The only basic configuration you need to start using the AI SDK is:
+**NOTE:** If using the container images, you will find the sdk\_config.env.example in the .zip (if you downloaded the container image from the support site) or you will have to download it from Github [here](https://github.com/denodo/denodo-ai-sdk/blob/public/9/dev/api/utils/sdk_config.env.example) (if you obtain the image through Harbor).
 
-* LLM model
-* Thinking LLM model (optional, if you want to use DeepQuery)
+There is a sample file named *sdk\_config.env.example* in api/utils/ that you can rename to *sdk\_config.env*. This file is already populated with the default values that will work for most cases. The only basic configuration you need to start using the AI SDK is:
+
+* LLM model  
+* Thinking LLM model (optional, if you want to use DeepQuery)  
 * Embedding model
 
 By default, OpenAI is configured in sdk\_config.env.example for both LLM, thinking LLM and embedding models. If your provider is OpenAI, the only parameter you are required to configure is the OPENAI\_API\_KEY parameter. If your provider is not OpenAI, please look for its section in the file and fill out the required parameters.
 
-You can also go to the Advanced configuration section of this guide to look for your provider of choice and learn how to configure it.
+You can also go to the [Advanced configuration](#llms/embeddings) section of this guide to look for your provider of choice and learn how to configure it.
 
 #### Large Language Model (LLM)
 
@@ -178,7 +182,7 @@ You will need access to a powerful LLM to be able to successfully build quality 
 
 An embedding model differs from an LLM in many ways, from architecture to purpose. It is likely that you have interacted with an embeddings model without knowing it, because you do not interact directly with it.
 
-An embeddings model takes in a natural language string as input and returns an array of integers (a vector). This vector is used to determine the semantic similarity between multiple strings. These vectors are stored in a vector store. 
+An embeddings model takes in a natural language string as input and returns an array of integers (*a vector*). This vector is used to determine the semantic similarity between multiple strings. These vectors are stored in a **vector store**. 
 
 In the case of the AI SDK, we use embedding models to determine which tables need to be used to answer the input question.
 
@@ -186,29 +190,29 @@ In the case of the AI SDK, we use embedding models to determine which tables nee
 
 Thinking models are used in the AI SDK at the core of the DeepQuery functionality. A thinking model is an LLM trained to “think longer” and handle complex, multi-step tasks. Before giving a final answer, it generates an internal ""chain of thought."" 
 
-This reasoning process isn't generally visible to the user, but it allows the model to break down problems, consider multiple approaches, and arrive at more accurate and logical conclusions. A thinking model is required to use DeepQuery.
+This reasoning process isn't generally visible to the user, but it allows the model to break down problems, consider multiple approaches, and arrive at more accurate and logical conclusions. **A thinking model is required to use DeepQuery**.
 
 ### Sample chatbot
 
-A sample chatbot is also provided as an example of how to develop an interface for users to interact with the AI SDK APIs. The sample chatbot is configured via another .env file located in sample\_chatbot/chatbot\_config.env.
+A sample chatbot is also provided as an example of how to develop an interface for users to interact with the AI SDK APIs. The sample chatbot is configured via another .env file located in *sample\_chatbot/chatbot\_config.env*.
 
-NOTE: If using the container images, you will find the chatbot\_config.env.example in the .zip (if you downloaded the container image from the support site) or you will have to download it from Github here (if you obtain the image through Harbor).
+**NOTE:** If using the container images, you will find the chatbot\_config.env.example in the .zip (if you downloaded the container image from the support site) or you will have to download it from Github [here](https://github.com/denodo/denodo-ai-sdk/blob/public/9/dev/sample_chatbot/chatbot_config_example.env) (if you obtain the image through Harbor).
 
-Again, for the basic configuration, you simply need to rename the sample file chatbot\_config.env.example to chatbot\_config.env and this will have the default parameters already populated. Then, the only basic configuration you will need to set up is the LLM model to use for the chatbot and the embeddings model."
+Again, for the basic configuration, you simply need to rename the sample file *chatbot\_config.env.example* to *chatbot\_config.env* and this will have the default parameters already populated. Then, the only basic configuration you will need to set up is the LLM model to use for the chatbot and the embeddings model."
 "Execution","Once the basic configuration has been properly populated, it’s time to get the AI SDK up and running.
 
 ### From source code
 
-NOTE: The AI SDK includes a sample chatbot. Both processes can be executed using the command python run.py both. To run the processes in the background and regain control of the terminal, execute python run.py both --background.
+**NOTE:** The AI SDK includes a sample chatbot. Both processes can be executed using the command *python run.py both*. To run the processes in the background and regain control of the terminal, execute *python run.py both \--background*.
 
-To stop the foreground processes, type exit and press Enter, press Ctrl+C, or send an EOF signal (Ctrl+D on Linux/macOS; Ctrl+Z + Enter on Windows). If the processes were launched in the background, they can be stopped by executing python stop.py both.
+To stop the foreground processes, type exit and press Enter, press Ctrl+C, or send an EOF signal (Ctrl+D on Linux/macOS; Ctrl+Z \+ Enter on Windows). If the processes were launched in the background, they can be stopped by executing *python stop.py both*.
 
 #### AI SDK
 
-To execute only the API endpoints, without the chatbot, you can run python run.py api.
+To execute only the API endpoints, without the chatbot, you can run *python run.py api*.
 
-* The Swagger documentation for the AI SDK API will be available in {API\_HOST}/docs.
-* The AI SDK API logs can be found in the file logs/api.log.
+* The **Swagger documentation** for the AI SDK API will be available in {API\_HOST}/docs.  
+* The **AI SDK API logs** can be found in the file logs/api.log.
 
 There is a sample api/example.py file that showcases how to call the AI SDK endpoints.
 
@@ -222,23 +226,23 @@ To execute the sample chatbot, you must have the API running (or execute both, a
 
 The sample chatbot comes with a sample banking dataset that you can load onto your Denodo instance to get a feel for the AI SDK.
 
-NOTE: If you have downloaded the AI SDK from GitHub, it is necessary to move the sample files in <AI\_SDK\_HOME>/sample\_chatbot/sample\_data/structured/ to <DENODO\_HOME>/samples/ai-sdk/sample\_chatbot/sample\_data/structured/, as the demo data loader expects them to be in that filepath. If you are using the Denodo Express installer, the CSVs will already be in that folder.
+**NOTE:** If you have downloaded the AI SDK from GitHub, it is necessary to move the sample files in *\<AI\_SDK\_HOME\>/sample\_chatbot/sample\_data/structured/* to *\<DENODO\_HOME\>/samples/ai-sdk/sample\_chatbot/sample\_data/structured/*, as the demo data loader expects them to be in that filepath. If you are using the Denodo Express installer, the CSVs will already be in that folder.
 
 To load the sample data, run the following command:
 
-python run.py both --load-demo --host localhost --grpc-port 9994 --dc-port 9090 --server-id 1
+python run.py both \--load-demo \--host localhost \--grpc-port 9994 \--dc-port 9090 \--server-id 1
 
-NOTE: The –load-demo command only needs to be run the first time to load the demo data in your Denodo instance. After that, you can run python run.py both, directly.
+**NOTE:** The –load-demo command only needs to be run the first time to load the demo data in your Denodo instance. After that, you can run python run.py both, directly.
 
 This command assumes your Denodo instance is using host localhost, GRPC port 9994, and Tomcat port 9090 (the default installation values). Besides, it assumes that you want to create the sample data in the VDP server registered with identifier 1 in the Data Marketplace (the VDP server registered by default during the installation). If this is not the case, you can modify the parameters to your current Denodo configuration. 
 
-Once the command has executed successfully, a ‘samples\_bank’ database will be created in your VDP server, the cache of the VDP server will be enabled, the Data Marketplace will be synchronized with the VDP server, the AI SDK will be launched (in the port 8008 by default) and the chatbot will be accessible through the following URL: <http://localhost:9992>
+Once the command has executed successfully, a ‘samples\_bank’ database will be created in your VDP server, the cache of the VDP server will be enabled, the Data Marketplace will be synchronized with the VDP server, the AI SDK will be launched (in the port 8008 by default) and the chatbot will be accessible through the following URL: [**http\://localhost:9992**](http://localhost:9992)
 
-With the chatbot now running, you will find the logs in the logs/sample\_chatbot.log file.
+With the chatbot now running, you will find the logs in the **logs/sample\_chatbot.log** file.
 
-You will also be able to leverage the sample chatbot’s decision-making, by uploading a UTF-8 encoded CSV file that contains unstructured data. To do this, simply click on the green button at the top-right of the header and upload your CSV file. You must include a description of the contents of the CSV file so that the LLM can correctly decide when it needs to search in the CSV file. 
+You will also be able to leverage the sample chatbot’s decision-making, by **uploading a UTF-8 encoded CSV file that contains unstructured data**.  To do this, simply click on the green button at the top-right of the header and upload your CSV file. You must include a description of the contents of the CSV file so that the LLM can correctly decide when it needs to search in the CSV file. 
 
-In the case of the banking dataset, there is a sample banking reviews CSV file located in <AI\_SDK\_HOME>/sample\_chatbot/sample\_data/unstructured/ that you can upload. 
+In the case of the banking dataset, there is a sample banking reviews CSV file located in *\<AI\_SDK\_HOME\>/sample\_chatbot/sample\_data/unstructured/* that you can upload. 
 
 In the description field, you can write “Reviews by customers”.
 
@@ -248,58 +252,58 @@ The chatbot will then vectorize the CSV file and it will now decide whether to q
 
 It is highly recommended to begin experimenting with the AI SDK using the provided sample banking dataset. However, if you have already done so and wish to experiment with your own dataset, we will now explain how to do it.
 
-First, run the command python run.py both to launch both the AI SDK APIs and the sample chatbot.
+First, run the command *python run.py both* to launch both the AI SDK APIs and the sample chatbot.
 
 Then, you can either call the getMetadata endpoint or use the Sync VectorDB button in the sample chatbot UI with the database or tags you want to vectorize. Once the vector store is populated, you can ask questions using either the answerQuestion endpoint or the chatbot itself.
 
-With the chatbot also running, you will find the logs in the logs/sample\_chatbot.log file.
+With the chatbot also running, you will find the logs in the **logs/sample\_chatbot.log file**.
 
-You will also be able to leverage the sample chatbot’s decision-making, by uploading a UTF-8 encoded CSV file that contains unstructured data. To do this, simply click on the green button at the top-right of the header and upload your CSV file. You must include a description of the contents of the CSV file so that the LLM can correctly decide when it needs to search in the CSV file. 
+You will also be able to leverage the sample chatbot’s decision-making, by uploading a **UTF-8 encoded CSV file that contains unstructured data**.  To do this, simply click on the green button at the top-right of the header and upload your CSV file. You must include a description of the contents of the CSV file so that the LLM can correctly decide when it needs to search in the CSV file. 
 
 For example, for the sample banking dataset, we used “Reviews by customers”.
 
-### From container
+### From container {#from-container}
 
 The image contains both the AI SDK and the sample chatbot. The only difference in execution is deciding whether to load the sample banking dataset into your Denodo instance or not. Before diving into the execution from container, make sure that:
 
-* You filled out the configuration files (sdk\_config.env and chatbot\_config.env) and moved them to a simple-to-remember filepath. For this example, we will use C:\\share\\sdk\_config.env and C:\\share\\chatbot\_config.env.
-* Data Marketplace is running and synced with VDP.
-* Optional. If you want to use the sample banking dataset, you must first move it to your Denodo’s instance directory. To do so, it is necessary to move the sample files (the sample\_data folder in the .zip you downloaded from the support site, or the sample\_data folder available through Github here, if you are downloading from Harbor) to <DENODO\_HOME>/samples/ai-sdk/sample\_chatbot/sample\_data/structured/, as the demo data loader expects them to be in that filepath.
+- You filled out the **configuration files** (sdk\_config.env and chatbot\_config.env) and moved them to a simple-to-remember filepath. For this example, we will use *C:\\share\\sdk\_config.env* and *C:\\share\\chatbot\_config.env*.  
+- Data Marketplace is running and **synced with VDP**.  
+- *Optional*. If you want to use the sample banking dataset, you must first move it to your Denodo’s instance directory. To do so, it is necessary to move the sample files (the *sample\_data* folder in the .zip you downloaded from the support site, or the sample\_data folder available through Github here, if you are downloading from Harbor) to *\<DENODO\_HOME\>/samples/ai-sdk/sample\_chatbot/sample\_data/structured/*, as the demo data loader expects them to be in that filepath.
 
-NOTE: For the following commands, remember that if using the container image available in the .zip file that you obtained from the support site, you will need to load the Docker image instead of pulling from Harbor.
+**NOTE:** For the following commands, remember that if using the container image available in the .zip file that you obtained from the support site, you will need to load the Docker image instead of pulling from Harbor.
 
 ##### With the sample data
 
 The sample chatbot comes with a sample banking dataset that you can load onto your Denodo instance to get a feel for the AI SDK.
 
-NOTE: Since you are using the AI SDK container, it is necessary to move the sample files. However, if you are using the Denodo Express installer, the CSVs will already be in that folder.
+**NOTE:** Since you are using the AI SDK container, it is necessary to move the sample files. However, if you are using the Denodo Express installer, the CSVs will already be in that folder.
 
 To load the sample data, you first need:
 
-* Data Marketplace host (from the container’s perspective, in this case we’ll use 192.168.1.1 as an example)
-* Data Marketplace port (default: 9090)
-* VDP GRPC port (default: 9994)
-* VDP server id (default: 1)
+* **Data Marketplace host** (from the container’s perspective, in this case we’ll use 192.168.1.1 as an example)  
+* **Data Marketplace port** (default: 9090\)  
+* **VDP GRPC port** (default: 9994\)  
+* **VDP server id** (default: 1\)
 
 Then, run (or modify if values are different) the following command:
 
-docker run --rm -ti -v /mnt/c/share/chatbot\_config.env:/opt/ai-sdk/sample\_chatbot/chatbot\_config.env -v /mnt/c/share/sdk\_config.env:/opt/ai-sdk/api/utils/sdk\_config.env -p 8008:8008 -p 9992:9992 harbor.open.denodo.com/denodo-connects-9/images/ai-sdk:latest bash -c ""python run.py both --load-demo --no-logs --host 192.168.1.1 --grpc-port 9994 --dc-port 9090 --server-id 1""
+docker run \--rm \-ti  \-v /mnt/c/share/chatbot\_config.env:/opt/ai-sdk/sample\_chatbot/chatbot\_config.env \-v /mnt/c/share/sdk\_config.env:/opt/ai-sdk/api/utils/sdk\_config.env \-p 8008:8008 \-p 9992:9992 harbor.open.denodo.com/denodo-connects-9/images/ai-sdk:latest bash \-c ""python run.py both \--load-demo \--no-logs \--host 192.168.1.1 \--grpc-port 9994 \--dc-port 9090 \--server-id 1""
 
-NOTE: The load demo command only needs to be run the first time to load the demo data in your Denodo instance. After that, you can run the container like in the next section.
+**NOTE:** The load demo command only needs to be run the first time to load the demo data in your Denodo instance. After that, you can run the container like in the next section.
 
-Please review the python command being executed after the image. This command assumes your Denodo instance is using host localhost, GRPC port 9994, and Tomcat port 9090 (the default installation values). Besides, it assumes that you want to create the sample data in the VDP server registered with identifier 1 in the Data Marketplace (the VDP server registered by default during the installation). If this is not the case, you can modify the parameters to your current Denodo configuration. 
+Please review the python command being executed after the image. This command assumes your Denodo instance is using host **localhost**, GRPC port **9994**, and Tomcat port **9090** (the default installation values). Besides, it assumes that you want to create the sample data in the VDP server registered with **identifier 1 in the Data Marketplace** (the VDP server registered by default during the installation). If this is not the case, you can modify the parameters to your current Denodo configuration. 
 
-Once the command has executed successfully, a ‘samples\_bank’ database will be created in your VDP server, the cache of the VDP server will be enabled, the Data Marketplace will be synchronized with the VDP server, the AI SDK will be launched (in the port 8008 by default) and the chatbot will be accessible through the following URL: <http://localhost:9992>
+Once the command has executed successfully, a ‘samples\_bank’ database will be created in your VDP server, the cache of the VDP server will be enabled, the Data Marketplace will be synchronized with the VDP server, the AI SDK will be launched (in the port 8008 by default) and the chatbot will be accessible through the following URL: [**http\://localhost:9992**](http://localhost:9992)
 
-You will also be able to leverage the sample chatbot’s decision-making, by uploading a UTF-8 encoded CSV file that contains unstructured data. To do this, simply click on the green button at the top-right of the header and upload your CSV file. You must include a description of the contents of the CSV file so that the LLM can correctly decide when it needs to search in the CSV file. 
+You will also be able to leverage the sample chatbot’s decision-making, by **uploading a UTF-8 encoded CSV file that contains unstructured data**.  To do this, simply click on the green button at the top-right of the header and upload your CSV file. You must include a description of the contents of the CSV file so that the LLM can correctly decide when it needs to search in the CSV file. 
 
-In the case of the banking dataset, there is a sample banking reviews CSV file (in the .zip you downloaded from the support site or available through Github) that you can upload.
+In the case of the banking dataset, there is a sample banking reviews CSV file (in the .zip you downloaded from the support site or [available through Github](https://github.com/denodo/denodo-ai-sdk/blob/public/9/dev/sample_chatbot/sample_data/unstructured/sample_unstructured_data.csv)) that you can upload.
 
 In the description field, you can write “Reviews by customers”.
 
 The chatbot will then vectorize the CSV file and it will now decide whether to query the Denodo instance or the unstructured data to answer your questions.
 
-You will also find the Swagger documentation for the AI SDK API will be available in {API\_HOST}/docs.
+You will also find the **Swagger documentation** for the AI SDK API will be available in {API\_HOST}/docs.
 
 ##### Without the sample data
 
@@ -307,30 +311,30 @@ It is highly recommended to begin experimenting with the AI SDK using the provid
 
 Then, run:
 
-docker run --rm -ti -v /mnt/c/share/chatbot\_config.env:/opt/ai-sdk/sample\_chatbot/chatbot\_config.env -v /mnt/c/share/sdk\_config.env:/opt/ai-sdk/api/utils/sdk\_config.env -p 8008:8008 -p 9992:9992 harbor.open.denodo.com/denodo-connects-9/images/ai-sdk:latest
+docker run \--rm \-ti  \-v /mnt/c/share/chatbot\_config.env:/opt/ai-sdk/sample\_chatbot/chatbot\_config.env \-v /mnt/c/share/sdk\_config.env:/opt/ai-sdk/api/utils/sdk\_config.env \-p 8008:8008 \-p 9992:9992 harbor.open.denodo.com/denodo-connects-9/images/ai-sdk:latest
 
-You will also be able to leverage the sample chatbot’s decision-making, by uploading a UTF-8 encoded CSV file that contains unstructured data. To do this, simply click on the green button at the top-right of the chatbot’s header and upload your CSV file. You must include a description of the contents of the CSV file so that the LLM can correctly decide when it needs to search in the CSV file. 
+You will also be able to leverage the sample chatbot’s decision-making, by uploading a **UTF-8 encoded CSV file that contains unstructured data**.  To do this, simply click on the green button at the top-right of the chatbot’s header and upload your CSV file. You must include a description of the contents of the CSV file so that the LLM can correctly decide when it needs to search in the CSV file. 
 
 For example, for the sample banking dataset, we used “Reviews by customers”.
 
-You will also find the Swagger documentation for the AI SDK API will be available in {API\_HOST}/docs.
+You will also find the **Swagger documentation** for the AI SDK API will be available in {API\_HOST}/docs.
 
 You will need to call the getMetadata endpoint yourself with the name of the database or tag you wish to vectorize (and ask questions about).
 
 ### Optimal performance
 
-While it is true that up until now we have covered the basics of how to get the AI SDK working, there are a few factors to consider to be able to extract maximum performance from it. After all, the AI SDK is a chain of many different components and it will only be as powerful as its weakest link.
+While it is true that up until now we have covered the basics of how to get the AI SDK working, there are a few factors to consider to be able to extract maximum performance from it. After all, the **AI SDK is a chain of many different components** and it will only be as *powerful* as its weakest link.
 
 For this reason, please ensure that all of these factors are attended properly:
 
-* Metadata. The AI SDK will pass everything it can find in the schema of a view to the LLM. One of the advantages of using Denodo is that it can enrich a view’s schema in ways that can help the LLM better understand the purpose of said views. It’s important to fill out view and column descriptions, associate related views and provide logical names. Make use of the Denodo Assistants’s features to enhance the LLM’s understanding of your data.
-* LLM. The LLM is the brains of the AI SDK. The smarter the LLM, the better the AI SDK’s performance. Striking a balance between speed and accuracy is key. Please check our recommended providers and model names in the AI SDK’s README file.
-* Embeddings. Another key component of the operation is the embeddings model. A more precise embeddings model will help the LLM choose the correct and relevant tables to answer your questions accurately. Again, you will find in the project’s README a list of recommended and tested providers and model names.
-* Advanced configuration. Custom instructions, set views, mode setting, graph generation… These are only a select few of the AI SDK’s capabilities that you will be able to fine-tune and leverage to obtain the most accurate results. We will review all of these characteristics in the following section.
+- **Metadata**. The AI SDK will pass everything it can find in the schema of a view to the LLM. One of the advantages of using Denodo is that it can enrich a view’s schema in ways that can help the LLM better understand the purpose of said views. It’s important to fill out view and column descriptions, associate related views and provide logical names. Make use of the **Denodo Assistants’s features to enhance the LLM’s understanding of your data**.  
+- **LLM**. The LLM is the brains of the AI SDK. The smarter the LLM, the better the AI SDK’s performance. Striking a balance between speed and accuracy is key. Please check our recommended providers and model names in the AI SDK’s README file.  
+- **Embeddings**. Another key component of the operation is the embeddings model. A more precise embeddings model will help the LLM choose the correct and relevant tables to answer your questions accurately. Again, you will find in the project’s README a list of recommended and tested providers and model names.  
+- **Advanced configuration**. Custom instructions, set views, mode setting, graph generation… These are only a select few of the AI SDK’s capabilities that you will be able to fine-tune and leverage to obtain the most accurate results. We will review all of these characteristics in the following section.
 
 ### MCP
 
-You can connect the AI SDK as an MCP server (i.e, as tools) with your MCP-compatible client (Visual Studio Code, Claude Desktop, Cursor…) via remote MCP (HTTP).
+You can connect the AI SDK as an MCP server (i.e, *as tools*) with your MCP-compatible client (Visual Studio Code, Claude Desktop, Cursor…) via remote MCP (HTTP).
 
 #### Tools
 
@@ -348,48 +352,50 @@ Executes a VQL query against the Denodo Data Marketplace and returns the executi
 
 Queries the metadata of the views vectorized in the vector database. It performs a similarity search to return information about the schema of the most relevant views. Below is an example of using the metadata\_search tool from VS Code:
 
+![][image4]
+
 #### Remote MCP (HTTP)
 
 Connecting to a remote AI SDK MCP server is very simple. Simply add “\--mcp” to your normal AI SDK runner to start the MCP server together with the normal AI SDK API:
 
 python run.py both \--mcp
 
-Connecting to the remote AI SDK MCP server (from the same machine or a different machine) requires configuring your MCP client. The authentication method depends on the MCP\_AI\_SDK\_BASIC\_AUTH variable set in your sdk\_config.env file. Below are the two possible modes.
+Connecting to the remote AI SDK MCP server (from the same machine or a different machine) requires configuring your MCP client. The authentication method depends on the **MCP\_AI\_SDK\_BASIC\_AUTH** variable set in your sdk\_config.env file. Below are the two possible modes.
 
-##### Dynamic Client Registration (MCP\_AI\_SDK\_BASIC\_AUTH = 0)
+##### Dynamic Client Registration (MCP\_AI\_SDK\_BASIC\_AUTH \= 0\)
 
-To comply with the Model Context Protocol proposed authorization flow, the remote AI SDK MCP server implements the OAuth 2.0 Protected Resource Metadata (RFC9728) standard. 
+To comply with the Model Context Protocol proposed authorization flow, the remote AI SDK MCP server implements the OAuth 2.0 Protected Resource Metadata ([RFC9728](https://datatracker.ietf.org/doc/html/rfc9728)) standard. 
 
-This enables MCP clients implementing the OAuth 2.0 Dynamic Client Registration Protocol (RFC7591) to be configured to automatically register themselves as authorization server clients, eliminating the need for manual, error-prone configuration steps.
+This enables MCP clients implementing the OAuth 2.0 Dynamic Client Registration Protocol ([RFC7591](https://datatracker.ietf.org/doc/html/rfc7591)) to be configured to automatically register themselves as authorization server clients, eliminating the need for manual, error-prone configuration steps.
 
 To use this functionality, you must appropriately configure the following properties in your sdk\_config.env file:
 
-* MCP\_AI\_SDK\_OIDC\_ISSUER\_URL: The URL of your Identity Provider (e.g., Keycloak).
-* MCP\_AI\_SDK\_OIDC\_JWKS\_URI: The URL to your IdP's JSON Web Key Set for token signature verification.
-* MCP\_AI\_SDK\_OIDC\_AUDIENCE: The unique identifier for your AI SDK API.
-* MCP\_AI\_SDK\_SCOPES\_SUPPORTED: A comma-separated list of permissions required in the token.
+* **MCP\_AI\_SDK\_OIDC\_ISSUER\_URL**: The URL of your Identity Provider (e.g., Keycloak).  
+* **MCP\_AI\_SDK\_OIDC\_JWKS\_URI**: The URL to your IdP's JSON Web Key Set for token signature verification.  
+* **MCP\_AI\_SDK\_OIDC\_AUDIENCE**: The unique identifier for your AI SDK API.  
+* **MCP\_AI\_SDK\_SCOPES\_SUPPORTED**: A comma-separated list of permissions required in the token.
 
-The base URL used by the MCP server to build metadata URLs for client discovery can be specified in MCP\_AI\_SDK\_DCR\_URL. It should be the root URL, without the /mcp path (e.g., <http://localhost:8008>). If not set, the URL is auto-generated using the AI\_SDK\_HOST, AI\_SDK\_PORT, and AI\_SDK\_ROOT\_PATH variables.
+The base URL used by the MCP server to build metadata URLs for client discovery can be specified in **MCP\_AI\_SDK\_DCR\_URL**. It should be the root URL, without the /mcp path (e.g., [http\://localhost:8008](http://localhost:8008)). If not set, the URL is auto-generated using the AI\_SDK\_HOST, AI\_SDK\_PORT, and AI\_SDK\_ROOT\_PATH variables.
 
-For the authorization flow to be successful, you must ensure that the authorization server specified in the MCP\_AI\_SDK\_OIDC\_ISSUER\_URL property supports both RFC 7591 and the OAuth 2.0 Authorization Server Metadata (RFC8414) standards.
+For the authorization flow to be successful, you must ensure that the authorization server specified in the **MCP\_AI\_SDK\_OIDC\_ISSUER\_URL** property supports both RFC 7591 and the OAuth 2.0 Authorization Server Metadata ([RFC8414](https://datatracker.ietf.org/doc/html/rfc8414)) standards.
 
-Notable identity providers that fully support both RFC 7591 and RFC 8414 include Okta, Ping Identity or Keycloak. As of October 2025, Microsoft Entra ID and Google Identity do not support these protocols.
+Notable identity providers that fully support both RFC 7591 and RFC 8414 include [Okta](https://developer.okta.com/docs/api/openapi/okta-oauth/oauth/tag/Client/), [Ping Identity](https://docs.pingidentity.com/pingfederate/12.3/administrators_reference_guide/help_clientsettingstasklet_oauthdynamicclientregistrationstate.html) or [Keycloak](https://www.keycloak.org/securing-apps/client-registration). As of October 2025, Microsoft Entra ID and Google Identity do not support these protocols.
 
-NOTE: If your Denodo identity provider doesn't support RFC 7591 or RFC 8414, you still can manually configure your MCP client. Most clients allow you to add custom headers, so you can manually get the access token using the OAuth 2.0 Credentials Wizard. Then, configure the MCP client to send this token in an Authorization header.
+**NOTE:** If your Denodo identity provider doesn't support **RFC 7591** or **RFC 8414**, you still can manually configure your MCP client. Most clients allow you to add custom headers, so you can manually get the access token using the OAuth 2.0 Credentials Wizard. Then, configure the MCP client to send this token in an **Authorization** header.
 
-Below are two examples of possible configurations for the MCP client with MCP\_AI\_SDK\_BASIC\_AUTH = 0.
+Below are two examples of possible configurations for the MCP client with **MCP\_AI\_SDK\_BASIC\_AUTH \= 0**.
 
-| { ""servers"": { ""Denodo\_AI\_SDK\_Remote"": { ""url"": ""http://localhost:8008/mcp"", ""type"": ""http"",  }  } } |
-| ------------------------------------------------------------------------------------------------------- |
+| {   ""servers"": {     ""Denodo\_AI\_SDK\_Remote"": {       ""url"": ""http\://localhost:8008/mcp"",       ""type"": ""http"",     }   } } |
+| :---- |
 
 VS Code configuration with DCR enabled
 
-| { ""inputs"": \[  { ""type"": ""promptString"", ""id"": ""denodo\_oauth\_token"", ""description"": ""Denodo OAuth 2.0 Token"", ""password"": true  }  \], ""servers"": { ""Denodo\_AI\_SDK\_Remote"": { ""url"": ""http://localhost:8008/mcp"", ""type"": ""http"", ""headers"": { ""Authorization"": ""Bearer ${input:denodo\_oauth\_token}""  }  }  } } |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| {   ""inputs"": \[     {       ""type"": ""promptString"",       ""id"": ""denodo\_oauth\_token"",       ""description"": ""Denodo OAuth 2.0 Token"",       ""password"": true     }   \],   ""servers"": {     ""Denodo\_AI\_SDK\_Remote"": {       ""url"": ""http\://localhost:8008/mcp"",       ""type"": ""http"",       ""headers"": {         ""Authorization"": ""Bearer \${input:denodo\_oauth\_token}""       }     }   } } |
+| :---- |
 
 VS Code configuration example without DCR support
 
-##### Basic authentication (MCP\_AI\_SDK\_BASIC\_AUTH = 1)
+##### Basic authentication (MCP\_AI\_SDK\_BASIC\_AUTH \= 1\)
 
 This mode disables the MCP server's built-in security layer, making it act as a simple proxy. It is primarily intended for development, testing, or trusted internal environments where security is handled by another layer.
 
@@ -397,53 +403,53 @@ In this mode, authentication is delegated to the internal logic of the AI SDK to
 
 The AI SDK's default tool implementation supports both HTTP Basic and Bearer token authentication formats. Below are two examples of possible configurations for the MCP client.
 
-| { ""servers"": { ""Denodo\_AI\_SDK\_Remote"": { ""url"": ""http://localhost:8008/mcp"", ""headers"": { ""Authorization"": ""Basic YWRtaW46YWRtaW4=""  }  }  } } |
-| ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| {   ""servers"": {     ""Denodo\_AI\_SDK\_Remote"": {       ""url"": ""http\://localhost:8008/mcp"",       ""headers"": {         ""Authorization"": ""Basic YWRtaW46YWRtaW4=""       }     }   } } |
+| :---- |
 
 VS Code configuration with HTTP Basic credentials (base64 of admin:admin in this example)
 
-| { ""inputs"": \[  { ""type"": ""promptString"", ""id"": ""denodo\_oauth\_token"", ""description"": ""Denodo OAuth 2.0 Token"", ""password"": true  }  \], ""servers"": { ""Denodo\_AI\_SDK\_Remote"": { ""url"": ""http://localhost:8008/mcp"", ""type"": ""http"", ""headers"": { ""Authorization"": ""Bearer ${input:denodo\_oauth\_token}""  }  }  } } |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| {   ""inputs"": \[     {       ""type"": ""promptString"",       ""id"": ""denodo\_oauth\_token"",       ""description"": ""Denodo OAuth 2.0 Token"",       ""password"": true     }   \],   ""servers"": {     ""Denodo\_AI\_SDK\_Remote"": {       ""url"": ""http\://localhost:8008/mcp"",       ""type"": ""http"",       ""headers"": {         ""Authorization"": ""Bearer \${input:denodo\_oauth\_token}""       }     }   } } |
+| :---- |
 
 VS Code configuration with Bearer token authentication"
 "Upgrading the AI SDK","If you are updating the AI SDK from a previous version, some configuration parameters may have changed to reflect new terminology (specifically in version 0.13 of the AI SDK, the transition from ""Data Catalog"" to ""Data Marketplace"").
 
-To make this transition easier, the run.py script includes an integrated Migration Tool that automatically detects legacy variables and updates your .env files.
+To make this transition easier, the *run.py* script includes an integrated **Migration Tool** that automatically detects legacy variables and updates your .env files.
 
-Prerequisites: The migration tool is compatible with configuration files from AI SDK v0.12.0 or higher. If you are upgrading from an older version, please create a new configuration file from the examples provided.
+**Prerequisites:** The migration tool is compatible with configuration files from **AI SDK v0.12.0 or higher**. If you are upgrading from an older version, please create a new configuration file from the examples provided.
 
-How to run it: You can launch the migration tool alongside the runner using the \--migrate flag:
+**How to run it:** You can launch the migration tool alongside the runner using the \--migrate flag:
 
-python run.py both --migrate
+python run.py both \--migrate
 
 What the tool does:
 
-1. Preview Changes: Before modifying anything, it lists all detected legacy variables (e.g., DATA\_CATALOG\_URL) and shows you the new replacement values (e.g., AI\_SDK\_DATA\_MARKETPLACE\_URL).
-2. Safety Backup: It prompts for user confirmation. If you proceed, it automatically creates a backup of your files (e.g., sdk\_config.env.bak) before applying the updates."
-"Advanced configuration","Check out the guide on how to deploy the AI SDK in production.
+1. **Preview Changes:** Before modifying anything, it lists all detected legacy variables (e.g., DATA\_CATALOG\_URL) and shows you the new replacement values (e.g., AI\_SDK\_DATA\_MARKETPLACE\_URL).  
+2. **Safety Backup:** It prompts for user confirmation. If you proceed, it automatically creates a backup of your files (e.g., sdk\_config.env.bak) before applying the updates."
+"Advanced configuration","Check out the guide on [how to deploy the AI SDK in production](#deploying-the-ai-sdk-in-production).
 
 ### AI SDK
 
-Please check out the api/utils/sdk\_config.env.example template for all the different parameters that can be modified in the AI SDK.
+Please check out the *api/utils/sdk\_config.env.example* template for all the different parameters that can be modified in the AI SDK.
 
 ### DeepQuery
 
-DeepQuery is an advanced feature of the Denodo AI SDK designed to process complex analytical questions. It operates in two distinct phases: a planning phase, which uses a thinking model to reason about the question and create an execution plan, and an execution phase, which carries out that plan to produce the final answer. Using DeepQuery requires more powerful LLMs. You'll need a thinking model with at least 128k context and a 50 RPM allowance.
+DeepQuery is an advanced feature of the Denodo AI SDK designed to process complex analytical questions. It operates in two distinct phases: a planning phase, which uses a thinking model to reason about the question and create an execution plan, and an execution phase, which carries out that plan to produce the final answer. Using DeepQuery requires more powerful LLMs. You'll need a thinking model with at least **128k context and a 50 RPM allowance**.
 
-DeepQuery leverages an advanced set of configurations to customize its behavior. These configuration settings are expected in the api/utils/sdk\_config.env file. Please check out the api/utils/sdk\_config.env.example template for more information.
+DeepQuery leverages an advanced set of configurations to customize its behavior. These configuration settings are expected in the *api/utils/sdk\_config.env* file. Please check out the *api/utils/sdk\_config.env.example* template for more information.
 
-* DEEPQUERY\_EXECUTION\_MODEL. Defines which LLM to use for the DeepQuery execution phase. This is separate from the planning phase, which always uses the thinking model.
-* ""thinking"": Uses the thinking model for execution (recommended for best performance and accuracy).
-* ""base"": Uses the standard LLM for execution (more cost-effective, but may be less capable of handling complex tasks).
-* DEEPQUERY\_DEFAULT\_ROWS. The number of rows to return by default in database queries during the reasoning process.
-* DEEPQUERY\_MAX\_ANALYSIS\_LOOPS. The maximum number of analysis loops the thinking model will perform.
-* DEEPQUERY\_MAX\_REPORTING\_LOOPS. The maximum number of internal loops the thinking model will perform to generate a comprehensive final report.
-* DEEPQUERY\_MAX\_CONCURRENT\_TOOL\_CALLS. The maximum number of tools that the thinking model can call simultaneously during its reasoning process.
+* **DEEPQUERY\_EXECUTION\_MODEL**. Defines which LLM to use for the DeepQuery execution phase. This is separate from the planning phase, which always uses the thinking model.  
+  * ""thinking"": Uses the thinking model for execution (recommended for best performance and accuracy).  
+  * ""base"": Uses the standard LLM for execution (more cost-effective, but may be less capable of handling complex tasks).  
+*  **DEEPQUERY\_DEFAULT\_ROWS**. The number of rows to return by default in database queries during the reasoning process.  
+* **DEEPQUERY\_MAX\_ANALYSIS\_LOOPS**. The maximum number of analysis loops the thinking model will perform.  
+* **DEEPQUERY\_MAX\_REPORTING\_LOOPS**. The maximum number of internal loops the thinking model will perform to generate a comprehensive final report.  
+* **DEEPQUERY\_MAX\_CONCURRENT\_TOOL\_CALLS**. The maximum number of tools that the thinking model can call simultaneously during its reasoning process.  
 * You can also configure the color schemes for the reports generated by DeepQuery.
 
-NOTE: To disable deepQuery in the API, please disable the THINKING\_PROVIDER/THINKING\_LLM variables in the sdk\_config.env configuration file.
+**NOTE:** To disable deepQuery in the API, please disable the THINKING\_PROVIDER/THINKING\_LLM variables in the sdk\_config.env configuration file.
 
-### Deploying the AI SDK in production
+### Deploying the AI SDK in production {#deploying-the-ai-sdk-in-production}
 
 Getting the AI SDK set up in production is simple, simply by using the flag –production with run.py. For example:
 
@@ -451,50 +457,50 @@ python run.py api –production
 
 This will launch Gunicorn (ASGI server) to handle incoming requests on UNIX or Uvicorn on Windows. Some configuration parameters that might be useful in production:
 
-* AI\_SDK\_WORKERS. Number of workers to handle incoming requests.
-* AI\_SDK\_SSL\_CERT. Path to the SSL certificate file. PEM format.
-* AI\_SDK\_SSL\_KEY. Path to the SSL key file. PEM format.
+- **AI\_SDK\_WORKERS**. Number of workers to handle incoming requests.  
+- **AI\_SDK\_SSL\_CERT**. Path to the SSL certificate file. PEM format.  
+- **AI\_SDK\_SSL\_KEY**. Path to the SSL key file. PEM format.
 
-As of version 0.7, the sample chatbot that comes with the AI SDK is not suitable for a production environment.
+As of version 0.7, the sample chatbot that comes with the AI SDK **is not suitable for a production environment.**
 
-Also, Chroma is not a suitable vector store for production, as it does not handle large queries and concurrency well. Please look at deploying PGVector or OpenSearch in production.
+Also, **Chroma is not a suitable vector store for production**, as it does not handle large queries and concurrency well. Please look at deploying PGVector or OpenSearch in production.
 
 ### Vector Stores
 
 The AI SDK is compatible with 3 different vector store providers through their Langchain compatibility libraries:
 
-* Chroma. Does not need extra deployment and is included in the AI SDK’s dependencies for demo purposes. However, it is not recommended for production environments.
-* PGVector
-* OpenSearch
-* Oracle
-* SQL Server
+* **Chroma**. Does not need extra deployment and is included in the AI SDK’s dependencies for demo purposes. However, it is **not recommended for production** environments.  
+* **PGVector**  
+* **OpenSearch**  
+* **Oracle**  
+* **SQL Server**
 
-### LLMs/Embeddings
+### LLMs/Embeddings {#llms/embeddings}
 
-The AI SDK is compatible with many different LLM and embedding providers through their Langchain connectors. Please carefully review the sdk\_config.env.example file to find your provider and their specific configuration. We will now review some provider-specific frequently asked questions.
+The AI SDK is compatible with many different LLM and embedding providers through their Langchain connectors. Please carefully review the *sdk\_config.env.example* file to find your provider and their specific configuration. We will now review some provider-specific frequently asked questions.
 
 #### How should I configure Azure in the AI SDK?
 
 When working with Azure, you normally have an URL that looks like this:
 
-<https://endpoint%5Fnamei.openai.azure.com/openai/deployments/GPT4o%5Fmini%5F2024-07-18/chat/completions?api-version=2024-08-01-preview>
+[https\://endpoint\_namei.openai.azure.com/openai/deployments/GPT4o\_mini\_2024-07-18/chat/completions?api-version=2024-08-01-preview](https://endpoint_namei.openai.azure.com/openai/deployments/GPT4o_mini_2024-07-18/chat/completions?api-version=2024-08-01-preview)
 
 To configure this LLM in the AI SDK, you have to decouple the previous URL into the following parameters:
 
-* {LLM/THINKING}\_PROVIDER: azure
-* {LLM/THINKING}\_MODEL. This is your deployment name. In the previous example, it would be: GPT4o\_mini\_2024-07-18
-* AZURE\_ENDPOINT. https://endpoint\_namei.openai.azure.com/
-* AZURE\_API\_VERSION: 2024-08-01-preview
-* AZURE\_API\_KEY. Your API key to access the Azure OpenAI service.
+* **{LLM/THINKING}\_PROVIDER**: azure  
+* **{LLM/THINKING}\_MODEL***.* This is your deployment name. In the previous example, it would be: GPT4o\_mini\_2024-07-18  
+* **AZURE\_ENDPOINT**. https\://endpoint\_namei.openai.azure.com/  
+* **AZURE\_API\_VERSION**: 2024-08-01-preview  
+* **AZURE\_API\_KEY**. Your API key to access the Azure OpenAI service.
 
 #### How to activate thinking in Google Vertex AI and AWS Bedrock?
 
 To use DeepQuery with either a Google Vertex AI or AWS Bedrock thinking LLM, you need to configure a thinking model and activate its reasoning capabilities with the following extra variables.:
 
-* THINKING\_PROVIDER \= bedrock
-* THINKING\_MODEL \= us.anthropic.claude-sonnet-4-20250514-v1:0
-* AWS\_CLAUDE\_THINKING \= 1
-* AWS\_CLAUDE\_THINKING\_TOKENS \= 2048
+* **THINKING\_PROVIDER** \= bedrock  
+* **THINKING\_MODEL** \= us.anthropic.claude-sonnet-4-20250514-v1:0  
+* **AWS\_CLAUDE\_THINKING** \= 1  
+* **AWS\_CLAUDE\_THINKING\_TOKENS** \= 2048
 
 #### Ollama is truncating my prompt, why is that?
 
@@ -502,69 +508,66 @@ By default, and unless the Modelfile specifies otherwise, Ollama defaults models
 
 If you are certain you want to increase your model’s context window size in Ollama, these are the steps to follow:
 
-1. We will be using phi4 (and expanding to a context window of 16k tokens) as an example for this tutorial, please replace it with the model you want to modify.
-2. ollama show --modelfile phi4 > Modelfile
-3. Open the file Modelfile and edit it.
-4. The FROM inside the Modelfile will contain a path. Delete it and replace it with your model. In our case, FROM phi4.
-5. Find the line PARAMETER and append a new line below it: PARAMETER num\_ctx 16000
-6. Create the new model: ollama create -f Modelfile phi4-16k
-7. In this case we named it phi4-16k, but feel free to call it however you like!
+1. We will be using phi4 (and expanding to a context window of 16k tokens) as an example for this tutorial, please replace it with the model you want to modify.   
+2. ollama show \--modelfile phi4 \> Modelfile  
+3. Open the file *Modelfile* and edit it.  
+4. The FROM inside the Modelfile will contain a path. Delete it and replace it with your model. In our case, FROM phi4.  
+5. Find the line PARAMETER and append a new line below it: PARAMETER num\_ctx 16000  
+6. Create the new model: ollama create \-f Modelfile phi4-16k  
+7. In this case we named it phi4-16k, but feel free to call it however you like\!  
 8. Finally, run: ollama run phi4-16k
 
-NOTE: Ollama will not work with DeepQuery unless enterprise-grade hardware is used to power the models. For example, corporate laptops are not powerful enough to support DeepQuery functionality.
+**NOTE:** Ollama will not work with DeepQuery unless enterprise-grade hardware is used to power the models. For example, corporate laptops are not powerful enough to support DeepQuery functionality.
 
 #### How to configure an OpenAI-Compatible Provider
 
-\_PROVIDER value: Any custom name that does not start with AZURE\_ (e.g., MY\_API).
-
+**\_PROVIDER value: Any custom name that does not start with AZURE\_ (e.g., MY\_API).**  
 This option allows you to connect to any LLM service that is not natively listed but offers an API compatible with OpenAI.
 
 To configure it:
 
-1. Choose a unique name for your provider (e.g., MY\_API).
-2. Set this name in the corresponding \_PROVIDER variable in section 4 of the configuration file (e.g., LLM\_PROVIDER = MY\_API).
-3. Define the following variables in the configuration file, replacing \[PROVIDER\_NAME\] with the name you chose:
-* \[PROVIDER\_NAME\]\_API\_KEY. The API key for your custom provider (e.g., MY\_API\_API\_KEY).
-* \[PROVIDER\_NAME\]\_BASE\_URL. The base URL of the API endpoint (e.g., MY\_API\_BASE\_URL).
+1. Choose a unique name for your provider (e.g., MY\_API).  
+2. Set this name in the corresponding \_PROVIDER variable in section 4 of the configuration file (e.g., LLM\_PROVIDER \= MY\_API).  
+3. Define the following variables in the configuration file, replacing \[PROVIDER\_NAME\] with the name you chose:  
+   * **\[PROVIDER\_NAME\]\_API\_KEY**. The API key for your custom provider (e.g., MY\_API\_API\_KEY).  
+   * **\[PROVIDER\_NAME\]\_BASE\_URL**. The base URL of the API endpoint (e.g., MY\_API\_BASE\_URL).
 
 #### How to configure a custom Azure Provider
 
-\_PROVIDER value: Any custom name that must start with AZURE\_ (e.g., AZURE\_LLM).
-
-This is the recommended approach for advanced Azure configurations, such as using separate endpoints or API versions for chat and embeddings.
-
+**\_PROVIDER value: Any custom name that must start with AZURE\_ (e.g., AZURE\_LLM).**  
+This is the recommended approach for advanced Azure configurations, such as using separate endpoints or API versions for chat and embeddings.  
 To configure it:
 
-1. Choose unique names for your providers that must start with AZURE\_ (e.g., AZURE\_LLM, AZURE\_EMBEDDING).
-2. Set these names in the corresponding \_PROVIDER variables in section 4.
-3. Define the following variables for each provider, replacing \[PROVIDER\_NAME\] with the names you chose:
-* \[PROVIDER\_NAME\]\_ENDPOINT. The endpoint of your Azure instance (e.g., AZURE\_LLM\_ENDPOINT).
-* \[PROVIDER\_NAME\]\_API\_VERSION. The API version for that specific configuration (e.g., AZURE\_LLM\_API\_VERSION).
-* \[PROVIDER\_NAME\]\_API\_KEY. The API key for that configuration (e.g., AZURE\_LLM\_API\_KEY)
-* \[PROVIDER\_NAME\]\_EMBEDDINGS\_DIMENSIONS. (Optional) Defines the vector dimensions for embedding models (e.g., AZURE\_EMBEDDING\_EMBEDDINGS\_DIMENSIONS).
+1. Choose unique names for your providers that must start with AZURE\_ (e.g., AZURE\_LLM, AZURE\_EMBEDDING).  
+2. Set these names in the corresponding \_PROVIDER variables in section 4\.  
+3. Define the following variables for each provider, replacing \[PROVIDER\_NAME\] with the names you chose:  
+   * **\[PROVIDER\_NAME\]\_ENDPOINT**. The endpoint of your Azure instance (e.g., AZURE\_LLM\_ENDPOINT).  
+   * **\[PROVIDER\_NAME\]\_API\_VERSION**. The API version for that specific configuration (e.g., AZURE\_LLM\_API\_VERSION).  
+   * **\[PROVIDER\_NAME\]\_API\_KEY**. The API key for that configuration (e.g., AZURE\_LLM\_API\_KEY)  
+   * **\[PROVIDER\_NAME\]\_EMBEDDINGS\_DIMENSIONS**. (Optional) Defines the vector dimensions for embedding models (e.g., AZURE\_EMBEDDING\_EMBEDDINGS\_DIMENSIONS).
 
 ### Sample chatbot
 
-Please carefully go through the sample\_chatbot/chatbot\_config.env.example template for more information on the advanced configuration possibilities of the sample chatbot.
+Please carefully go through the *sample\_chatbot/chatbot\_config.env.example* template for more information on the advanced configuration possibilities of the sample chatbot.
 
 #### How to create custom agents in the sample chatbot
 
-Starting with version 1.1, the sample chatbot includes a sidebar for specialized chatbots. These chatbots behave like custom agents focused on a specific use case, with their own databases, tags, LLM settings, feature flags, and behavioral constraints.
+Starting with **version 1.1**, the sample chatbot includes a sidebar for specialized chatbots. These chatbots behave like custom agents focused on a specific use case, with their own databases, tags, LLM settings, feature flags, and behavioral constraints.
 
 Specialized chatbots are detected automatically from YAML files placed in api/agents/custom. Each chatbot can also define its own icon by adding an image file to api/agents/custom/icons. A template file is available at api/agents/custom/samples\_bank.yaml.example to help you get started. Additionally, for a comprehensive and exclusive description of all available properties and acceptable values, please refer to the schema file located at utils/yaml/agent\_schema.yaml.
 
 To create a specialized chatbot:
 
-1. Create a new YAML file in api/agents/custom.
-2. Add the chatbot icon file to api/agents/custom/icons.
+1. Create a new YAML file in api/agents/custom.  
+2. Add the chatbot icon file to api/agents/custom/icons.  
 3. Start or restart the sample chatbot application.
 
 The sample chatbot will discover the new configuration and add the chatbot to the sidebar automatically.
 
 For example, you can create api/agents/custom/samples\_bank.yaml with:
 
-| name: ""Banking agent"" id: ""banking-agent"" description: ""Retail banking analytics assistant."" icon\_file\_name: ""bank\_agent.png"" settings:  databases:  \- ""samples\_bank""  llm\_provider: ""OpenAI""  llm\_model: ""gpt-4.1-mini""  unstructured\_mode: false  feedback\_enabled: false  reporting\_enabled: false  deepquery\_enabled: false  user\_edit\_llm: false |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| name: ""Banking agent"" id: ""banking-agent"" description: ""Retail banking analytics assistant."" icon\_file\_name: ""bank\_agent.png"" settings:   databases:     \- ""samples\_bank""   llm\_provider: ""OpenAI""   llm\_model: ""gpt-4.1-mini""   unstructured\_mode: false   feedback\_enabled: false   reporting\_enabled: false   deepquery\_enabled: false   user\_edit\_llm: false |
+| :---- |
 
 Specialized chatbot configuration
 
@@ -572,13 +575,13 @@ And place the corresponding icon at api/agents/custom/icons/bank\_agent.png.
 
 This example creates a specialized chatbot with:
 
-* Access limited to the samples\_bank database
-* LLM model fixed to gpt-4.1-mini
-* Unstructured CSV mode disabled
-* Feedback disabled
-* Reporting disabled
-* DeepQuery disabled
-* End users unable to edit the selected LLM
+- Access limited to the samples\_bank database  
+- LLM model fixed to gpt-4.1-mini  
+- Unstructured CSV mode disabled  
+- Feedback disabled  
+- Reporting disabled  
+- DeepQuery disabled  
+- End users unable to edit the selected LLM
 
 This makes it easy to create focused chatbot experiences for specific teams or workflows while keeping the general chatbot available in parallel.
 
@@ -586,32 +589,34 @@ This makes it easy to create focused chatbot experiences for specific teams or w
 
 The log files generated in the logs/ folder of the AI SDK are useful to debug specific errors/functionality. However, to properly review the complete flow of the AI SDK there is compatibility with an open-source LLM observability and tracing tool called Langfuse.
 
-To configure it, simply fill out the following variables in the sdk\_config.env and chatbot\_config.env configuration files:  
+To configure it, simply fill out the following variables in the sdk\_config.env and chatbot\_config.env configuration files:
 
-* LANGFUSE\_PUBLIC\_KEY and LANGFUSE\_SECRET\_KEY identify your Langfuse project. Both are required to enable tracing.
-* Set the Langfuse host in LANGFUSE\_BASE\_URL. Can either use cloud or local (self-hosted).
-* Optional: Associate traces with a user identifier (appears as user\_id in Langfuse) through LANGFUSE\_USER."
+* LANGFUSE\_PUBLIC\_KEY and LANGFUSE\_SECRET\_KEY identify your Langfuse project. Both are required to enable tracing.  
+* Set the Langfuse host in LANGFUSE\_BASE\_URL.  Can either use cloud or local (self-hosted).  
+* **Optional**: Associate traces with a user identifier (appears as user\_id in Langfuse) through LANGFUSE\_USER."
 "Answer Question Endpoints","The AI SDK provides multiple endpoints that will allow a user to ask questions regarding their data. The general process an answer question endpoint follows is described in the following image:
+
+![][image5]
 
 Where:
 
-1. The views the user has permission to are retrieved from Data Marketplace.
-2. The user’s question is vectorized and the most similar views are retrieved from the vectorDB, filtering for the views the user has permission to.
-3. With the schema of these views, the endpoint will either:
-1. generate a VQL query and execute it (if the user’s question is a question that can be answered with data) or
+1. The views the user has permission to are retrieved from Data Marketplace.  
+2. The user’s question is vectorized and the most similar views are retrieved from the vectorDB, filtering for the views the user has permission to.  
+3. With the schema of these views, the endpoint will either:  
+1. generate a VQL query and execute it (if the user’s question is a question that can be answered with data) or   
 2. generate a natural language response based on the schema of the views (if the user’s question is a question that can be answered with only the metadata)
 
 This flow is accessible via the following endpoints:
 
-* /answerQuestion. This is the main endpoint for processing natural language questions about your data. It automatically determines whether to use generate an SQL query or to query the vectorDB for the metadata of your data model to answer the question. If you know that you want to query data or metadata directly, you can either set the mode parameter in this endpoint to “data”/ “metadata” or you can call the answerDataQuestion/answerMetadataQuestion endpoints directly. In the case of deployment in agentic environments, it is recommended to provide both tools (data and metadata) independently.
-* /answerDataQuestion. Identical to /answerQuestion but specifically for questions that require generating a SQL query by forcing data mode. It is faster than using default mode on answerQuestion because it doesn’t have to decide if it needs data or metadata.
-* /answerMetadataQuestion. Identical to /answerQuestion but specifically for questions that require generating a SQL query by forcing data mode. It is faster than using default mode on answerQuestion because it doesn’t have to decide if it needs data or metadata.
-* /answerQuestionUsingViews. DEPRECATED. Similar to /answerQuestion but accepts pre-selected views instead of performing vector search. This endpoint is ONLY intended for customers that want to implement their own vector store provider and not one supported by the AI SDK. To force the LLM to consider a set of views, please review the use\_views parameter in answerQuestion.
+* /answerQuestion. This is the **main endpoint for processing natural language questions** about your data. It automatically determines whether to use **generate an SQL query or to query the vectorDB for the metadata of your data model** to answer the question. If you know that you want to query data or metadata directly, you can either set the mode parameter in this endpoint to “data”/ “metadata” or you can call the answerDataQuestion/answerMetadataQuestion endpoints directly. In the case of deployment in agentic environments, it is recommended to provide both tools (data and metadata) independently.  
+* /answerDataQuestion. Identical to /answerQuestion but specifically for questions that require generating a SQL query by forcing data mode. It is faster than using default mode on answerQuestion because it doesn’t have to decide if it needs data or metadata.  
+* /answerMetadataQuestion. Identical to /answerQuestion but specifically for questions that require generating a SQL query by forcing data mode. It is faster than using default mode on answerQuestion because it doesn’t have to decide if it needs data or metadata.  
+* /answerQuestionUsingViews. **DEPRECATED**. Similar to /answerQuestion but accepts pre-selected views instead of performing vector search. This endpoint is **ONLY intended for customers that want to implement their own vector store** provider and not one supported by the AI SDK. To force the LLM to consider a set of views, please review the **use\_views** parameter in answerQuestion.
 
 These endpoints are all accessible via streaming:
 
-* /streamAnswerQuestion. Streaming version of /answerQuestion that returns the answer as a text stream.
-* /streamAnswerQuestionUsingViews. DEPRECATED. Streaming version of /answerQuestionUsingViews that returns the answer as a text stream."
+* /streamAnswerQuestion. Streaming version of /answerQuestion that returns the answer as a text stream.  
+* /streamAnswerQuestionUsingViews. **DEPRECATED**. Streaming version of /answerQuestionUsingViews that returns the answer as a text stream."
 "DeepQuery Endpoints","### /deepQuery
 
 This endpoint processes a complex analysis question using DeepQuery. It returns the analysis along with metadata that can be used by the /generateDeepQueryReport endpoint to generate a report.
@@ -619,7 +624,9 @@ This endpoint processes a complex analysis question using DeepQuery. It returns 
 ### /generateDeepQueryReport
 
 This endpoint generates a report from the metadata returned by the /deepQuery endpoint. The report includes visualizations and detailed analysis."
-"Metadata Endpoints","### /getMetadata
+"Metadata Endpoints","![][image6]
+
+### /getMetadata {#/getmetadata}
 
 Retrieves metadata from specified VDP databases and optionally stores it in a vector database.
 
@@ -636,67 +643,72 @@ Performs similarity search on previously stored metadata.
 Gets the synchronized VDBs and tags with their last synchronization date. This list is filtered to show only the resources that contain at least one view the current user has permissions for."
 "Authentication","All endpoints support two authentication methods:
 
-* HTTP Basic Authentication
-* OAuth Bearer Token Authentication"
+* **HTTP Basic** Authentication  
+* **OAuth Bearer Token** Authentication"
 "Environment Variables","To avoid including the parameters constantly in every call, you can set the following environment variables to have the API default to them, if not specified.
 
-* EMBEDDINGS\_PROVIDER
-* EMBEDDINGS\_MODEL
-* VECTOR\_STORE
-* LLM\_PROVIDER
-* LLM\_MODEL
-* THINK\_LLM\_PROVIDER
-* THINK\_LLM\_MODEL
-* CUSTOM\_INSTRUCTIONS
-* VQL\_EXECUTE\_ROWS\_LIMIT
+* EMBEDDINGS\_PROVIDER  
+* EMBEDDINGS\_MODEL  
+* VECTOR\_STORE  
+* LLM\_PROVIDER  
+* LLM\_MODEL  
+* THINK\_LLM\_PROVIDER  
+* THINK\_LLM\_MODEL  
+* CUSTOM\_INSTRUCTIONS  
+* VQL\_EXECUTE\_ROWS\_LIMIT  
 * LLM\_RESPONSE\_ROWS\_LIMIT"
 "Integrating the AI SDK into your environment","The AI SDK API’s offer endpoints that can be integrated as tools in an agentic architecture. To showcase this architecture, the AI SDK comes bundled with a sample chatbot that uses an agent orchestrator to satisfy requests by levering the AI SDK endpoints, which are served as tools to the agent.
 
 ### Sample chatbot
 
-The sample chatbot uses a custom agent (MCP client-like) architecture with tools. For this reason, an LLM with tool calling is a requirement of the sample chatbot.
+The sample chatbot uses a custom agent (MCP client-like) architecture with tools. For this reason, **an LLM with tool calling is a requirement** of the sample chatbot.
 
 Our sample chatbot has 3 tools currently implemented (which might be expanded in the future):
 
-* generateVQL tool. This tool calls the generateVQL endpoint, with the parameters being set by the chatbot LLM. This tool acts as the “VQL generation expert”.
-* executeVQL tool. This tool calls the executeVQL endpoint.
-* Metadata search tool. This tool calls the similaritySearch endpoint, with the parameters being set by the chatbot LLM, same as before. This tool allows the orchestrator to explore the vectorDB.
-* Knowledge base query tool. This tool performs a similarity search on the unstructured CSV uploaded to the chatbot.
-* DeepQuery tool. This tool allows the user and the orchestrator to request deepQuery reports.
+* **generateVQL tool**. This tool calls the generateVQL endpoint, with the parameters being set by the chatbot LLM. This tool acts as the “VQL generation expert”.  
+* **executeVQL tool**. This tool calls the executeVQL endpoint.  
+* **Metadata search tool**. This tool calls the similaritySearch endpoint, with the parameters being set by the chatbot LLM, same as before. This tool allows the orchestrator to explore the vectorDB.  
+* **Knowledge base query tool**. This tool performs a similarity search on the unstructured CSV uploaded to the chatbot.  
+* **DeepQuery tool**. This tool allows the user and the orchestrator to request deepQuery reports.
 
 ### Integrating into your own chatbot solution
 
 To integrate the AI SDK API’s into your own solution, you need to have an MCP client-like architecture yourself, governed by an agent. The AI SDK endpoints would then be offered to this agent as tools. You can review the sample chatbot’s architecture and source code to understand in detail the recommended integration approach..
 
-NOTE: Before calling any of the endpoints, you must have inserted the VDP database(s) information into a compatible vector store. To do this, call the getMetadata endpoint with insert = True. 
+**NOTE:** Before calling any of the endpoints, you must have inserted the VDP database(s) information into a compatible vector store. To do this, call the **getMetadata** endpoint with **insert \= True**. 
 
-Here is a simple example using the Python requests library of how to call the AI SDK API. We are going to call the answerQuestion endpoint with the corresponding parameters. This endpoint takes a natural language question in and returns a natural language response out.
+Here is a simple example using the Python *requests* library of how to call the AI SDK API. We are going to call the answerQuestion endpoint with the corresponding parameters. This endpoint takes a natural language question in and returns a natural language response out.
 
 First, we load the vector store with the views from database ‘bank’.
 
+![][image7]  
 Once this is done, we can now use answerQuestion (or any other endpoint, for that matter). 
+
+![][image8]
 
 For the question ‘How many loans have we have’, in our database, we get the following response:
 
-As we can see, the LLM answered that we have 23 loans. To reach this conclusion, it generated the query SELECT COUNT(\*) FROM bank.loans and executed it.
+![][image9]
 
-You can find more examples in the api/example.py file.
+As we can see, the LLM answered that we have 23 loans. To reach this conclusion, it generated the query *SELECT COUNT(\*) FROM bank.loans* and executed it.
 
-This is a straightforward approach when querying the AI SDK directly. However, for production use, the AI SDK must be integrated in your architecture as a tool, where your application is controlled by an LLM. In these cases you should instead use verbose = False and return only the execution\_result to your application’s LLM. Please refer to the sample chatbot source code for details on the correct integration of the AI SDK as tools."
-"Frequently Asked Questions (FAQ)","### How can I choose the reasoning level of OpenAI models?
+You can find more examples in the **api/example.py** file.
 
-OpenAI reasoning models have different levels of reasoning (<https://platform.openai.com/docs/guides/reasoning>) that can be triggered via the API:
+This is a straightforward approach when querying the AI SDK directly. However, for production use, the AI SDK must be integrated in your architecture as a tool, where your application is controlled by an LLM. In these cases you should instead use **verbose \= False** and return only the execution\_result to your application’s LLM. Please refer to the sample chatbot source code for details on the correct integration of the AI SDK as tools."
+"Frequently Asked Questions (FAQ) {#frequently-asked-questions-(faq)}","### How can I choose the reasoning level of OpenAI models?
 
-* none (limited to only some models)
-* minimal (limited to only some models)
-* low
-* medium
-* high
+OpenAI reasoning models have different levels of reasoning ([https\://platform.openai.com/docs/guides/reasoning](https://platform.openai.com/docs/guides/reasoning))  that can be triggered via the API:
+
+* none (limited to only some models)  
+* minimal (limited to only some models)  
+* low  
+* medium  
+* high  
 * …
 
 To set this parameter, please add “-value” to the value of the {LLM/THINKING}\_MODEL. For example, to use gpt-5.2 with high (default) you would set:
 
-THINKING\_MODEL = gpt-5.2-high
+THINKING\_MODEL \= gpt-5.2-high
 
 ### How can I send custom HTTP headers with OpenAI-compatible LLMs?
 
@@ -704,13 +716,13 @@ You can define custom HTTP headers to be sent with API requests. This is useful 
 
 IMPORTANT: This functionality is specifically designed for providers compatible with the OpenAI/Azure API structure. It applies to:
 
-* OpenAI (standard)
+* OpenAI (standard)  
 * Azure
 
 The syntax is: PROVIDER\_NAME\_HEADER\_Header-Name=HeaderValue
 
-1. Replace PROVIDER\_NAME with the provider's name in uppercase (e.g., MYAPI, AZURE).
-2. Replace Header-Name with the actual HTTP header name (e.g., Subscription-Key).
+1. Replace PROVIDER\_NAME with the provider's name in uppercase (e.g., MYAPI, AZURE).  
+2. Replace Header-Name with the actual HTTP header name (e.g., Subscription-Key).  
 3. Replace HeaderValue with the value for that header.
 
 #### Example for a Custom OpenAI-compatible provider named ""MYAPI""
@@ -721,21 +733,21 @@ MYAPI\_HEADER\_Subscription-Key=HeaderValue
 
 If you’re certain your AWS credentials are correct, the role you chose has the permissions to access Bedrock and assumeRole is failing with a permissions error, it might be that the AWS SDK is using the global STS endpoint to assume the role.
 
-To use the regional STS endpoint, please uncomment the AWS\_STS\_REGIONAL\_ENDPOINTS = regional line in both the sdk\_config.env and the chatbot\_config.env.
+To use the regional STS endpoint, please uncomment the *AWS\_STS\_REGIONAL\_ENDPOINTS \= regional* line in both the sdk\_config.env and the chatbot\_config.env.
 
 ### How does incremental loading work?
 
-NOTE: As of version 0.7 of the AI SDK, incremental loading only works with Denodo 9.2.0 and above. In previous versions, the AI SDK will remove all existing views and re-insert all the views associated with the database(s) and tag(s) that you want to vectorize. Please note that in 9.2.1 and onwards, incremental mode will be activated automatically in the Data Marketplace when using incremental = True. In 9.2.0, you will have to follow the steps listed at the end of this question.
+**NOTE:** As of version 0.7 of the AI SDK, incremental loading only works with Denodo 9.2.0 and above. In previous versions, the AI SDK will remove all existing views and re-insert all the views associated with the database(s) and tag(s) that you want to vectorize. Please note that in 9.2.1 and onwards, incremental mode will be activated automatically in the Data Marketplace when using incremental \= True. In 9.2.0, you will have to follow the steps listed at the end of this question.
 
-When you first load a database(s) with getMetadata with insert = True and incremental = True, all of the views in the database(s) will be vectorized in the vector store. With this first load, a timestamp is saved in the vector store to keep track of the last time it was updated.
+When you first load a database(s) with getMetadata with **insert \= True and incremental \= True**, all of the views in the database(s) will be vectorized in the vector store. With this first load, a timestamp is saved in the vector store to keep track of the last time it was updated.
 
-Next time you call the endpoint getMetadata with insert = True and incremental = True, only the views that have received changes will be modified in the vector store. 
+Next time you call the endpoint getMetadata with **insert \= True and incremental \= True**, only the views that have received changes will be modified in the vector store. 
 
 If you wish to perform a fresh start, you can safely delete your vector store and load again using getMetadata.
 
-NOTE: For Denodo 9.2.0 (and only 9.2.0, not 9.2.1 and above) you will need to perform extra steps to activate incremental mode. 
+**NOTE:** For Denodo 9.2.0 (and **only 9.2.0**, not 9.2.1 and above) you will need to perform extra steps to activate incremental mode. 
 
-Go to the Denodo Platform path and navigate to resources\\apache-tomcat\\webapps\\denodo-data-catalog\\WEB-INF\\classes. Open the application.properties file. Activate askAQuestion.aiSdk.metadataChanges.enabled
+Go to the Denodo Platform path and navigate to *resources\\apache-tomcat\\webapps\\denodo-data-catalog\\WEB-INF\\classes.* Open the *application.properties file.* Activate *askAQuestion.aiSdk.metadataChanges.enabled*
 
 ### No matching distribution found for pysqlite3-binary
 
@@ -745,37 +757,37 @@ Sometimes when installing the requirements.txt, you will face an error that says
 
 When upgrading the AI SDK, please make sure to follow these steps:
 
-* Back up your AI SDK configuration files (api/utils/sdk\_config.env) and the sample chatbot configuration files (sample\_chatbot/chatbot\_config.env).
-* Review the new AI SDK configuration files and sample chatbot configuration files to check whether new properties have been added/deleted/modified.
-* Delete the previous AI SDK’s python virtual environment.
-* Check if there have been any critical changes to the vector store structure with the new schema. If so, delete the previous AI SDK’s vector store.
-* Install the new AI SDK’s dependencies in the new python virtual environment.
-* If you had to delete the previous AI SDK’s vector store, run getMetadata to load the new AI SDK vector store.
+- Back up your AI SDK configuration files (api/utils/sdk\_config.env) and the sample chatbot configuration files (sample\_chatbot/chatbot\_config.env).  
+- Review the new AI SDK configuration files and sample chatbot configuration files to check whether new properties have been added/deleted/modified.  
+- Delete the previous AI SDK’s python virtual environment.  
+- Check if there have been any critical changes to the vector store structure with the new schema. If so, delete the previous AI SDK’s vector store.  
+- Install the new AI SDK’s dependencies in the new python virtual environment.  
+- If you had to delete the previous AI SDK’s vector store, run getMetadata to load the new AI SDK vector store.
 
-You’re set!
+You’re set\!
 
 ### Python and Ubuntu installation common problems
 
 When installing Python in Ubuntu, you might encounter some of the following problems:
 
-* Python installation failed due to SSL/SQLite dependencies missing from OS. In this case, executing the following command solved the issue:
+- Python installation failed due to SSL/SQLite dependencies missing from OS. In this case, executing the following command solved the issue:
 
 apt install zlib1g zlib1g-dev libssl-dev libbz2-dev libsqlite3-dev
 
-* Requirements install failed due to Failed to build chroma-hnswlib. This sometimes occurs in Ubuntu 22.04 and Python 3.12\. Upgrading to Ubuntu 24.04 (or downgrading to Python 3.11) solved the issue.
+- Requirements install failed due to *Failed to build chroma-hnswlib.* This sometimes occurs in Ubuntu 22.04 and Python 3.12. Upgrading to Ubuntu 24.04 (or downgrading to Python 3.11) solved the issue.
 
 ### Chroma requires a more recent SQLite version
 
 SQLite is included in the Python installation. If your Python installation comes bundled with an old SQLite version, you might need to update it.
 
-Please refer to the following https://docs.trychroma.com/troubleshooting#sqlite.
+Please refer to the following [https\://docs.trychroma.com/troubleshooting\#sqlite](https://docs.trychroma.com/troubleshooting).
 
 ### Using the AI SDK with a Denodo version lower than 9.0.5
 
 While it is possible to use the AI SDK with a Denodo version lower than 9.0.5 (not included), some functionality may be limited:
 
-* User permissions. To be able to filter by user permissions, you will need a specific hotfix for any version below 9.0.5.
-* Setting examples\_per\_table to 0 will cause a bug. If you don’t want to provide the LLMs with example data to better understand your dataset, you can set examples\_per\_table to 0, but this will cause a crash in versions under 9.0.5\. You will need the same hotfix as the user permissions to avoid this.
+- **User permissions**. To be able to filter by user permissions, you will need a specific hotfix for any version below 9.0.5.  
+- **Setting examples\_per\_table to 0 will cause a bug**. If you don’t want to provide the LLMs with example data to better understand your dataset, you can set examples\_per\_table to 0, but this will cause a crash in versions under 9.0.5. You will need the same hotfix as the user permissions to avoid this.
 
 ### Installing Python requirements.txt takes longer than 15 minutes
 
@@ -793,29 +805,27 @@ Non-streaming endpoints are better suited for programmatic access or when you’
 
 If you encounter issues, you can check the following log files to help diagnose the problem:
 
-1\. AI SDK API log file: This log file (located in logs/api.log) contains information about the API server's operations.
-
-2\. Sample chatbot log: This log file (located in logs/sample\_chatbot.log) provides details about the chatbot's activities.
-
-3\. Denodo Data Marketplace log: Located in {DENODO\_HOME}/logs/vdp-data-catalog/ within the Denodo installation folder, this log can provide insights into Data Marketplace-related issues.
+1\. **AI SDK API log file**: This log file (located in *logs/api.log*) contains information about the API server's operations.  
+2\. **Sample chatbot log**: This log file (located in *logs/sample\_chatbot.log*) provides details about the chatbot's activities.  
+3\. **Denodo Data Marketplace log**: Located in {DENODO\_HOME}/logs/vdp-data-catalog/ **within the Denodo installation folder**, this log can provide insights into Data Marketplace-related issues.
 
 Reviewing these log files can help you identify error messages, warnings, or other relevant information to troubleshoot the problem.
 
 ### How can I use two different custom providers for LLM and embeddings?
 
-NOTE: This requires v0.4 of the AI SDK or above.
+**NOTE:** This requires v0.4 of the AI SDK or above.
 
 The SDK supports custom provider for LLM and embeddings as long as it offers a OpenAI-API compatible API endpoint. You can configure the custom providers by following these steps:
 
-1. Set the provider for the LLM models as a custom name (not OpenAI). For example, provider1.
-2. Set the provider for the embeddings as a custom name (not OpenAI). For example, provider2.
-3. Set PROVIDER1\_BASE\_URL, PROVIDER1\_API\_KEY, PROVIDER1\_PROXY (optional) and PROVIDER2\_BASE\_URL, PROVIDER2\_API\_KEY, PROVIDER2\_PROXY (optional) in the configuration files.
+1. Set the provider for the LLM models as a custom name (not OpenAI). For example, provider1.  
+2. Set the provider for the embeddings as a custom name (not OpenAI). For example, provider2.  
+3. Set **PROVIDER1\_BASE\_URL, PROVIDER1\_API\_KEY, PROVIDER1\_PROXY** (optional) and **PROVIDER2\_BASE\_URL, PROVIDER2\_API\_KEY, PROVIDER2\_PROXY** (optional) in the configuration files.
 
 PROVIDER1 must be the full capital letters version of the custom provider name set in \_PROVIDER. 
 
 The base URL should always end in v1, for example:
 
-CEREBRAS\_BASE\_URL = https://api.cerebras.ai/v1
+*CEREBRAS\_BASE\_URL \= https\://api.cerebras.ai/v1*
 
 ### Can I use a different provider for each component (LLM/Embeddings)?
 
@@ -825,31 +835,31 @@ Yes, absolutely. You can configure the AI SDK to use different providers for you
 
 Not all models are available in all regions on AWS Bedrock. In these cases, you may need to prepend “us.” to your modelID so that AWS routes your request to the appropriate region where the model is available. So, for example, if LLM\_MODEL is:
 
-meta.llama3-1-70b-instruct-v1:0
+**meta.llama3-1-70b-instruct-v1:0**
 
 It should become:
 
-us.meta.llama3-1-70b-instruct-v1:0
+**us.meta.llama3-1-70b-instruct-v1:0**
 
-### I’m having issues with the onnxruntime library on Windows, how can I fix it? 
+### I’m having issues with the *onnxruntime* library on Windows, how can I fix it? 
 
-This usually happens because of a dependency conflict with Visual C++. Please install the latest version: https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170
+This usually happens because of a dependency conflict with Visual C++. Please install the latest version: https\://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170
 
 ### Unsupported compiler, at least C++11 support is needed
 
 If you are getting this error while installing the AI SDK’s requirements.txt in Ubuntu 22, you need to run the following command:
 
-apt-get install build-essential -y
+apt-get install build-essential \-y
 
 ### Can I avoid writing the log to the filesystem?
 
-To avoid generating log files, you can send the output of the AI SDK/chatbot to the console by adding the –no-logs flag to the python run.py command:
+To avoid generating log files, you can send the output of the AI SDK/chatbot to the console by adding the **–no-logs flag** to the *python run.py* command:
 
-python run.py both --no-logs
+python run.py both \--no-logs
 
 ### How can I save the log files outside the container?
 
-The commands in the From container section start the image with \--no-logs. The image does the same on its own: if you do not replace the container command, it runs python run.py both --no-logs. With that flag, log lines go to the container output (docker logs) and are not written to files.
+The commands in the [From container](#from-container) section start the image with **\--no-logs**. The image does the same on its own: if you do not replace the container command, it runs ***python run.py both \--no-logs***. With that flag, log lines go to the container output (docker logs) and are not written to files.
 
 To keep the log files on the host:
 
@@ -857,28 +867,14 @@ To keep the log files on the host:
 
 AI\_SDK\_DATA\_DIR=/app/data
 
-1. Mount a host directory on that path, and start the container without --no-logs. Using the paths from the container guide:
+2. Mount a host directory on that path, and start the container without \--no-logs. Using the paths from the container guide:
 
-docker run --rm -ti -v /mnt/c/share/chatbot\_config.env:/opt/ai-sdk/sample\_chatbot/chatbot\_config.env -v /mnt/c/share/sdk\_config.env:/opt/ai-sdk/api/utils/sdk\_config.env -v /mnt/c/share/ai-sdk-data:/app/data -p 8008:8008 -p 9992:9992 harbor.open.denodo.com/denodo-connects-9/images/ai-sdk:latest python run.py both
+docker run \--rm \-ti \-v /mnt/c/share/chatbot\_config.env:/opt/ai-sdk/sample\_chatbot/chatbot\_config.env \-v /mnt/c/share/sdk\_config.env:/opt/ai-sdk/api/utils/sdk\_config.env \-v /mnt/c/share/ai-sdk-data:/app/data \-p 8008:8008 \-p 9992:9992 harbor.open.denodo.com/denodo-connects-9/images/ai-sdk:latest python run.py both
 
-The log files are then written on the host under C:\\share\\ai-sdk-data\\logs\\ (api\_<timestamp>.log and sample\_chatbot\_<timestamp>.log). That directory also stores the embeddings cache, CSV uploads, reports, and conversation history.
+The log files are then written on the host under C:\\share\\ai-sdk-data\\logs\\ (api\_\<timestamp\>.log and sample\_chatbot\_\<timestamp\>.log). That directory also stores the embeddings cache, CSV uploads, reports, and conversation history.
 
 The process inside the image runs as the user denodo. The host directory must be writable by that user. If it is not, the AI SDK falls back to a directory inside the container and the host folder stays empty.
 
-To load the sample data and still write log files, keep the flags from the container guide, drop --no-logs, and add the same data volume:
+To load the sample data and still write log files, keep the flags from the container guide, drop \--no-logs, and add the same data volume:
 
-docker run --rm -ti -v /mnt/c/share/chatbot\_config.env:/opt/ai-sdk/sample\_chatbot/chatbot\_config.env -v /mnt/c/share/sdk\_config.env:/opt/ai-sdk/api/utils/sdk\_config.env -v /mnt/c/share/ai-sdk-data:/app/data -p 8008:8008 -p 9992:9992 harbor.open.denodo.com/denodo-connects-9/images/ai-sdk:latest bash -c ""python run.py both --load-demo --host 192.168.1.1 --grpc-port 9994 --dc-port 9090 --server-id 1""
-
-Feedback: 
-
-Share: 
-
-Add feedback 
-
-logo 
-
-Copyrights © Denodo Technologies
-
-Code of Conduct Terms of Use Privacy Notice Cookies Notice 
-
-Denodo Site Support Site Partner Portal Contact Us"
+docker run \--rm \-ti \-v /mnt/c/share/chatbot\_config.env:/opt/ai-sdk/sample\_chatbot/chatbot\_config.env \-v /mnt/c/share/sdk\_config.env:/opt/ai-sdk/api/utils/sdk\_config.env \-v /mnt/c/share/ai-sdk-data:/app/data \-p 8008:8008 \-p 9992:9992 harbor.open.denodo.com/denodo-connects-9/images/ai-sdk:latest bash \-c ""python run.py both \--load-demo \--host 192.168.1.1 \--grpc-port 9994 \--dc-port 9090 \--server-id 1"""

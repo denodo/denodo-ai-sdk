@@ -31,11 +31,12 @@ class GenerationStatus(str, Enum):
 @dataclass
 class GeneratedQuery:
     """A generated VQL query: its status, the VQL itself, the generation reasoning,
-    and the tokens used."""
+    the views selected for that query, and the tokens used."""
     status: "GenerationStatus"
     vql: str
     explanation: str
     tokens: dict = field(default_factory=empty_tokens)
+    filtered_tables: list = field(default_factory=list)
 
 @utils.log_params
 @utils.timed
@@ -123,4 +124,5 @@ async def query_to_vql(
         vql=vql_query,
         explanation=query_explanation,
         tokens=usage_tokens(cb),
+        filtered_tables=filtered_tables,
     )

@@ -56,13 +56,16 @@ properties:
         description: "Enable/disable unstructured mode. By default, users can upload their own unstructured data through CSV files and ask questions about their documents."
       user_edit_llm:
         type: boolean
-        description: "Allow users to edit LLM settings (provider, model, temperature, max_tokens) through the settings modal"
+        description: "Allow users to edit LLM settings (provider, model, temperature, max_tokens, context window) through the settings modal"
       auto_graph:
         type: boolean
         description: "The chatbot LLM might decide to request a graph generation even when not explicitly asked for in your question."
       filters_enabled:
         type: boolean
         description: "Allow users to narrow the query scope through the filter modal"
+      share_general_memory:
+        type: boolean
+        description: "When true, this specialized agent can use the general chat's user and user-metadata memories. Defaults to true. Metadata memories belong to the user and are available to every agent, whether this is true or false."
 
       # LLM Configuration
       llm_provider:
@@ -77,6 +80,9 @@ properties:
       llm_max_tokens:
         type: integer
         description: "Defines the maximum output tokens for the chatbot LLM"
+      llm_context_window:
+        type: integer
+        description: "Context window, in tokens, of the chatbot LLM. Used to track context usage and to drop older conversation turns when the next message would leave no room for the answer. After a trim, 25% of this window is kept, and never more than 30000 tokens."
       llm_response_rows_limit:
         type: integer
         description: "Maximum number of rows from the VQL execution result that are passed to the LLM for generating the final answer"

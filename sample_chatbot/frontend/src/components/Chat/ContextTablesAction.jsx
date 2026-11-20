@@ -1,90 +1,55 @@
-import React from "react";
-import Button from "react-bootstrap/Button";
+import React, { useId, useMemo } from "react";
 import OverlayTrigger from "react-bootstrap/OverlayTrigger";
 import Tooltip from "react-bootstrap/Tooltip";
-import { buildViewCatalogUrl } from "../../utils/viewUrl";
+import { ViewChip } from "../QuestionForm/ContextViewsRow";
+import {
+  splitUsedTables,
+  buildViewTokenLookup,
+  viewTokens,
+  cleanViewName,
+} from "../../utils/viewUsage";
 
-const assetBaseUrl = import.meta.env.BASE_URL;
-
-const renderTooltip = (content) => (
-  <Tooltip id="context-tooltip">{content}</Tooltip>
+const renderTooltip = (id, content) => (
+  <Tooltip id={id}>{content}</Tooltip>
 );
 
-const ContextTablesAction = ({ tables, vql, dataCatalogUrl, icons, onOpenContext }) => {
-  if (!tables || tables.length === 0) {
-    return icons || null;
-  }
+// Views searched for an answer, shown at the bottom of the answer card.
+// Views actually referenced by the generated VQL appear as green chips in
+// the current context-view chip format; the rest sit behind a "+N more"
+// chip that opens the Context Tables modal. If no view was used, no chips
+// are shown at all.
+const ContextTablesAction = ({ tables, vql, dataCatalogUrl, icons, onOpenContext, contextViews }) => {
+  const tooltipId = `context-tooltip-${useId().replace(/[^A-Za-z0-9_-]/g, "")}`;
+  const { usedTables, unusedTables } = useMemo(
+    () => splitUsedTables(tables, vql, contextViews),
+    [tables, vql, contextViews],
+  );
+  const tokenLookup = useMemo(
+    () => buildViewTokenLookup(contextViews),
+    [contextViews],
+  );
 
-  let cleanVql = "";
-  if (Array.isArray(vql)) {
-    cleanVql = vql
-      .filter(Boolean)
-      .map((x) => String(x).replace(/"/g, "").toLowerCase())
-      .join(" ");
-  } else if (vql) {
-    cleanVql = String(vql).replace(/"/g, "").toLowerCase();
-  }
-
-  const usedTables = [];
-  const unusedTables = [];
-
-  tables.forEach((table) => {
-    const cleanTable = table.replace(/"/g, "").toLowerCase();
-    const isUsedInVql = cleanVql.includes(cleanTable);
-
-    if (isUsedInVql) {
-      usedTables.push(table);
-    } else {
-      unusedTables.push(table);
-    }
-  });
-
-  const renderTableButton = (table, index, isUsed = true) => {
-    const catalogUrl = buildViewCatalogUrl(dataCatalogUrl, table);
-
-    if (catalogUrl) {
-      return (
-        <a
-          key={index}
-          href={catalogUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-decoration-none"
-        >
-          <Button
-            variant={isUsed ? "success" : "secondary"}
-            size="sm"
-            bsPrefix="btn"
-            className="me-1 mb-1 d-inline-flex align-items-center"
-          >
-            <img
-              src={`${assetBaseUrl}denodo_view.svg`}
-              alt="View"
-              width="16"
-              height="16"
-              className="me-1"
-            />
-            {table.replace(/"/g, "")}
-          </Button>
-        </a>
-      );
-    }
-
+  if (usedTables.length === 0) {
+    if (!icons) return null;
     return (
-      <Button
-        key={index}
-        variant={isUsed ? "success" : "secondary"}
-        size="sm"
-        bsPrefix="btn"
-        className="me-1 mb-1 d-inline-flex align-items-center"
-        style={isUsed ? { backgroundColor: "#143142", borderColor: "#143142" } : {}}
+      <div
+        style={{
+          backgroundColor: "transparent",
+          padding: "1rem 0",
+          marginBottom: "0",
+        }}
       >
-        {table.replace(/"/g, "")}
-      </Button>
+        <div className="mb-2 d-flex justify-content-end align-items-center">
+          <div
+            className="d-flex flex-row align-items-center"
+            style={{ gap: "8px" }}
+          >
+            {icons}
+          </div>
+        </div>
+      </div>
     );
-  };
-
-  const hasTableButtons = usedTables.length > 0 || unusedTables.length > 0;
+  }
 
   return (
     <div
@@ -94,38 +59,37 @@ const ContextTablesAction = ({ tables, vql, dataCatalogUrl, icons, onOpenContext
         marginBottom: "0",
       }}
     >
-      <div
-        className={`mb-2 d-flex ${
-          hasTableButtons ? "justify-content-between" : "justify-content-end"
-        } align-items-center`}
-      >
-        {hasTableButtons && (
-          <div className="context-badges-container">
-            {usedTables.map((table, index) =>
-              renderTableButton(table, index, true)
-            )}
-            {unusedTables.length > 0 && (
-              <OverlayTrigger
-                placement="top"
-                delay={{ show: 250, hide: 400 }}
-                overlay={renderTooltip("View all searched tables")}
+      <div className="mb-2 d-flex justify-content-between align-items-center">
+        <div className="context-badges-container d-flex flex-wrap align-items-center" style={{ gap: "8px", flex: 1, minWidth: 0 }}>
+          {usedTables.map((table) => (
+            <ViewChip
+              key={table}
+              view={{ name: cleanViewName(table), tokens: viewTokens(table, tokenLookup) }}
+              dataCatalogUrl={dataCatalogUrl}
+              showHint={false}
+              used
+            />
+          ))}
+          {unusedTables.length > 0 && (
+            <OverlayTrigger
+              placement="top"
+              delay={{ show: 250, hide: 400 }}
+              overlay={renderTooltip(tooltipId, "View all searched tables")}
+            >
+              <button
+                type="button"
+                className="context-view-more-chip"
+                onClick={() => onOpenContext(tables, vql)}
               >
-                <Button
-                  variant="outline-info"
-                  size="sm"
-                  className="me-1 mb-1 d-inline-flex align-items-center context-more-btn"
-                  onClick={() => onOpenContext(tables, vql)}
-                >
-                  +{unusedTables.length} more
-                </Button>
-              </OverlayTrigger>
-            )}
-          </div>
-        )}
+                +{unusedTables.length} more
+              </button>
+            </OverlayTrigger>
+          )}
+        </div>
         {icons && (
           <div
             className="d-flex flex-row align-items-center"
-            style={{ gap: "8px" }}
+            style={{ gap: "8px", flexShrink: 0 }}
           >
             {icons}
           </div>
@@ -136,4 +100,3 @@ const ContextTablesAction = ({ tables, vql, dataCatalogUrl, icons, onOpenContext
 };
 
 export default ContextTablesAction;
-

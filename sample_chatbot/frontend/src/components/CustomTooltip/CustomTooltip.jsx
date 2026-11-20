@@ -9,6 +9,7 @@ const CustomTooltip = ({
   delay = { show: 400, hide: 250 },
   placement = "right",
   disabled = false,
+  tooltipClassName = "",
 }) => {
   const [show, setShow] = useState(false);
   const target = useRef(null);
@@ -99,7 +100,7 @@ const CustomTooltip = ({
           <Tooltip
             id={id}
             {...props}
-            className="custom-light-tooltip"
+            className={`custom-light-tooltip${tooltipClassName ? ` ${tooltipClassName}` : ""}`}
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
             style={{ ...props.style, pointerEvents: "none" }}

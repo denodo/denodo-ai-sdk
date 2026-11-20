@@ -8,6 +8,7 @@ from flask_login import login_user, logout_user, login_required, current_user
 
 from sample_chatbot.config import get_config, get_agents_metadata_by_user
 from sample_chatbot.services.agent_prerequisites import missing_agent_prerequisites, missing_prerequisites_message
+from sample_chatbot.services.ui_preferences import apply_agent, apply_profile
 from sample_chatbot.services.user_store import user_store
 from sample_chatbot.utils.ai_sdk_client import (
     get_user_access_info,
@@ -26,8 +27,6 @@ def login():
     data = request.json
     username = data.get('username')
     password = data.get('password')
-    user_details = data.get('user_details', '')
-    custom_instructions = data.get('custom_instructions')
 
     if not username or not password:
         return jsonify({"success": False, "message": "Username and password are required"}), 400
@@ -71,8 +70,8 @@ def login():
     user.is_admin = is_admin
     user.legacy_permissions_endpoint = legacy_permissions_endpoint
 
-    if custom_instructions is not None or user_details:
-        user.set_custom_instructions(user_details, custom_instructions)
+    profile = apply_profile(user)
+    apply_agent(user, user.agent_id)
 
     login_user(user)
     logging.info(f"[Auth] Login successful for user: {username} | Roles: {roles} | Global admin: {is_admin} | Legacy DM: {legacy_permissions_endpoint}")
@@ -113,7 +112,13 @@ def login():
                 "ai_sdk": config.custom_instructions_ai_sdk,
                 "chatbot": config.custom_instructions_chatbot,
             },
-        }
+            "is_admin": is_admin,
+        },
+        "profile": {
+            "user_details": profile.get("user_details") or "",
+            "input_method": profile.get("input_method") or config.input_method,
+            "number_format": profile.get("number_format"),
+        },
     }), 200
 
 @auth_bp.route('/api/logout', methods=['POST'])
@@ -137,10 +142,7 @@ def get_current_user_info():
 def change_agent():
     data = request.json
     agent_id = data.get('id')
-    user_details = data.get('user_details', '')
-    custom_instructions = data.get('custom_instructions')
     active_csvs = data.get('active_csvs')
-    llm_settings = data.get('llm_settings', {})
 
     agent_config = get_config(agent_id)
 
@@ -166,17 +168,8 @@ def change_agent():
         current_user.set_agent_config(agent_config)
         current_user.thread_id = str(current_user.id) + '-' + str(agent_config.id)
 
-    try:
-        current_user.update_llm_preferences(llm_settings)
-    except ValueError as e:
-        return jsonify({"success": False, "message": f"Invalid LLM settings: {str(e)}"}), 400
-
-    if user_details:
-        current_user.user_details = user_details
-        current_user.chatbot = None
-
-    if custom_instructions is not None and agent_config.user_edit_instructions:
-        current_user.merge_custom_instructions_for_agent(agent_config.id, custom_instructions)
+    apply_profile(current_user)
+    apply_agent(current_user, agent_config.id)
 
     if active_csvs is not None:
         current_user.set_active_csvs(active_csvs)
@@ -229,5 +222,6 @@ def change_agent():
                 "ai_sdk": agent_config.custom_instructions_ai_sdk,
                 "chatbot": agent_config.custom_instructions_chatbot,
             },
+            "is_admin": current_user.is_admin,
         }
     }), 200
