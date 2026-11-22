@@ -14,6 +14,7 @@ from utils import langfuse
 from utils import utils
 from utils.logging_utils import llm_call_logging
 from utils.schema_catalog import SchemaCatalog
+from utils.schema_catalog.helpers import normalize_table_name
 from api.utils.ai_tools.prompts import QUERY_TO_VQL_PROMPT, PROCESS_STEP_NORMAL_PROMPT, PROCESS_STEP_OBLIGATORY_PROMPT
 from api.utils.ai_tools.types import empty_tokens, usage_tokens
 from api.utils.ai_tools.schema_text import format_schema_text
@@ -57,13 +58,17 @@ async def query_to_vql(
     chain = prompt | llm.llm | StrOutputParser()
 
     filtered_tables = utils.custom_tag_parser(filter_params, 'table', default=[])
-    if any(name.strip().casefold() == 'none' for name in filtered_tables):
+    has_selection = bool(filtered_tables)
+    no_selection = any(name.strip().casefold() == 'none' for name in filtered_tables)
+    schema_catalog = SchemaCatalog.from_vector_search_tables(vector_search_tables)
+    available_names = {view.get_name() for view in schema_catalog.views}
+    filtered_tables = [name for name in filtered_tables if normalize_table_name(name) in available_names]
+    if has_selection and (no_selection or not filtered_tables):
         return GeneratedQuery(
             status=GenerationStatus.NO_QUERY, vql='',
             explanation='No suitable views were selected from the supplied schema.',
             filtered_tables=[],
         )
-    schema_catalog = SchemaCatalog.from_vector_search_tables(vector_search_tables)
     include_vector = schema_catalog.selected_tables_have_vector_column(filtered_tables)
     include_metric = schema_catalog.selected_tables_include_metric_view(filtered_tables)
     relevant_tables = format_schema_text(

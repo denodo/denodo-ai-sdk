@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -125,7 +126,15 @@ def test_category_race_waits_for_losing_task_cleanup(monkeypatch, winner):
                 raise RuntimeError('model unavailable')
             return '<cat>SQL</cat><query><table>demo.orders</table></query>'
 
+        @contextmanager
+        def trace_context(**kwargs):
+            try:
+                yield {}
+            finally:
+                assert cleaned.is_set(), 'Close the trace only after child calls finish'
+
         monkeypatch.setattr(selection, 'metadata_category', metadata)
+        monkeypatch.setattr(selection.langfuse, 'trace_context', trace_context)
         if winner == 'failure':
             with pytest.raises(RuntimeError, match='model unavailable'):
                 await selection.sql_category('Question', [], model(sql))
@@ -135,3 +144,75 @@ def test_category_race_waits_for_losing_task_cleanup(monkeypatch, winner):
         assert cleaned.is_set(), 'Child calls must finish before returning from classification'
 
     asyncio.run(asyncio.wait_for(run(), timeout=5))
+
+
+@pytest.mark.parametrize('response', [
+    '<query><table>demo.typo</table></query>',
+    '<query><dates>1</dates></query>',
+])
+def test_unmatched_selection_never_generates_against_all_candidates(response):
+    tables = [{'id': '1', 'tableName': 'demo.orders', 'schema': [
+        {'columnName': 'id', 'type': 'int'},
+    ]}]
+
+    def unexpected_generation(prompt):
+        pytest.fail('Unmatched selection must not expose every candidate to generation')
+
+    async def run():
+        decision = await selection.direct_sql_category('Question', tables, model(lambda p: response))
+        return await generate.query_to_vql(
+            'Question', tables, model(unexpected_generation), filter_params=decision[1],
+        )
+
+    assert asyncio.run(run()).status == generate.GenerationStatus.NO_QUERY
+
+
+def test_generation_without_selection_retains_direct_caller_behavior():
+    result = asyncio.run(generate.query_to_vql(
+        'Question', [], model(lambda p: '<vql>SELECT 1</vql>'),
+    ))
+    assert result.vql == 'SELECT 1'
+
+
+def test_explicit_view_selection_reaches_generation_without_other_candidates():
+    prompts = []
+    tables = [
+        {'id': '1', 'tableName': 'demo.orders', 'schema': [{'columnName': 'id', 'type': 'int'}]},
+        {'id': '2', 'tableName': 'demo.staff', 'schema': [{'columnName': 'salary', 'type': 'int'}]},
+    ]
+
+    def generate_response(prompt):
+        prompts.append(prompt.to_messages()[-1].content)
+        return '<vql>SELECT "id" FROM "demo"."orders"</vql>'
+
+    async def run():
+        decision = await selection.direct_sql_parts(
+            'Show orders', tables, model(lambda p: '<query><dates>1</dates></query>'),
+        )
+        selected = selection.inject_selected_tables(decision[1], ['"demo"."orders"'])
+        return await generate.query_to_vql('Show orders', tables, model(generate_response), filter_params=selected)
+
+    result = asyncio.run(run())
+    assert result.status == generate.GenerationStatus.GENERATED
+    assert result.filtered_tables == ['"demo"."orders"']
+    assert '# Table: "demo"."orders"' in prompts[0]
+    assert '# Table: "demo"."staff"' not in prompts[0]
+
+
+def test_category_race_cleans_up_if_schema_rendering_fails(monkeypatch):
+    async def metadata(**kwargs):
+        await asyncio.Event().wait()
+
+    def invalid_schema(*args):
+        raise ValueError('invalid schema')
+
+    monkeypatch.setattr(selection, 'metadata_category', metadata)
+    monkeypatch.setattr(selection, 'selector_schema_for_prompt', invalid_schema)
+
+    async def run():
+        before = asyncio.all_tasks()
+        with pytest.raises(ValueError, match='invalid schema'):
+            await selection.sql_category('Question', [], model(lambda p: ''))
+        assert asyncio.all_tasks() - before == set()
+
+    asyncio.run(run())

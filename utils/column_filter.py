@@ -111,7 +111,7 @@ def filter_view_columns(views: list[dict], rules: list[dict], use_rules: list[di
     filtered_views = []
     for view in views:
         name = _view_name(view)
-        schema = view.get('schema', [])
+        schema = view.get('schema') or []
         kept_schema = [field for field in schema if not is_hidden(name, _identifier_name(field['name']))]
         samples = view.get('viewFieldDataList') or []
         kept_samples = [sample for sample in samples

@@ -1,6 +1,8 @@
 import copy
 import json
 
+import pytest
+
 from langchain_core.documents import Document
 
 from api.utils.ai_tools.table_retrieval import _fetch_sample_data
@@ -116,3 +118,8 @@ def test_no_sample_rows_produce_no_documents():
     assert prepare_sample_data_schema(schema) == [[]]
 
 
+@pytest.mark.parametrize('column', ['"Order ID"', 'true', 'null', '123'])
+def test_legacy_single_column_names_are_not_interpreted_as_json_scalars(column):
+    document = Document(page_content='Alice', metadata={'columns': column})
+    samples, _ = fetch([document])
+    assert samples == {'42': {column: ['Alice']}}

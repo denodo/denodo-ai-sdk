@@ -446,6 +446,8 @@ def _read_sample_row(document):
         columns = json.loads(raw_columns)
     except (ValueError, TypeError):
         columns = [name.strip() for name in raw_columns.split(',')] if isinstance(raw_columns, str) else []
+    if not isinstance(columns, list) and 'row_json' not in document.metadata:
+        columns = [name.strip() for name in raw_columns.split(',')] if isinstance(raw_columns, str) else []
     if not isinstance(columns, list) or not columns or not all(isinstance(col, str) and col for col in columns):
         raise ValueError('Invalid sample column names')
 

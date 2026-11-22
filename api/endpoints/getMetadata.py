@@ -182,7 +182,9 @@ async def getMetadata(
                 rate_limit_rpm=endpoint_request.rate_limit_rpm
             )
 
-            if endpoint_request.examples_per_table > 0:
+            if (endpoint_request.examples_per_table > 0
+                    or parse_ignore_columns(endpoint_request.ignore_columns)
+                    or parse_use_columns(endpoint_request.use_columns)):
                 sample_data_vector_store = state_manager.get_vector_store(
                     provider=endpoint_request.vector_store_provider,
                     embeddings_provider=endpoint_request.embeddings_provider,

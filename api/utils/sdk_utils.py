@@ -681,13 +681,21 @@ async def process_metadata_source(
         start_sample_data = perf_counter()
         if sample_data_vector_store:
             views = flatten_list(prepare_sample_data_schema(db_schema))
-            await asyncio.to_thread(
-                sample_data_vector_store.add_views,
-                views=views,
-                parallel=request.parallel,
-                source_type=source_type,
-                sample_data=True
-            )
+            # add_views replaces samples only for IDs present in the new batch.
+            # Explicitly remove old rows for views whose samples are now empty.
+            sampled_ids = {str(document.metadata['view_id']) for document in views}
+            empty_ids = [str(view['id']) for view in db_schema.get('views', [])
+                         if str(view['id']) not in sampled_ids]
+            if empty_ids:
+                await asyncio.to_thread(sample_data_vector_store.delete_by_view_id, view_ids=empty_ids)
+            if views:
+                await asyncio.to_thread(
+                    sample_data_vector_store.add_views,
+                    views=views,
+                    parallel=request.parallel,
+                    source_type=source_type,
+                    sample_data=True
+                )
         timings['sample_data_processing'] = perf_counter() - start_sample_data
 
         timings['total_execution_time'] = perf_counter() - start_total

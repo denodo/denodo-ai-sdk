@@ -62,7 +62,9 @@ Marketplace from retrieving the original samples.
 
 After changing rules, run a full synchronization (`incremental=false`) for all
 affected databases/tags so previously indexed columns and samples are replaced.
-Use the same rules for overlapping synchronization sources.
+Use the same rules for overlapping synchronization sources. Returned views with no
+remaining sample rows have their old indexed samples removed. When column rules
+are supplied, sample cleanup also runs with `examples_per_table=0`.
 
 ## Sample values containing commas
 
