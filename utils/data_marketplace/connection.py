@@ -18,6 +18,7 @@ import asyncio
 from async_lru import alru_cache
 from utils.utils import timed, log_params
 from utils.schema_catalog import SchemaCatalog
+from utils.column_filter import filter_view_columns, parse_ignore_columns, parse_use_columns
 from utils.data_marketplace.vql_execution_outcomes import ExecutionStatus, ExecutionOutcome
 
 DATA_MARKETPLACE_URL = (os.getenv("AI_SDK_DATA_MARKETPLACE_URL") or 'http://localhost:9090/denodo-data-catalog').rstrip('/') + '/'
@@ -57,7 +58,9 @@ async def get_views_metadata_documents(
     incremental=False,
     tags_to_ignore=None,
     views_per_request=50,
-    custom_headers=None
+    custom_headers=None,
+    ignore_columns="",
+    use_columns="",
 ):
     """
     Retrieve JSON documents from views metadata with support for OAuth token or Basic auth.
@@ -82,10 +85,15 @@ async def get_views_metadata_documents(
         tags_to_ignore: List of tags to exclude from vectorization
         views_per_request: Maximum number of views to query in a single request
         custom_headers: Custom HTTP headers to forward
+        ignore_columns: JSON column exclusion rules applied before SDK indexing
+        use_columns: JSON column inclusion rules applied before SDK indexing
 
     Returns:
         Parsed metadata JSON response
     """
+
+    ignored = parse_ignore_columns(ignore_columns)
+    selected = parse_use_columns(use_columns)
 
     # Validate that only one of database_name or tag_name is provided
     if (database_name is None and tag_name is None) or (database_name is not None and tag_name is not None):
@@ -262,6 +270,7 @@ async def get_views_metadata_documents(
             if filtered_count > 0:
                 logging.info(f"Filtered out {filtered_count} views based on tags_to_ignore.")
 
+        all_views = filter_view_columns(all_views, ignored, selected)
         processed_views = parse_metadata_json(
             json_response=all_views,
             use_associations=table_associations,

@@ -21,6 +21,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from utils.data_marketplace.connection import activate_incremental, get_user_permissions, DataCatalogAuthError
+from utils.column_filter import parse_ignore_columns, parse_use_columns
 from api.utils import state_manager
 from api.utils.sdk_utils import (
     handle_endpoint_error, authenticate, process_metadata_source,
@@ -64,6 +65,14 @@ class getMetadataRequest(BaseModel):
     associations: bool = True
     view_prefix_filter: str = ''
     view_suffix_filter: str = ''
+    ignore_columns: str = Field(
+        default='',
+        description='JSON list of column exclusion rules, each with columns and an optional database.view name. Exclusions take precedence over use_columns.'
+    )
+    use_columns: str = Field(
+        default='',
+        description='JSON list of column inclusion rules, each with columns and an optional database.view name. Unmatched views remain unrestricted.'
+    )
     insert: bool = True
     views_per_request: int = Field(
             default = 50,
@@ -77,6 +86,18 @@ class getMetadataRequest(BaseModel):
             default = True,
             description=desc.PARALLEL
         )
+
+    @field_validator('ignore_columns')
+    @classmethod
+    def validate_ignore_columns(cls, value):
+        parse_ignore_columns(value)
+        return value
+
+    @field_validator('use_columns')
+    @classmethod
+    def validate_use_columns(cls, value):
+        parse_use_columns(value)
+        return value
 
     @field_validator('embeddings_token_limit')
     @classmethod
@@ -161,7 +182,9 @@ async def getMetadata(
                 rate_limit_rpm=endpoint_request.rate_limit_rpm
             )
 
-            if endpoint_request.examples_per_table > 0:
+            if (endpoint_request.examples_per_table > 0
+                    or parse_ignore_columns(endpoint_request.ignore_columns)
+                    or parse_use_columns(endpoint_request.use_columns)):
                 sample_data_vector_store = state_manager.get_vector_store(
                     provider=endpoint_request.vector_store_provider,
                     embeddings_provider=endpoint_request.embeddings_provider,
