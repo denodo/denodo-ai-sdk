@@ -9,6 +9,8 @@
  of the license agreement you entered into with DENODO.
 """
 import os
+import asyncio
+from contextlib import contextmanager
 import re
 import sys
 import logging
@@ -300,3 +302,21 @@ def set_log_level(level_name):
     logging.log(announce_level, f"Log level changed to {level_name}")
     logging.debug(f"Runtime log level is now {level_name}")
     return level_name
+
+
+@contextmanager
+def llm_call_logging(role, llm):
+    """Log each actual model invocation, including errors and cancellation."""
+    activity_logger = logging.getLogger(__name__)
+    label = f"{role} (provider={llm.provider_name}, model={llm.model_name})"
+    activity_logger.info("%s started.", label)
+    try:
+        yield
+    except (asyncio.CancelledError, GeneratorExit):
+        activity_logger.info("%s finished (status=cancelled).", label)
+        raise
+    except BaseException:
+        activity_logger.exception("%s finished (status=failed).", label)
+        raise
+    else:
+        activity_logger.info("%s finished (status=completed).", label)

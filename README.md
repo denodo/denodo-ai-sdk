@@ -77,6 +77,32 @@ to replace legacy samples; commas that were already misinterpreted cannot be
 reliably recovered from the old format. Row and column permission restrictions
 continue to apply during retrieval.
 
+## Selection and generation diagnostics
+
+The Selection LLM selects only relevant candidate views, including views needed
+for JOINs, and provides a brief explanation in `selection_thoughts`. It can select
+no suitable views; in that case the SDK returns no generated query. Selection
+instructions and the user question/schema are sent as separate system and user
+messages. Requests with explicitly selected views keep the existing explicit-view
+flow.
+
+At INFO level, Selection and Generation LLM invocations log their provider/model,
+start, and completed, failed or cancelled outcome. The logs also include the
+model's returned selection/generation explanations. These explanations may contain
+schema or question details and follow the existing logging configuration. Existing
+Langfuse tracing and response token accounting are preserved.
+
+## Running the regression tests
+
+With the project virtual environment active, install `pytest` and run:
+
+```shell
+python -m pytest tests -q
+```
+
+The tests use local model and HTTP doubles; no running Denodo service or live LLM
+credentials are required.
+
 ## Benchmarks
 
 We test our text-to-VQL pipeline on our propietary benchmark across the whole range of LLMs that we support.
