@@ -17,11 +17,12 @@ This function supports the following distance metrics:
 Unless otherwise specified, leave the distance metric blank and it will default to cosine.
 
 When using VECTOR_DISTANCE, follow this query structure:
+Here, 'query_text' represents the user's search text as a VQL string literal.
 
 <vql>
-SELECT ..., VECTOR_DISTANCE(vector_field, query_text) AS distance
+SELECT ..., VECTOR_DISTANCE("vector_field", 'query_text') AS "distance"
 FROM ...
-ORDER BY distance ASC
+ORDER BY "distance" ASC
 LIMIT N
 </vql>
 
@@ -31,9 +32,9 @@ When performing a JOIN between a vector search with VECTOR_DISTANCE and another 
 <vql>
 SELECT ...
 FROM (
-    SELECT ..., VECTOR_DISTANCE(vector_field, query_text) AS distance
+    SELECT ..., VECTOR_DISTANCE("vector_field", 'query_text') AS "distance"
     FROM ...
-    ORDER BY distance ASC
+    ORDER BY "distance" ASC
     LIMIT N
 ) top_matches
 JOIN ...
@@ -52,13 +53,13 @@ For example:
 <vql>
 SELECT ...
 FROM ...
-WHERE input_search_field_vectorA = 'query_text'
+WHERE "input_search_field_vectorA" = 'query_text'
 </vql>
 
 Instead of:
 
 <vql>
-VECTOR_DISTANCE(vectorA, 'query_text')
+VECTOR_DISTANCE("vectorA", 'query_text')
 </vql>
 
 The WHERE condition on the input search field can only be an equality condition.
@@ -66,17 +67,17 @@ You can use multiple input search fields, but you cannot repeat the same input s
 This is invalid:
 
 <vql>
-WHERE input_search_field = 'query_text' AND input_search_field = 'query_text_2'
+WHERE "input_search_field" = 'query_text' AND "input_search_field" = 'query_text_2'
 </vql>
 
 Sometimes these views may also contain a field to control the number of similar elements to retrieve, like:
 
 <vql>
-SELECT ..., similarity_score
+SELECT ..., "similarity_score"
 FROM ...
-WHERE input_search_field_vectorA = 'query_text'
-AND input_search_limit = 5
-ORDER BY similarity_score DESC
+WHERE "input_search_field_vectorA" = 'query_text'
+AND "input_search_limit" = 5
+ORDER BY "similarity_score" DESC
 LIMIT 5
 </vql>
 
@@ -96,9 +97,9 @@ VQL offers other vector functions:
 When using any of cosine/l1/l2 distance functions, always follow this query structure:
 
 <vql>
-SELECT ..., <vector_distance_function>(vector_field_1, vector_field_2) AS distance
+SELECT ..., <vector_distance_function>("vector_field_1", "vector_field_2") AS "distance"
 FROM ...
-ORDER BY distance ASC
+ORDER BY "distance" ASC
 LIMIT N
 </vql>
 
@@ -108,9 +109,9 @@ When performing a JOIN between a vector search with VECTOR_DISTANCE and another 
 <vql>
 SELECT ...
 FROM (
-    SELECT ..., <vector_distance_function>(vector_field_1, vector_field_2) AS distance
+    SELECT ..., <vector_distance_function>("vector_field_1", "vector_field_2") AS "distance"
     FROM ...
-    ORDER BY distance ASC
+    ORDER BY "distance" ASC
     LIMIT N
 ) top_matches
 JOIN ...
