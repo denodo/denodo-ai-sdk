@@ -1,6 +1,6 @@
-from api.prompts.category_detection.ambiguity_block import AMBIGUITY_BLOCK
+from api.prompts.category_detection.ambiguity_block import SELECTION_AMBIGUITY_BLOCK
 
-BASE_SQL_CATEGORY = """
+BASE_SQL_CATEGORY_SYSTEM = """
     <purpose>
     You are going to receive a request from a user and relevant schema (from database(s) in the Denodo Platform) to that request.
     Your job is to determine if the request can:
@@ -30,8 +30,14 @@ BASE_SQL_CATEGORY = """
     <guideline_preparation>
     The tables in the schema come in the format: "<database>"."<table_name>". You have to respect this format always.
 
-    Your job is to analyze the user input, analyze the schema and return the candidate tables that may be useful in generating a query.
-    Do not filter out any candidates, we want to see all possible candidates.
+    Select zero or more candidate views needed to answer the question, including
+    views needed for requested fields, filters, aggregations and JOINs. Include
+    each selected view once, using its exact fully qualified name from the schema.
+    If no candidate views are suitable, return exactly one <table>None</table>
+    inside <query>. Do not combine None with selected view names.
+    Explain the selection and helper tags in at most 75 words inside
+    <selection_thoughts></selection_thoughts>, outside <query>. If none are
+    suitable, explain what information is missing from the supplied schema.
 
     Return each candidate table in between <table></table> tags. For example, <table>"company"."clients"</table> for the table 'clients' in the database 'company'.
 
@@ -51,7 +57,9 @@ BASE_SQL_CATEGORY = """
     - CAST. Is the query going to require casting considerations? Answer <cast>1</cast>. If not, don't answer anything.
     - WINDOW. Is the query going to use window functions? Answer <window>1</window>. If not, don't answer anything.
 
-    Return your guidelines inside <query></query> tags. Like this:
+    Return <selection_thoughts> followed by guidelines inside <query></query>:
+    <selection_thoughts>The first view provides customer names and the second
+    provides payment dates. The date filter requires the dates helper.</selection_thoughts>
     <query>
     <table>...</table>
     <table>...</table>
@@ -60,6 +68,19 @@ BASE_SQL_CATEGORY = """
     </query>
     </guideline_preparation>
 
+    Limit your response to:
+        - Your thought process (in maximum 2 lines) behind what category to classify the user request as, in between <thoughts></thoughts> tags.
+        - Category of the user request in between <cat></cat> tags.
+{output_instructions}"""
+
+SQL_CATEGORY_SYSTEM = BASE_SQL_CATEGORY_SYSTEM.replace(
+    "{ambiguity_block}", SELECTION_AMBIGUITY_BLOCK
+).replace(
+    "{output_instructions}",
+    "        - A brief explanation in <selection_thoughts></selection_thoughts>, followed by either the tables needed and query classification in between <query></query> tags or the ambiguity inputs in between <ambiguity></ambiguity> tags, if you answered <cat>SQL</cat>."
+)
+
+SQL_CATEGORY_USER = """
     Here is the user input:
     <input>
     {instruction}
@@ -69,14 +90,6 @@ BASE_SQL_CATEGORY = """
     {schema}
     </schema>
 
-    Limit your response to:
-        - Your thought process (in maximum 2 lines) behind what category to classify the user request as, in between <thoughts></thoughts> tags.
-        - Category of the user request in between <cat></cat> tags.
-{output_instructions}"""
+"""
 
-SQL_CATEGORY = BASE_SQL_CATEGORY.replace(
-    "{ambiguity_block}", AMBIGUITY_BLOCK
-).replace(
-    "{output_instructions}",
-    "        - Either the tables needed and query classification in between <query></query> tags or the ambiguity inputs in between <ambiguity></ambiguity> tags, if you answered <cat>SQL</cat>."
-)
+SQL_CATEGORY = SQL_CATEGORY_SYSTEM + SQL_CATEGORY_USER

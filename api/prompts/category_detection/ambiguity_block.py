@@ -54,3 +54,14 @@ AMBIGUITY_BLOCK = """
 
     </ambiguous_queries>
 """
+
+# The explicit-view flow uses AMBIGUITY_BLOCK without selection instructions.
+SELECTION_AMBIGUITY_BLOCK = AMBIGUITY_BLOCK[:AMBIGUITY_BLOCK.index("    If you detect ambiguity,")] + """
+    If you detect ambiguity, explain the missing information in at most 75 words
+    inside <selection_thoughts></selection_thoughts>, followed by clarification
+    questions inside <ambiguity></ambiguity>. Do not return <query> in this case.
+    Otherwise return <selection_thoughts> followed by <query>, following the
+    selection instructions below. A clear question with no suitable candidate
+    views is not ambiguous: return <table>None</table> and explain what is missing.
+    </ambiguous_queries>
+"""

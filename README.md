@@ -26,6 +26,21 @@ The AI SDK requires:
 - An LLM provider
 - An embeddings model provider
 
+### Selection and generation diagnostics
+
+The Selection LLM selects only relevant candidate views, including views needed
+for JOINs, and provides a brief explanation in `selection_thoughts`. It can select
+no suitable views; in that case the SDK returns no generated query. Selection
+instructions and the user question/schema are sent as separate system and user
+messages. Requests with explicitly selected views keep the existing explicit-view
+flow.
+
+At INFO level, Selection and Generation LLM invocations log their provider/model,
+start, and completed, failed or cancelled outcome. The logs also include the
+model's returned selection/generation explanations. These explanations may contain
+schema or question details and follow the existing logging configuration. Existing
+Langfuse tracing and response token accounting are preserved.
+
 ### Installation
 
 To get started with the AI SDK:
