@@ -17,7 +17,6 @@ from api.utils.ai_tools.types import empty_tokens, usage_tokens
 from api.utils.ai_tools.schema_text import format_schema_text
 from api.utils.ai_tools.vql_rules_builder import build_vql_restrictions
 
-TODAYS_DATE = datetime.now().strftime("%Y-%m-%d")
 
 class GenerationStatus(str, Enum):
     """Status of the generated VQL query based on the output of the query_to_vql prompt.
@@ -98,7 +97,7 @@ async def query_to_vql(
             {
                 "query": query,
                 "schema": relevant_tables,
-                "date": TODAYS_DATE,
+                "date": datetime.now().strftime("%Y-%m-%d"),
                 "vql_restrictions": vql_restrictions,
                 "custom_instructions": custom_instructions,
                 "query_generation_process": query_generation_process

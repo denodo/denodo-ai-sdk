@@ -5,6 +5,8 @@ Convert Text to Date
 - Purpose: Convert TEXT to DATE for date comparisons in VQL.
 - WARNING: TO_DATE is deprecated, use TO_TIMESTAMPTZ instead.
 
+For an entire calendar day, month, or year, use an inclusive lower bound and an exclusive upper bound: field >= start AND field < start_of_next_period.
+
 Date Filtering Examples
 
 1. Date Column (TYPE: DATE)
@@ -12,9 +14,10 @@ Date Filtering Examples
 <vql>
 SELECT COUNT("p"."payment_id") AS "count_payments"
 FROM "bank"."payments" AS "p"
-WHERE "p"."payment_date" BETWEEN
-      TO_TIMESTAMPTZ('yyyy-MM-dd', '2023-01-01') AND
-      TO_TIMESTAMPTZ('yyyy-MM-dd', '2023-12-31');
+WHERE "p"."payment_date" >=
+      TO_TIMESTAMPTZ('yyyy-MM-dd', '2023-01-01')
+  AND "p"."payment_date" <
+      TO_TIMESTAMPTZ('yyyy-MM-dd', '2024-01-01');
 </vql>
 
 2. Text Column (TYPE: TEXT)
@@ -22,9 +25,10 @@ WHERE "p"."payment_date" BETWEEN
 <vql>
 SELECT COUNT("p"."payment_id") AS "count_payments"
 FROM "bank"."payments" AS "p"
-WHERE TO_TIMESTAMPTZ('yyyy-MM-dd', "p"."payment_date") BETWEEN
-      TO_TIMESTAMPTZ('yyyy-MM-dd', '2023-01-01') AND
-      TO_TIMESTAMPTZ('yyyy-MM-dd', '2023-12-31');
+WHERE TO_TIMESTAMPTZ('yyyy-MM-dd', "p"."payment_date") >=
+      TO_TIMESTAMPTZ('yyyy-MM-dd', '2023-01-01')
+  AND TO_TIMESTAMPTZ('yyyy-MM-dd', "p"."payment_date") <
+      TO_TIMESTAMPTZ('yyyy-MM-dd', '2024-01-01');
 </vql>
 
 3. Filter from Now to 3 Months Ago (TYPE: DATE)
@@ -77,9 +81,23 @@ GROUP BY "month";
 
 2. Calculate Age in Years
 
+Calculate completed years of age. For February 29 birthdays, use February 28 in non-leap years.
+
 <vql>
 SELECT "student_id", "student_name",
-       (GETYEAR(NOW()) - GETYEAR("student_birthday")) AS "age"
+       (GETYEAR(NOW()) - GETYEAR("student_birthday"))
+       - CASE
+           WHEN GETMONTH("student_birthday") = 2
+                AND GETDAY("student_birthday") = 29
+                AND GETMONTH(NOW()) = 2
+                AND GETDAY(NOW()) = 28
+                AND GETMONTH(ADDDAY(NOW(), 1)) = 3
+           THEN 0
+           WHEN GETMONTH(NOW()) * 100 + GETDAY(NOW())
+                < GETMONTH("student_birthday") * 100 + GETDAY("student_birthday")
+           THEN 1
+           ELSE 0
+         END AS "age"
 FROM "school"."students";
 </vql>
 

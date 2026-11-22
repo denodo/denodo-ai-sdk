@@ -3,6 +3,8 @@ VQL_RULES = """
 if the database is 'organization' and the view is 'employees', reference it as: "organization"."employees".
 
 2. Column names and column aliases must be wrapped in double quotes.
+This also applies inside functions and expressions, for example AVG("salary") and GETMONTH("date").
+Argument names in function signatures, such as date in GETMONTH(date), are placeholders. Replace them with actual expressions, quoting any column references.
 
 Wrong (unquoted view name without database):
 
@@ -102,7 +104,7 @@ WHERE CAST('decimal', "price") > 100;
 
 Only use CAST if necessary, as columns typically have the desired data type.
 
-4. VQL strings use single quotes: WHERE name = 'Joseph'. Single quotes can be escaped in VQL strings by doubling them: 'D''angelo' matches D'angelo.
+4. VQL strings use single quotes: WHERE "name" = 'Joseph'. Single quotes can be escaped in VQL strings by doubling them: 'D''angelo' matches D'angelo.
 
 5. VQL string functions:
 
@@ -111,7 +113,7 @@ Only use CAST if necessary, as columns typically have the desired data type.
   Example: SUBSTR('Artificial', 2) → 'rtificial'
 
 - CONCAT(str1, str2, ..., strN). Joins strings together. Requires 2+ parameters.
-  Example: CONCAT(GETYEAR(date), '-', GETMONTH(date), '-', GETDAY(date))
+  Example: CONCAT(GETYEAR("date"), '-', GETMONTH("date"), '-', GETDAY("date"))
 
 - LEN(text). Returns string length.
 
@@ -132,7 +134,7 @@ HAVING AVG("salary") > 30000;
 Example of invalid HAVING clause (uses subquery SELECT department...):
 
 <vql>
-SELECT "department", AVG(salary) AS "avg_salary"
+SELECT "department", AVG("salary") AS "avg_salary"
 FROM "organization"."employees"
 GROUP BY "department"
 HAVING "department" IN (SELECT "department" FROM "organization"."managers" WHERE "status" = 'senior');
@@ -142,12 +144,12 @@ Example of invalid HAVING clause because it uses a CTE:
 
 <vql>
 WITH salary_threshold AS (
-    SELECT 30000 AS threshold
+    SELECT 30000 AS "threshold"
 )
-SELECT "department", AVG(salary) AS "avg_salary"
+SELECT "department", AVG("salary") AS "avg_salary"
 FROM "organization"."employees", salary_threshold
 GROUP BY "department"
-HAVING AVG(salary) > threshold;
+HAVING AVG("salary") > "threshold";
 </vql>
 
 7. The OFFSET, FETCH and LIMIT clauses limit the number of rows obtained when executing a query.
