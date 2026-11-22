@@ -64,6 +64,19 @@ After changing rules, run a full synchronization (`incremental=false`) for all
 affected databases/tags so previously indexed columns and samples are replaced.
 Use the same rules for overlapping synchronization sources.
 
+## Sample values containing commas
+
+Sample rows and column names are stored as JSON metadata, and sample values are
+shown to the LLM as JSON arrays. Values such as `Smith, Jane`, quoted text,
+Unicode, empty strings and null retain their boundaries and row positions.
+
+Existing comma-separated sample documents remain readable when their value count
+matches their column count. Ambiguous legacy rows and corrupt JSON rows are
+skipped with a warning. Run a full metadata synchronization (`incremental=false`)
+to replace legacy samples; commas that were already misinterpreted cannot be
+reliably recovered from the old format. Row and column permission restrictions
+continue to apply during retrieval.
+
 ## Benchmarks
 
 We test our text-to-VQL pipeline on our propietary benchmark across the whole range of LLMs that we support.

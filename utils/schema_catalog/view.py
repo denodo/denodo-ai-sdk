@@ -159,9 +159,7 @@ class SchemaColumn:
         elif logical_name is not None and description is None:
             parts.append(f"→ {logical_name}.")
         if examples:
-            filtered_examples = [example for example in examples if example]
-            if filtered_examples:
-                parts.append(f"sample values: {', '.join(filtered_examples[:examples_per_table])}")
+            parts.append(f"sample values: {json.dumps(examples[:examples_per_table], ensure_ascii=False)}")
 
         return " ".join(parts)
 
@@ -392,6 +390,8 @@ class SchemaTable:
 
         table_id = self.get_id()
         table_sample_data = sample_data.get(table_id, {}) if sample_data and table_id in sample_data else {}
+        if table_sample_data:
+            lines.append('Sample values are JSON arrays. Values at the same array index belong to the same row; empty strings and null keep their positions.')
         for column in self._view_data.get('schema', []):
             column_name = column.get('columnName')
             column_sample_data = table_sample_data.get(column_name, [])
