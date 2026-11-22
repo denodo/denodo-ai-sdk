@@ -1,12 +1,14 @@
 import asyncio
 import inspect
+import logging
 
-from langchain_core.prompts import PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.callbacks import get_usage_metadata_callback
 
 from utils import langfuse
 from utils import utils
+from utils.logging_utils import llm_call_logging
 from utils.schema_catalog import SchemaCatalog
 from api.prompts.category_detection.direct_metadata_category import (
     DIRECT_METADATA_RESPONSE_MARKDOWN,
@@ -18,16 +20,30 @@ from api.prompts.category_detection.metadata_category import (
 )
 from api.utils.ai_tools.prompts import (
     DIRECT_METADATA_CATEGORY_PROMPT,
-    DIRECT_SQL_CATEGORY_PROMPT,
-    DIRECT_SQL_CATEGORY_NO_AMBIGUITY_PROMPT,
+    DIRECT_SQL_CATEGORY_SYSTEM_PROMPT,
+    DIRECT_SQL_CATEGORY_USER_PROMPT,
+    DIRECT_SQL_CATEGORY_NO_AMBIGUITY_SYSTEM_PROMPT,
     DIRECT_SQL_PARTS_PROMPT,
     DIRECT_SQL_PARTS_NO_AMBIGUITY_PROMPT,
     METADATA_CATEGORY_PROMPT,
-    SQL_CATEGORY_PROMPT,
-    SQL_CATEGORY_NO_AMBIGUITY_PROMPT,
+    SQL_CATEGORY_SYSTEM_PROMPT,
+    SQL_CATEGORY_USER_PROMPT,
+    SQL_CATEGORY_NO_AMBIGUITY_SYSTEM_PROMPT,
 )
 from api.utils.ai_tools.schema_text import selector_schema_for_prompt
 from api.utils.ai_tools.types import CategoryDecision, usage_tokens
+
+logger = logging.getLogger(__name__)
+
+
+async def _invoke_sql_selection(chain, inputs, *, config, llm):
+    with llm_call_logging("Selection LLM", llm):
+        response = await chain.ainvoke(inputs, config=config)
+        for tag in ("thoughts", "selection_thoughts"):
+            explanation = utils.custom_tag_parser(response, tag, default='')[0].strip()
+            logger.info("Selection LLM %s: %s", tag, explanation or "(not provided)")
+        return response
+
 
 def _metadata_response_instructions(markdown_response, layout):
     if layout == "direct":
@@ -46,7 +62,7 @@ def inject_selected_tables(category_response, view_names_list):
         return category_response.replace("<query>", f"<query>\n{table_xml}", 1)
     return f"<query>\n{table_xml}\n{category_response}\n</query>"
 
-def _parse_sql_category_response(response, tokens, check_ambiguity):
+def _parse_sql_category_response(response, tokens, check_ambiguity, select_views=True):
     category = utils.custom_tag_parser(response, 'cat', default="OTHER")[0].strip()
     ambiguity_params = utils.custom_tag_parser(response, 'ambiguity', default=[]) if check_ambiguity else []
     if ambiguity_params:
@@ -54,6 +70,8 @@ def _parse_sql_category_response(response, tokens, check_ambiguity):
     else:
         filter_params = utils.custom_tag_parser(response, 'query', default=[])
         category_response = filter_params[0] if filter_params else ''
+        if select_views and not utils.custom_tag_parser(category_response, 'table', default=[]):
+            category_response = '<table>None</table>\n' + category_response
 
     return CategoryDecision(
         category=category,
@@ -134,8 +152,11 @@ async def direct_sql_category(
     table_description_char_limit=None,
     check_ambiguity=True
 ):
-    prompt_text = DIRECT_SQL_CATEGORY_PROMPT if check_ambiguity else DIRECT_SQL_CATEGORY_NO_AMBIGUITY_PROMPT
-    prompt = PromptTemplate.from_template(prompt_text)
+    system_prompt = DIRECT_SQL_CATEGORY_SYSTEM_PROMPT if check_ambiguity else DIRECT_SQL_CATEGORY_NO_AMBIGUITY_SYSTEM_PROMPT
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        ("human", DIRECT_SQL_CATEGORY_USER_PROMPT),
+    ])
     chain = prompt | llm.llm | StrOutputParser()
 
     with get_usage_metadata_callback() as cb, langfuse.trace_context(
@@ -143,13 +164,14 @@ async def direct_sql_category(
         session_id=session_id,
         run_name=inspect.currentframe().f_code.co_name
     ) as config:
-        response = await chain.ainvoke(
+        response = await _invoke_sql_selection(
+            chain,
             {
                 "instruction": query,
                 "schema": selector_schema_for_prompt(vector_search_tables, column_description_char_limit, table_description_char_limit),
                 "custom_instructions": custom_instructions
             },
-            config=config
+            config=config, llm=llm
         )
 
     decision = _parse_sql_category_response(response, usage_tokens(cb), check_ambiguity)
@@ -171,7 +193,8 @@ async def direct_sql_parts(
     chain = prompt | llm.llm | StrOutputParser()
 
     with get_usage_metadata_callback() as cb:
-        response = await chain.ainvoke(
+        response = await _invoke_sql_selection(
+            chain,
             {
                 "instruction": query,
                 "schema": selector_schema_for_prompt(vector_search_tables, column_description_char_limit, table_description_char_limit),
@@ -181,10 +204,11 @@ async def direct_sql_parts(
                 model_id=f"{llm.provider_name}.{llm.model_name}",
                 session_id=session_id,
                 run_name=inspect.currentframe().f_code.co_name
-            )
+            ),
+            llm=llm,
         )
 
-    decision = _parse_sql_category_response(response, usage_tokens(cb), check_ambiguity)
+    decision = _parse_sql_category_response(response, usage_tokens(cb), check_ambiguity, select_views=False)
     decision.category = "SQL"
     return _decision_tuple(decision)
 
@@ -200,8 +224,11 @@ async def sql_category(
     check_ambiguity=True,
     markdown_response=True,
 ):
-    prompt_text = SQL_CATEGORY_PROMPT if check_ambiguity else SQL_CATEGORY_NO_AMBIGUITY_PROMPT
-    prompt = PromptTemplate.from_template(prompt_text)
+    system_prompt = SQL_CATEGORY_SYSTEM_PROMPT if check_ambiguity else SQL_CATEGORY_NO_AMBIGUITY_SYSTEM_PROMPT
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        ("human", SQL_CATEGORY_USER_PROMPT),
+    ])
     chain = prompt | llm.llm | StrOutputParser()
 
     if mode == 'metadata':
@@ -226,53 +253,65 @@ async def sql_category(
             check_ambiguity=check_ambiguity
         )
 
-    metadata_task = asyncio.create_task(
-        metadata_category(
-            query=query,
-            vector_search_tables=vector_search_tables,
-            llm=llm,
-            custom_instructions=custom_instructions,
-            session_id=session_id,
-            markdown_response=markdown_response,
-        )
-    )
-
-    with get_usage_metadata_callback() as cb, langfuse.trace_context(
-        model_id=f"{llm.provider_name}.{llm.model_name}",
-        session_id=session_id,
-        run_name=inspect.currentframe().f_code.co_name
-    ) as config:
-        sql_task = asyncio.create_task(
-            chain.ainvoke(
-                {
-                    "instruction": query,
-                    "schema": selector_schema_for_prompt(vector_search_tables, column_description_char_limit, table_description_char_limit),
-                    "custom_instructions": custom_instructions
-                },
-                config=config
+    metadata_task = sql_task = None
+    try:
+        metadata_task = asyncio.create_task(
+            metadata_category(
+                query=query,
+                vector_search_tables=vector_search_tables,
+                llm=llm,
+                custom_instructions=custom_instructions,
+                session_id=session_id,
+                markdown_response=markdown_response,
             )
         )
 
-        done, _ = await asyncio.wait({metadata_task, sql_task}, return_when=asyncio.FIRST_COMPLETED)
-        first_completed = list(done)[0]
+        with get_usage_metadata_callback() as cb, langfuse.trace_context(
+            model_id=f"{llm.provider_name}.{llm.model_name}",
+            session_id=session_id,
+            run_name=inspect.currentframe().f_code.co_name
+        ) as config:
+            try:
+                sql_task = asyncio.create_task(
+                    _invoke_sql_selection(
+                        chain,
+                        {
+                            "instruction": query,
+                            "schema": selector_schema_for_prompt(vector_search_tables, column_description_char_limit, table_description_char_limit),
+                            "custom_instructions": custom_instructions
+                        },
+                        config=config, llm=llm
+                    )
+                )
 
-        if first_completed == metadata_task:
-            metadata_result = first_completed.result()
-            if metadata_result[0] == "METADATA":
-                sql_task.cancel()
-                return metadata_result
-        elif first_completed == sql_task:
-            response = first_completed.result()
-            category = utils.custom_tag_parser(response, 'cat', default="OTHER")[0].strip()
-            if category == "SQL":
-                metadata_task.cancel()
-            else:
-                return await metadata_task
+                done, _ = await asyncio.wait({metadata_task, sql_task}, return_when=asyncio.FIRST_COMPLETED)
+                first_completed = list(done)[0]
 
-        if sql_task in done:
-            response = sql_task.result()
-        else:
-            response = await sql_task
+                if first_completed == metadata_task:
+                    metadata_result = first_completed.result()
+                    if metadata_result[0] == "METADATA":
+                        return metadata_result
+                elif first_completed == sql_task:
+                    response = first_completed.result()
+                    category = utils.custom_tag_parser(response, 'cat', default="OTHER")[0].strip()
+                    if category != "SQL":
+                        return await metadata_task
+
+                if sql_task in done:
+                    response = sql_task.result()
+                else:
+                    response = await sql_task
+            finally:
+                tasks = [task for task in (metadata_task, sql_task) if task is not None]
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+    finally:
+        # Tracing setup can fail before the inner cleanup block is entered.
+        if metadata_task is not None and not metadata_task.done():
+            metadata_task.cancel()
+            await asyncio.gather(metadata_task, return_exceptions=True)
 
     decision = _parse_sql_category_response(response, usage_tokens(cb), check_ambiguity)
     return _decision_tuple(decision)
