@@ -17,6 +17,19 @@ To showcase the AI SDK’s capabilities, a sample chatbot application is include
 
 The complete user manual for the Denodo AI SDK is available [here](https://community.denodo.com/docs/html/document/denodoconnects/latest/en/Denodo%20AI%20SDK%20-%20User%20Manual).
 
+### Sample values containing commas
+
+Sample rows and column names are stored as JSON metadata, and sample values are
+shown to the LLM as JSON arrays. Values such as `Smith, Jane`, quoted text,
+Unicode, empty strings and null retain their boundaries and row positions.
+
+Existing comma-separated sample documents remain readable when their value count
+matches their column count. Ambiguous legacy rows and corrupt JSON rows are
+skipped with a warning. Run a full metadata synchronization (`incremental=false`)
+to replace legacy samples; commas that were already misinterpreted cannot be
+reliably recovered from the old format. Row and column permission restrictions
+continue to apply during retrieval.
+
 ### Requirements
 
 The AI SDK requires:

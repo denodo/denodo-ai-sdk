@@ -44,8 +44,8 @@ VQL_SCHEMA_GRAMMAR = """# Table: "<database>"."<view>"
 - <column_name> (<type>) [PK] [NOT NULL] [OBLIGATORY] [<extra_key>: <extra_val>] ...
 - <column_name> (<type>) → <logical_name>
 - <column_name> (<type>) → <logical_name>: <description>.
-- <column_name> (<type>) → <logical_name>. sample values: a, b, c
-- <column_name> (<type>) sample values: a, b, c
+- <column_name> (<type>) → <logical_name>. sample values: ["a", "b", "c"]
+- <column_name> (<type>) sample values: ["a", "b", "c"]
 ## JOINs:
 → <join_clause>. Description: <association_description>
 → <join_clause>
