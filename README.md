@@ -66,6 +66,17 @@ Use the same rules for overlapping synchronization sources. Returned views with 
 remaining sample rows have their old indexed samples removed. When column rules
 are supplied, sample cleanup also runs with `examples_per_table=0`.
 
+## Running the regression tests
+
+With the project virtual environment active, install `pytest` and run:
+
+```shell
+python -m pytest tests -q
+```
+
+The tests use local model and HTTP doubles; no running Denodo service or live LLM
+credentials are required.
+
 ## Benchmarks
 
 We test our text-to-VQL pipeline on our propietary benchmark across the whole range of LLMs that we support.
