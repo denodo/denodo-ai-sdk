@@ -584,6 +584,8 @@ async def process_metadata_source(
         "last_update_timestamp_ms": last_update,
         "view_prefix_filter": request.view_prefix_filter,
         "view_suffix_filter": request.view_suffix_filter,
+        "ignore_columns": getattr(request, "ignore_columns", ""),
+        "use_columns": getattr(request, "use_columns", ""),
         "incremental": incremental,
         "views_per_request": request.views_per_request,
         "custom_headers": custom_headers

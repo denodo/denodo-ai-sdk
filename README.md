@@ -37,6 +37,33 @@ To get started with the AI SDK:
 5. Rename the configuration templates for both AI SDK (`api/utils/sdk_config.env.example` => `api/utils/sdk_config.env`) and the sample chatbot (`sample_chatbot/utils/chatbot_config.env.example` => `sample_chatbot/utils/chatbot_config.env`)
 6. Review the configuration files for both the AI SDK and the sample chatbot and configure your own LLM/embeddings providers
 
+## Metadata column selection
+
+`GET /getMetadata` accepts optional `use_columns` and `ignore_columns` query
+parameters. Each is a JSON string containing rules with a `columns` list and an
+optional unquoted `database.view` name:
+
+```json
+[{"columns": ["id", "name"]}, {"view": "hr.employees", "columns": ["department_id"]}]
+```
+
+Use `use_columns` to keep only matching columns and `ignore_columns` to exclude
+columns. Global and matching view rules are combined; exclusions take precedence.
+Column names match case-insensitively and literally, without wildcards. View names
+match exactly. Views without a matching inclusion rule remain unrestricted.
+Omitting either parameter, or passing an empty string or `[]`, adds no rules.
+Invalid rules return HTTP 422 before synchronization begins.
+
+The SDK filters returned metadata and sample values before normalization and
+vectorization. Associations that reference removed columns are omitted. If a
+composite primary key loses a member, its remaining columns are no longer marked
+as a primary key. These options do not change Denodo permissions or prevent Data
+Marketplace from retrieving the original samples.
+
+After changing rules, run a full synchronization (`incremental=false`) for all
+affected databases/tags so previously indexed columns and samples are replaced.
+Use the same rules for overlapping synchronization sources.
+
 ## Benchmarks
 
 We test our text-to-VQL pipeline on our propietary benchmark across the whole range of LLMs that we support.
