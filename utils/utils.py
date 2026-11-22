@@ -478,31 +478,45 @@ def flatten_list(list_of_lists):
 
 @timed
 def prepare_sample_data_schema(schema):
+    """Store complete JSON rows and embed labeled values, keeping sample positions."""
     def create_sample_data_document(table):
         table_id = str(table['id'])
         columns = []
+        labels = []
         examples = []
         max_sample_data_length = 0
         for column in table['schema']:
             columns.append(column.get('columnName'))
-            examples.append(column.get('sample_data', []))
-            max_sample_data_length = max(max_sample_data_length, len(column.get('sample_data', [])))
+            labels.append((column.get('logicalName') or '').strip() or column.get('columnName'))
+            # Pad a copy so building the sample index never changes the schema.
+            examples.append(list(column.get('sample_data') or []))
+            max_sample_data_length = max(max_sample_data_length, len(examples[-1]))
 
         for example in examples:
             if len(example) < max_sample_data_length:
                 example.extend([''] * (max_sample_data_length - len(example)))
 
         base_metadata = {
-            "columns": ','.join(columns),
+            "columns": json.dumps(columns, ensure_ascii=False),
             "view_id": table_id
         }
 
-        tuples = list(map(list, zip(*examples)))
-        return [Document(
-            id=f"{table_id}_tuple_{i}",
-            page_content=','.join(tuple),
-            metadata={**base_metadata, "document_id": f"{table_id}_tuple_{i}"}
-        ) for i, tuple in enumerate(tuples)]
+        documents = []
+        for index, row in enumerate(zip(*examples)):
+            document_id = f"{table_id}_tuple_{index}"
+            documents.append(Document(
+                id=document_id,
+                page_content=' · '.join(
+                    f"{label}: {json.dumps(value, ensure_ascii=False)}"
+                    for label, value in zip(labels, row)
+                ),
+                metadata={
+                    **base_metadata,
+                    "document_id": document_id,
+                    "row_json": json.dumps(dict(zip(columns, row)), ensure_ascii=False),
+                },
+            ))
+        return documents
 
     return [create_sample_data_document(table) for table in schema['views']]
 
